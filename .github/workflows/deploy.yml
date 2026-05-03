@@ -1,0 +1,21 @@
+name: Deploy
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+
+    steps:
+      - name: Pull code
+        run: |
+          cd /opt/sites/vitazgio.ru
+          git pull origin main
+
+      - name: Restart docker
+        run: |
+          cd /opt/sites/vitazgio.ru
+          docker compose up -d --build
