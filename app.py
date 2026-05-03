@@ -4,7 +4,7 @@ app = Flask(__name__)
 
 @app.route("/")
 def home():
-    return "Сайт работает 🚀”
+    return "Сайт работает 🚀"
 
-if __name__ == "__name__":
-    app.run(host="0.0.0.0", port=5000) 
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)
