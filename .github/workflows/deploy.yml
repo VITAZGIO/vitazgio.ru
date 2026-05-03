@@ -19,4 +19,4 @@ jobs:
       - name: Restart Docker
         run: |
           cd /opt/sites/vitazgio.ru
-          docker compose up -d --build
+          docker compose restart web

@@ -4,4 +4,6 @@ services:
     container_name: vitazgio-site
     ports:
       - "5000:5000"
+    volumes:
+      - .:/app
     restart: unless-stopped
