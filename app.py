@@ -233,7 +233,15 @@ def home():
           <div class="services">
             <a class="service service--ha" href="https://ha.vitazgio.ru" aria-label="Открыть Home Assistant">
               <div class="service-top">
-                <span class="logo" aria-hidden="true"><svg viewBox="0 0 48 48" fill="none"><path d="M7 22 24 7l17 15v18H29V29H19v11H7V22Z" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><circle cx="24" cy="20" r="3" fill="currentColor"/><path d="M24 23v6m0 0h-5m5 0h5" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg></span>
+                <span class="logo" aria-hidden="true">
+                  <svg viewBox="0 0 48 48" fill="none">
+                    <path d="M5 21.5c0-2.1.8-4.1 2.3-5.6L18.5 4.7a7.8 7.8 0 0 1 11 0l11.2 11.2a8 8 0 0 1 2.3 5.6V37a6 6 0 0 1-6 6H11a6 6 0 0 1-6-6V21.5Z" fill="#18b7e8"/>
+                    <path d="M24 43V15M24 34l11-11M24 39 13 28" stroke="#f5f7ff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+                    <circle cx="24" cy="13" r="5" fill="#f5f7ff"/>
+                    <circle cx="36" cy="22" r="5" fill="#f5f7ff"/>
+                    <circle cx="12" cy="27" r="5" fill="#f5f7ff"/>
+                  </svg>
+                </span>
                 <span class="arrow" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M7 17 17 7m0 0H8m9 0v9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
               </div>
               <div class="service-copy"><h2>Home Assistant</h2><p>Умный дом и автоматизация</p><span class="domain">ha.vitazgio.ru</span></div>
