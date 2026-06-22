@@ -1,6 +1,208 @@
-from flask import Flask
+import base64
+import hashlib
+import hmac
+import os
+import secrets
+import threading
+import time
+from collections import defaultdict, deque
+from functools import wraps
+
+from flask import Flask, jsonify, redirect, request, session, url_for
 
 app = Flask(__name__)
+app.config.update(
+    SECRET_KEY=os.environ.get("VITAZGIO_SESSION_SECRET", secrets.token_hex(32)),
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Strict",
+    SESSION_COOKIE_SECURE=os.environ.get("SESSION_COOKIE_SECURE", "false").lower() == "true",
+)
+
+PASSWORD_SALT = base64.b64decode("vLsGUQ/owFhcITf4A6CVjw==")
+PASSWORD_HASH = base64.b64decode("T+E27QxamfCbhsdxJ1JlEXo4yuBwfwQFtw9ODFkA+kg=")
+PASSWORD_ITERATIONS = 600_000
+LOGIN_WINDOW_SECONDS = 300
+LOGIN_MAX_ATTEMPTS = 5
+login_attempts = defaultdict(deque)
+login_attempts_lock = threading.Lock()
+
+
+def login_required(view):
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if not session.get("authenticated"):
+            return redirect(url_for("home"))
+        return view(*args, **kwargs)
+
+    return wrapped
+
+
+def password_matches(password):
+    candidate = hashlib.pbkdf2_hmac(
+        "sha256", password.encode("utf-8"), PASSWORD_SALT, PASSWORD_ITERATIONS
+    )
+    return hmac.compare_digest(candidate, PASSWORD_HASH)
+
+
+@app.post("/api/login")
+def login():
+    client = request.remote_addr or "unknown"
+    now = time.monotonic()
+
+    with login_attempts_lock:
+        attempts = login_attempts[client]
+        while attempts and now - attempts[0] > LOGIN_WINDOW_SECONDS:
+            attempts.popleft()
+        if len(attempts) >= LOGIN_MAX_ATTEMPTS:
+            return jsonify(error="Слишком много попыток. Попробуйте через 5 минут."), 429
+
+    payload = request.get_json(silent=True) or {}
+    password = payload.get("password", "")
+    if not isinstance(password, str) or not password_matches(password):
+        with login_attempts_lock:
+            login_attempts[client].append(now)
+        return jsonify(error="Неверный пароль."), 401
+
+    with login_attempts_lock:
+        login_attempts.pop(client, None)
+    session.clear()
+    session["authenticated"] = True
+    session.permanent = False
+    return jsonify(redirect=url_for("cabinet"))
+
+
+@app.post("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("home"))
+
+
+@app.get("/cabinet")
+@login_required
+def cabinet():
+    return """
+    <!DOCTYPE html>
+    <html lang="ru">
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <meta name="robots" content="noindex, nofollow">
+      <title>Личный кабинет · vitazgio.ru</title>
+      <style>
+        * { box-sizing: border-box; }
+        body { margin: 0; min-height: 100svh; color: #e9fbff; font-family: "Cascadia Code", Consolas, monospace; background: radial-gradient(circle at top left, #192a44, #0d1321 55%); }
+        .cabinet { min-height: 100svh; padding: clamp(24px, 4vw, 54px); background: linear-gradient(135deg, rgba(10,18,32,.25), transparent 60%); }
+        .cabinet-header { display: flex; align-items: center; gap: 20px; }
+        h1 { margin: 0; font-size: clamp(2.1rem, 5vw, 4.2rem); letter-spacing: -.07em; text-shadow: 2px 0 #ff3fa4, -2px 0 #2de2ff; }
+        .logout-form { margin: 0; }
+        .logout-button { padding: 10px 16px; color: #dffaff; font: 700 .78rem "Cascadia Code", Consolas, monospace; border: 1px solid rgba(45,226,255,.28); background: rgba(45,226,255,.07); cursor: pointer; }
+        .logout-button:hover { border-color: #2de2ff; background: rgba(45,226,255,.14); }
+        [hidden] { display: none !important; }
+        .workspace { width: 50%; min-width: 560px; margin-top: clamp(28px, 5vw, 56px); }
+        .netbird { border: 1px solid rgba(255,112,38,.24); background: rgba(10,17,30,.72); box-shadow: 0 24px 70px rgba(0,0,0,.24); }
+        .netbird-toggle { width: 100%; display: flex; align-items: center; gap: 16px; padding: 18px; text-align: left; border: 0; background: linear-gradient(100deg, rgba(255,105,22,.09), rgba(45,226,255,.035)); }
+        .netbird-toggle:hover { border: 0; background: linear-gradient(100deg, rgba(255,105,22,.16), rgba(45,226,255,.07)); }
+        .netbird-logo { width: 54px; height: 54px; padding: 6px; object-fit: contain; border-radius: 14px; background: #050608; }
+        .netbird-title { display: block; color: #f8fbff; font-size: 1.25rem; font-weight: 800; }
+        .netbird-count { display: block; margin-top: 5px; color: #8f99ab; font-size: .74rem; letter-spacing: .08em; text-transform: uppercase; }
+        .netbird-arrow { margin-left: auto; color: #ff782f; font-size: 1.3rem; transition: transform .25s ease; }
+        .netbird-toggle[aria-expanded="true"] .netbird-arrow { transform: rotate(180deg); }
+        .device-list { margin: 0; padding: 8px 18px 18px; list-style: none; border-top: 1px solid rgba(255,255,255,.07); }
+        .device { min-height: 48px; display: grid; grid-template-columns: 150px 1fr 82px; align-items: center; gap: 12px; border-bottom: 1px solid rgba(255,255,255,.06); }
+        .device:last-child { border-bottom: 0; }
+        .copy-ip { padding: 7px 8px; color: #69e8ff; text-align: left; border: 0; background: transparent; }
+        .copy-ip:hover, .copy-ip:focus-visible { color: #fff; border: 0; outline: 1px solid rgba(45,226,255,.28); background: rgba(45,226,255,.08); }
+        .device-name { color: #c4cad5; font-size: .84rem; overflow-wrap: anywhere; }
+        .copy-status { color: #63f5ad; font-size: .7rem; opacity: 0; transition: opacity .18s ease; }
+        .copy-status.visible { opacity: 1; }
+        @media (max-width: 900px) {
+          .workspace { width: 100%; min-width: 0; }
+        }
+        @media (max-width: 560px) {
+          .cabinet { padding-inline: 20px; }
+          .cabinet-header { align-items: flex-start; justify-content: space-between; gap: 12px; }
+          .device { grid-template-columns: 1fr auto; gap: 4px 10px; padding: 8px 0; }
+          .device-name { grid-column: 1; grid-row: 2; padding-left: 8px; }
+          .copy-status { grid-column: 2; grid-row: 1 / span 2; }
+        }
+      </style>
+    </head>
+    <body>
+      <main class="cabinet">
+        <header class="cabinet-header">
+          <h1>Личный кабинет</h1>
+          <form class="logout-form" action="/logout" method="post"><button class="logout-button" type="submit">Выйти</button></form>
+        </header>
+        <div class="workspace">
+          <section class="netbird">
+          <button id="netbird-toggle" class="netbird-toggle" type="button" aria-expanded="false" aria-controls="netbird-devices">
+            <img class="netbird-logo" src="/static/netbird-official.png" alt="">
+            <span><span class="netbird-title">NetBird</span><span class="netbird-count">8 устройств</span></span>
+            <span class="netbird-arrow" aria-hidden="true">⌄</span>
+          </button>
+          <div id="netbird-devices" hidden>
+            <ul class="device-list">
+              <li class="device"><button class="copy-ip" type="button" data-ip="100.104.188.141">100.104.188.141</button><span class="device-name">NOUTBOOK</span><span class="copy-status">Скопировано</span></li>
+              <li class="device"><button class="copy-ip" type="button" data-ip="100.104.140.4">100.104.140.4</button><span class="device-name">VitazComp</span><span class="copy-status">Скопировано</span></li>
+              <li class="device"><button class="copy-ip" type="button" data-ip="100.104.1.172">100.104.1.172</button><span class="device-name">windows10proxmox</span><span class="copy-status">Скопировано</span></li>
+              <li class="device"><button class="copy-ip" type="button" data-ip="100.104.67.89">100.104.67.89</button><span class="device-name">orangepizero3</span><span class="copy-status">Скопировано</span></li>
+              <li class="device"><button class="copy-ip" type="button" data-ip="100.104.221.91">100.104.221.91</button><span class="device-name">ubuntu-server</span><span class="copy-status">Скопировано</span></li>
+              <li class="device"><button class="copy-ip" type="button" data-ip="100.104.160.121">100.104.160.121</button><span class="device-name">windows10V</span><span class="copy-status">Скопировано</span></li>
+              <li class="device"><button class="copy-ip" type="button" data-ip="100.104.111.39">100.104.111.39</button><span class="device-name">ubuntuvitaz1</span><span class="copy-status">Скопировано</span></li>
+              <li class="device"><button class="copy-ip" type="button" data-ip="100.104.86.103">100.104.86.103</button><span class="device-name">MOBILA</span><span class="copy-status">Скопировано</span></li>
+            </ul>
+          </div>
+          </section>
+        </div>
+      </main>
+      <script>
+        (() => {
+          const toggle = document.getElementById("netbird-toggle");
+          const devices = document.getElementById("netbird-devices");
+          const timers = new WeakMap();
+
+          toggle.addEventListener("click", () => {
+            const expanded = toggle.getAttribute("aria-expanded") === "true";
+            toggle.setAttribute("aria-expanded", String(!expanded));
+            devices.hidden = expanded;
+          });
+
+          const copyFallback = (text) => {
+            const input = document.createElement("textarea");
+            input.value = text;
+            input.style.position = "fixed";
+            input.style.opacity = "0";
+            document.body.appendChild(input);
+            input.select();
+            document.execCommand("copy");
+            input.remove();
+          };
+
+          document.querySelectorAll(".copy-ip").forEach((button) => {
+            button.addEventListener("click", async () => {
+              try {
+                if (navigator.clipboard && window.isSecureContext) {
+                  await navigator.clipboard.writeText(button.dataset.ip);
+                } else {
+                  copyFallback(button.dataset.ip);
+                }
+                const message = button.parentElement.querySelector(".copy-status");
+                message.classList.add("visible");
+                clearTimeout(timers.get(message));
+                timers.set(message, setTimeout(() => message.classList.remove("visible"), 1800));
+              } catch {
+                const message = button.parentElement.querySelector(".copy-status");
+                message.textContent = "Ошибка";
+                message.classList.add("visible");
+                setTimeout(() => { message.classList.remove("visible"); message.textContent = "Скопировано"; }, 1800);
+              }
+            });
+          });
+        })();
+      </script>
+    </body>
+    </html>
+    """
 
 
 @app.route("/")
@@ -295,6 +497,65 @@ def home():
           font-size: .82rem;
         }
 
+        [hidden] { display: none !important; }
+
+        .secret-trigger {
+          position: fixed;
+          z-index: 50;
+          right: 0;
+          bottom: 0;
+          width: 64px;
+          height: 64px;
+          padding: 0;
+          opacity: 0;
+          border: 0;
+          background: transparent;
+          cursor: default;
+        }
+
+        .secret-trigger:focus-visible { opacity: .14; outline: 1px solid #2de2ff; }
+
+        .auth-modal {
+          position: fixed;
+          z-index: 100;
+          inset: 0;
+          display: grid;
+          place-items: center;
+          padding: 20px;
+        }
+
+        .auth-backdrop {
+          position: absolute;
+          inset: 0;
+          background: rgba(3, 6, 13, .82);
+          backdrop-filter: blur(12px);
+        }
+
+        .auth-panel {
+          position: relative;
+          width: min(430px, 100%);
+          padding: 38px;
+          color: #e8fbff;
+          border: 1px solid rgba(45, 226, 255, .3);
+          background: linear-gradient(145deg, rgba(16, 30, 47, .98), rgba(20, 16, 37, .98));
+          clip-path: polygon(0 0, calc(100% - 22px) 0, 100% 22px, 100% 100%, 22px 100%, 0 calc(100% - 22px));
+          box-shadow: 0 32px 100px rgba(0,0,0,.65), inset 0 0 40px rgba(45,226,255,.05);
+        }
+
+        .auth-kicker { color: #2de2ff; font: 700 .7rem/1 "Cascadia Code", Consolas, monospace; letter-spacing: .16em; text-transform: uppercase; }
+        .auth-panel h2 { margin: 16px 0 8px; font: 800 clamp(2rem, 8vw, 3rem)/1 "Cascadia Code", Consolas, monospace; letter-spacing: -.07em; text-shadow: 2px 0 #ff3fa4, -2px 0 #2de2ff; }
+        .auth-hint { margin: 0 0 26px; color: #8792a6; line-height: 1.55; }
+        .auth-close { position: absolute; top: 15px; right: 17px; padding: 5px; color: #7d8799; font-size: 1.35rem; border: 0; background: none; cursor: pointer; }
+        .auth-close:hover { color: #fff; }
+        .auth-form label { display: block; margin-bottom: 9px; color: #b8c1d2; font-size: .78rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+        .auth-form input { width: 100%; height: 50px; padding: 0 15px; color: #f4fbff; font: 700 1rem "Cascadia Code", Consolas, monospace; border: 1px solid rgba(255,255,255,.12); outline: none; background: rgba(4,10,20,.65); }
+        .auth-form input:focus { border-color: #2de2ff; box-shadow: 0 0 0 3px rgba(45,226,255,.09); }
+        .auth-submit { width: 100%; height: 50px; margin-top: 14px; color: #071018; font: 800 .82rem "Cascadia Code", Consolas, monospace; letter-spacing: .08em; text-transform: uppercase; border: 0; background: linear-gradient(90deg, #2de2ff, #65f2bd); cursor: pointer; }
+        .auth-submit:hover { filter: brightness(1.08); }
+        .auth-submit:disabled { opacity: .55; cursor: wait; }
+        .auth-error { min-height: 20px; margin: 12px 0 0; color: #ff6ba8; font-size: .8rem; }
+        body.modal-open { overflow: hidden; }
+
         @media (max-width: 700px) {
           .page { justify-content: flex-start; }
           .hero { margin-bottom: 22px; }
@@ -305,6 +566,7 @@ def home():
           .service { min-height: 280px; scroll-snap-align: center; }
           .services-wrap { scroll-snap-type: x mandatory; }
           footer { flex-direction: column; }
+          .auth-panel { padding: 34px 25px 28px; }
         }
 
         @media (prefers-reduced-motion: reduce) {
@@ -346,7 +608,7 @@ def home():
                 <span class="logo" aria-hidden="true"><img src="/static/jellyfin.svg" alt=""></span>
                 <span class="arrow" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M7 17 17 7m0 0H8m9 0v9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
               </div>
-              <div class="service-copy"><h2>Jellyfin</h2><p>Фильмы, сериалы и музыка</p><span class="domain">jel.vitazgio.ru</span></div>
+              <div class="service-copy"><h2>Jellyfin</h2><p>Фильмы и сериалы</p><span class="domain">jel.vitazgio.ru</span></div>
             </a>
 
             <a class="service service--npm" href="https://npm.vitazgio.ru" aria-label="Открыть Nginx Proxy Manager">
@@ -384,6 +646,22 @@ def home():
 
         <footer><span>© 2026 vitazgio.ru · Основан 2:12 04.05.2026</span></footer>
       </main>
+      <button id="secret-trigger" class="secret-trigger" type="button" aria-label="Открыть личный кабинет"></button>
+      <div id="auth-modal" class="auth-modal" hidden>
+        <div class="auth-backdrop" data-auth-close></div>
+        <section class="auth-panel" role="dialog" aria-modal="true" aria-labelledby="auth-title">
+          <button class="auth-close" type="button" data-auth-close aria-label="Закрыть">×</button>
+          <div class="auth-kicker">Restricted area // 01</div>
+          <h2 id="auth-title">Авторизация</h2>
+          <p class="auth-hint">Введите пароль для доступа к личному кабинету.</p>
+          <form id="auth-form" class="auth-form">
+            <label for="auth-password">Пароль</label>
+            <input id="auth-password" name="password" type="password" autocomplete="current-password" required>
+            <button class="auth-submit" type="submit">Получить доступ</button>
+            <p id="auth-error" class="auth-error" role="alert"></p>
+          </form>
+        </section>
+      </div>
       <script>
         (() => {
           const output = document.getElementById("cyber-text");
@@ -420,6 +698,61 @@ def home():
           };
 
           runTerminal();
+        })();
+
+        (() => {
+          const trigger = document.getElementById("secret-trigger");
+          const modal = document.getElementById("auth-modal");
+          const form = document.getElementById("auth-form");
+          const password = document.getElementById("auth-password");
+          const error = document.getElementById("auth-error");
+          const submit = form.querySelector("button[type='submit']");
+
+          const openModal = () => {
+            modal.hidden = false;
+            document.body.classList.add("modal-open");
+            error.textContent = "";
+            requestAnimationFrame(() => password.focus());
+          };
+
+          const closeModal = () => {
+            modal.hidden = true;
+            document.body.classList.remove("modal-open");
+            form.reset();
+            error.textContent = "";
+            trigger.focus();
+          };
+
+          trigger.addEventListener("click", openModal);
+          modal.querySelectorAll("[data-auth-close]").forEach((element) => element.addEventListener("click", closeModal));
+          document.addEventListener("keydown", (event) => {
+            if (event.key === "Escape" && !modal.hidden) closeModal();
+          });
+
+          form.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            error.textContent = "";
+            submit.disabled = true;
+            try {
+              const response = await fetch("/api/login", {
+                method: "POST",
+                credentials: "same-origin",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ password: password.value }),
+              });
+              const result = await response.json();
+              if (!response.ok) {
+                error.textContent = result.error || "Не удалось выполнить вход.";
+                password.select();
+                return;
+              }
+              window.location.assign(result.redirect);
+            } catch {
+              error.textContent = "Сервер недоступен. Повторите попытку.";
+            } finally {
+              submit.disabled = false;
+            }
+          });
         })();
       </script>
     </body>
