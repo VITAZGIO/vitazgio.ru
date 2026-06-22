@@ -343,7 +343,7 @@ def home():
 
             <a class="service service--jellyfin" href="https://jel.vitazgio.ru" aria-label="Открыть Jellyfin">
               <div class="service-top">
-                <span class="logo" aria-hidden="true"><svg viewBox="0 0 48 48"><defs><linearGradient id="jf" x1="8" y1="40" x2="40" y2="8"><stop stop-color="#00a4dc"/><stop offset="1" stop-color="#aa5cc3"/></linearGradient></defs><path d="M24 5c7.8 0 19.7 29.1 15.8 34.2C36 44.3 12 44.3 8.2 39.2 4.3 34.1 16.2 5 24 5Zm0 10.6c-3.6 0-9.1 14.7-7.4 17.3 1.8 2.5 13 2.5 14.8 0 1.7-2.6-3.8-17.3-7.4-17.3Z" fill="url(#jf)"/></svg></span>
+                <span class="logo" aria-hidden="true"><img src="/static/jellyfin.svg" alt=""></span>
                 <span class="arrow" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M7 17 17 7m0 0H8m9 0v9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
               </div>
               <div class="service-copy"><h2>Jellyfin</h2><p>Фильмы, сериалы и музыка</p><span class="domain">jel.vitazgio.ru</span></div>
@@ -351,7 +351,7 @@ def home():
 
             <a class="service service--npm" href="https://npm.vitazgio.ru" aria-label="Открыть Nginx Proxy Manager">
               <div class="service-top">
-                <span class="logo" aria-hidden="true"><svg viewBox="0 0 48 48" fill="none"><path d="m24 4 17 10v20L24 44 7 34V14L24 4Z" stroke="currentColor" stroke-width="3"/><path d="m24 13 9 5v11l-9 5-9-5V18l9-5Z" fill="currentColor"/><circle cx="24" cy="24" r="4" fill="#151928"/></svg></span>
+                <span class="logo" aria-hidden="true"><img src="/static/nginx-proxy-manager.svg" alt=""></span>
                 <span class="arrow" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M7 17 17 7m0 0H8m9 0v9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
               </div>
               <div class="service-copy"><h2>Nginx Proxy</h2><p>Управление доменами и прокси</p><span class="domain">npm.vitazgio.ru</span></div>
@@ -359,7 +359,22 @@ def home():
 
             <a class="service service--mc" href="https://mc.vitazgio.ru" aria-label="Открыть Minecraft сервер">
               <div class="service-top">
-                <span class="logo" aria-hidden="true"><svg viewBox="0 0 48 48" fill="none"><path d="m6 13 18-8 18 8-18 8-18-8Z" fill="#8fca61"/><path d="m6 13 18 8v22L6 35V13Z" fill="#6f4931"/><path d="m42 13-18 8v22l18-8V13Z" fill="#82553a"/><path d="m6 13 18 8 18-8" stroke="#d6f0b4" stroke-width="2"/><path d="M10 25h6v6h-6zm9 8h5v7h-5zm14-10h6v7h-6z" fill="#543624"/></svg></span>
+                <span class="logo" aria-hidden="true">
+                  <svg viewBox="0 0 48 48" fill="none" shape-rendering="geometricPrecision">
+                    <defs>
+                      <linearGradient id="grass-top" x1="8" y1="9" x2="39" y2="23" gradientUnits="userSpaceOnUse"><stop stop-color="#a8db68"/><stop offset="1" stop-color="#6eae48"/></linearGradient>
+                      <linearGradient id="dirt-left" x1="7" y1="17" x2="25" y2="42" gradientUnits="userSpaceOnUse"><stop stop-color="#b98253"/><stop offset="1" stop-color="#855333"/></linearGradient>
+                      <linearGradient id="dirt-right" x1="24" y1="24" x2="41" y2="39" gradientUnits="userSpaceOnUse"><stop stop-color="#98623d"/><stop offset="1" stop-color="#6b4029"/></linearGradient>
+                    </defs>
+                    <path d="m24 5 18 9.5L24 24 6 14.5 24 5Z" fill="url(#grass-top)"/>
+                    <path d="m6 14.5 18 9.5v19L6 33.5v-19Z" fill="url(#dirt-left)"/>
+                    <path d="M42 14.5 24 24v19l18-9.5v-19Z" fill="url(#dirt-right)"/>
+                    <path d="m6 14.5 18 9.5 18-9.5M24 24v19" stroke="#d6efa5" stroke-opacity=".42" stroke-width="1.2"/>
+                    <path d="m6 14.5 18 9.5v4l-4-2.1v3.4l-4-2.1v-3.4l-4-2.1v3.4L6 22v-7.5Z" fill="#79b64d"/>
+                    <path d="M42 14.5 24 24v4l4-2.1v3.4l4-2.1v-3.4l4-2.1v3.4l6-3.1v-7.5Z" fill="#659b40"/>
+                    <path d="m10 27 4 2.1v4.2L10 31v-4Zm8 7.2 3 1.6v4.1l-3-1.6v-4.1Zm18-6.4 3-1.6v4.2L36 32v-4.2Zm-8 5.3 4-2.1v4.2l-4 2.1v-4.2Z" fill="#5b3523" fill-opacity=".68"/>
+                  </svg>
+                </span>
                 <span class="arrow" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M7 17 17 7m0 0H8m9 0v9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
               </div>
               <div class="service-copy"><h2>Minecraft</h2><p>Игровой сервер для друзей</p><span class="domain">mc.vitazgio.ru</span></div>
@@ -367,7 +382,7 @@ def home():
           </div>
         </nav>
 
-        <footer><span>© 2026 vitazgio.ru</span></footer>
+        <footer><span>© 2026 vitazgio.ru · Основан 2:12 04.05.2026</span></footer>
       </main>
       <script>
         (() => {
