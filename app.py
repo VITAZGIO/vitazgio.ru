@@ -17,8 +17,8 @@ def home():
       <style>
         :root {
           color-scheme: dark;
-          --bg: #080b12;
-          --surface: rgba(18, 23, 35, 0.78);
+          --bg: #0d1321;
+          --surface: rgba(25, 32, 48, 0.82);
           --line: rgba(255, 255, 255, 0.1);
           --text: #f7f8fc;
           --muted: #989fb2;
@@ -33,8 +33,8 @@ def home():
           min-width: 320px;
           font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
           background:
-            radial-gradient(circle at 12% 8%, rgba(57, 126, 255, 0.16), transparent 30rem),
-            radial-gradient(circle at 88% 78%, rgba(149, 65, 255, 0.13), transparent 32rem),
+            radial-gradient(circle at 12% 8%, rgba(57, 126, 255, 0.24), transparent 32rem),
+            radial-gradient(circle at 88% 78%, rgba(149, 65, 255, 0.2), transparent 34rem),
             var(--bg);
           color: var(--text);
         }
@@ -93,14 +93,6 @@ def home():
           font-weight: 760;
           letter-spacing: -0.065em;
           line-height: 0.94;
-        }
-
-        .intro {
-          max-width: 570px;
-          margin: 24px 0 0;
-          color: var(--muted);
-          font-size: clamp(1rem, 1.5vw, 1.15rem);
-          line-height: 1.65;
         }
 
         .services-wrap {
@@ -219,7 +211,6 @@ def home():
           .page { justify-content: flex-start; }
           .hero { margin-bottom: 22px; }
           h1 { font-size: clamp(2.55rem, 14vw, 4.4rem); }
-          .intro { margin-top: 18px; }
           .services { grid-template-columns: repeat(5, 78vw); min-width: max-content; }
           .service { min-height: 280px; scroll-snap-align: center; }
           .services-wrap { scroll-snap-type: x mandatory; }
@@ -234,9 +225,8 @@ def home():
     <body>
       <main class="page">
         <section class="hero" aria-labelledby="page-title">
-          <div class="eyebrow">vitazgio.ru · домашняя инфраструктура</div>
-          <h1 id="page-title">Мои сервисы.<br>В одном месте.</h1>
-          <p class="intro">Личная панель быстрого доступа к домашней автоматизации, файлам, медиа и серверам.</p>
+          <div class="eyebrow">vitazgio.ru · мои домены</div>
+          <h1 id="page-title">Мои Веб Сервисы</h1>
         </section>
 
         <nav class="services-wrap" aria-label="Сервисы vitazgio.ru">
@@ -283,7 +273,7 @@ def home():
           </div>
         </nav>
 
-        <footer><span>© 2026 vitazgio.ru</span><span>Пять сервисов · одна точка входа</span></footer>
+        <footer><span>© 2026 vitazgio.ru</span></footer>
       </main>
     </body>
     </html>
