@@ -86,13 +86,100 @@ def home():
           box-shadow: 0 0 16px #64e6a5;
         }
 
-        h1 {
-          max-width: 850px;
+        .sr-only {
+          position: absolute;
+          width: 1px;
+          height: 1px;
+          padding: 0;
+          margin: -1px;
+          overflow: hidden;
+          clip: rect(0, 0, 0, 0);
+          white-space: nowrap;
+          border: 0;
+        }
+
+        .cyber-terminal {
+          position: relative;
+          min-height: 164px;
+          display: flex;
+          align-items: center;
           margin: 0;
-          font-size: clamp(2.8rem, 6vw, 6rem);
-          font-weight: 760;
-          letter-spacing: -0.065em;
-          line-height: 0.94;
+          padding: 34px clamp(22px, 4vw, 54px);
+          overflow: hidden;
+          border: 1px solid rgba(54, 228, 255, .24);
+          background: linear-gradient(110deg, rgba(12, 28, 43, .92), rgba(20, 17, 38, .82));
+          clip-path: polygon(0 0, calc(100% - 25px) 0, 100% 25px, 100% 100%, 25px 100%, 0 calc(100% - 25px));
+          box-shadow: inset 0 0 38px rgba(38, 211, 255, .06);
+        }
+
+        .cyber-terminal::before,
+        .cyber-terminal::after {
+          content: "";
+          position: absolute;
+          height: 2px;
+          background: linear-gradient(90deg, transparent, #2de2ff, #ff3fa4, transparent);
+          opacity: .72;
+        }
+
+        .cyber-terminal::before { top: 0; left: 4%; width: 42%; }
+        .cyber-terminal::after { right: 5%; bottom: 0; width: 30%; }
+
+        .terminal-prompt {
+          margin-right: .35em;
+          color: #ff3fa4;
+          font-family: "Cascadia Code", Consolas, monospace;
+          font-size: clamp(1.4rem, 5vw, 4.7rem);
+          font-weight: 800;
+          text-shadow: 0 0 16px rgba(255, 63, 164, .7);
+        }
+
+        .cyber-text {
+          position: relative;
+          display: inline-block;
+          min-height: 1.1em;
+          white-space: nowrap;
+          color: #dffaff;
+          font-family: "Cascadia Code", Consolas, "Courier New", monospace;
+          font-size: clamp(1.15rem, 4.7vw, 4.4rem);
+          font-weight: 800;
+          letter-spacing: -.065em;
+          line-height: 1;
+          text-shadow: 2px 0 #ff3fa4, -2px 0 #21dcff, 0 0 20px rgba(33, 220, 255, .35);
+        }
+
+        .cyber-text::before,
+        .cyber-text::after {
+          content: attr(data-text);
+          position: absolute;
+          inset: 0;
+          pointer-events: none;
+          opacity: 0;
+        }
+
+        .cyber-text::before { color: #2de2ff; clip-path: inset(18% 0 57% 0); animation: glitch-top 4.2s infinite; }
+        .cyber-text::after { color: #ff3fa4; clip-path: inset(62% 0 16% 0); animation: glitch-bottom 4.2s infinite; }
+
+        .terminal-cursor {
+          width: .12em;
+          height: clamp(1.4rem, 4.7vw, 4.4rem);
+          margin-left: .14em;
+          background: #2de2ff;
+          box-shadow: 0 0 14px #2de2ff;
+          animation: cursor-blink .72s step-end infinite;
+        }
+
+        @keyframes cursor-blink { 50% { opacity: 0; } }
+        @keyframes glitch-top {
+          0%, 88%, 100% { opacity: 0; transform: translate(0); }
+          89% { opacity: .9; transform: translate(5px, -1px); }
+          91% { opacity: .65; transform: translate(-4px, 1px); }
+          93% { opacity: 0; }
+        }
+        @keyframes glitch-bottom {
+          0%, 91%, 100% { opacity: 0; transform: translate(0); }
+          92% { opacity: .85; transform: translate(-6px, 1px); }
+          94% { opacity: .6; transform: translate(3px, -1px); }
+          96% { opacity: 0; }
         }
 
         .services-wrap {
@@ -175,7 +262,8 @@ def home():
           box-shadow: inset 0 1px 0 rgba(255,255,255,.08);
         }
 
-        .logo svg { width: 38px; height: 38px; }
+        .logo svg,
+        .logo img { width: 38px; height: 38px; object-fit: contain; }
 
         .arrow {
           width: 38px;
@@ -210,7 +298,9 @@ def home():
         @media (max-width: 700px) {
           .page { justify-content: flex-start; }
           .hero { margin-bottom: 22px; }
-          h1 { font-size: clamp(2.55rem, 14vw, 4.4rem); }
+          .cyber-terminal { min-height: 126px; padding-inline: 18px; }
+          .terminal-prompt { margin-right: .2em; }
+          .cyber-text { letter-spacing: -.08em; }
           .services { grid-template-columns: repeat(5, 78vw); min-width: max-content; }
           .service { min-height: 280px; scroll-snap-align: center; }
           .services-wrap { scroll-snap-type: x mandatory; }
@@ -218,7 +308,7 @@ def home():
         }
 
         @media (prefers-reduced-motion: reduce) {
-          * { scroll-behavior: auto !important; transition: none !important; }
+          * { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
         }
       </style>
     </head>
@@ -226,22 +316,18 @@ def home():
       <main class="page">
         <section class="hero" aria-labelledby="page-title">
           <div class="eyebrow">vitazgio.ru · мои домены</div>
-          <h1 id="page-title">Мои Веб Сервисы</h1>
+          <h1 id="page-title" class="cyber-terminal" aria-label="Мои веб-сервисы, Vitazgio Network, Domain Control">
+            <span class="terminal-prompt" aria-hidden="true">&gt;</span>
+            <span id="cyber-text" class="cyber-text" data-text="МОИ ВЕБ-СЕРВИСЫ" aria-hidden="true">МОИ ВЕБ-СЕРВИСЫ</span>
+            <span class="terminal-cursor" aria-hidden="true"></span>
+          </h1>
         </section>
 
         <nav class="services-wrap" aria-label="Сервисы vitazgio.ru">
           <div class="services">
             <a class="service service--ha" href="https://ha.vitazgio.ru" aria-label="Открыть Home Assistant">
               <div class="service-top">
-                <span class="logo" aria-hidden="true">
-                  <svg viewBox="0 0 48 48" fill="none">
-                    <path d="M5 21.5c0-2.1.8-4.1 2.3-5.6L18.5 4.7a7.8 7.8 0 0 1 11 0l11.2 11.2a8 8 0 0 1 2.3 5.6V37a6 6 0 0 1-6 6H11a6 6 0 0 1-6-6V21.5Z" fill="#18b7e8"/>
-                    <path d="M24 43V15M24 34l11-11M24 39 13 28" stroke="#f5f7ff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
-                    <circle cx="24" cy="13" r="5" fill="#f5f7ff"/>
-                    <circle cx="36" cy="22" r="5" fill="#f5f7ff"/>
-                    <circle cx="12" cy="27" r="5" fill="#f5f7ff"/>
-                  </svg>
-                </span>
+                <span class="logo" aria-hidden="true"><img src="/static/home-assistant.png" alt=""></span>
                 <span class="arrow" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M7 17 17 7m0 0H8m9 0v9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
               </div>
               <div class="service-copy"><h2>Home Assistant</h2><p>Умный дом и автоматизация</p><span class="domain">ha.vitazgio.ru</span></div>
@@ -283,6 +369,44 @@ def home():
 
         <footer><span>© 2026 vitazgio.ru</span></footer>
       </main>
+      <script>
+        (() => {
+          const output = document.getElementById("cyber-text");
+          const phrases = ["МОИ ВЕБ-СЕРВИСЫ", "VITAZGIO NETWORK", "DOMAIN CONTROL"];
+          const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+          const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+          const render = (text) => {
+            output.textContent = text;
+            output.dataset.text = text;
+          };
+
+          if (reduceMotion) {
+            render(phrases[0]);
+            return;
+          }
+
+          const runTerminal = async () => {
+            let phraseIndex = 0;
+            while (true) {
+              const phrase = phrases[phraseIndex];
+              render("");
+              for (let index = 1; index <= phrase.length; index += 1) {
+                render(phrase.slice(0, index));
+                await wait(78);
+              }
+              await wait(1450);
+              for (let index = phrase.length - 1; index >= 0; index -= 1) {
+                render(phrase.slice(0, index));
+                await wait(42);
+              }
+              await wait(260);
+              phraseIndex = (phraseIndex + 1) % phrases.length;
+            }
+          };
+
+          runTerminal();
+        })();
+      </script>
     </body>
     </html>
     """
