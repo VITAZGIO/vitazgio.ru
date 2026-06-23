@@ -39,10 +39,10 @@ NETBIRD_DEVICES = [
     {"ip": "100.104.188.141", "name": "NOUTBOOK"},
     {"ip": "100.104.140.4", "name": "VitazComp"},
     {"ip": "100.104.1.172", "name": "windows10proxmox"},
-    {"ip": "100.104.67.89", "name": "orangepizero3", "ssh_enabled": True, "ssh_user": "CHANGE_ME"},
-    {"ip": "100.104.221.91", "name": "ubuntu-server", "ssh_enabled": True, "ssh_user": "CHANGE_ME"},
+    {"ip": "100.104.67.89", "name": "orangepizero3", "ssh_enabled": True},
+    {"ip": "100.104.221.91", "name": "ubuntu-server", "ssh_enabled": True},
     {"ip": "100.104.160.121", "name": "windows10V"},
-    {"ip": "100.104.111.39", "name": "ubuntuvitaz1", "ssh_enabled": True, "ssh_user": "CHANGE_ME"},
+    {"ip": "100.104.111.39", "name": "ubuntuvitaz1", "ssh_enabled": True},
     {"ip": "100.104.86.103", "name": "MOBILA"},
 ]
 PING_INTERVAL_SECONDS = 10
@@ -51,27 +51,7 @@ PING_LATENCY_RE = re.compile(r"time[=<]\s*([\d.]+)\s*ms", re.IGNORECASE)
 
 netbird_status = {device["ip"]: {"online": False, "latency_ms": None} for device in NETBIRD_DEVICES}
 netbird_status_lock = threading.Lock()
-ssh_devices_by_ip = {device["ip"]: device for device in NETBIRD_DEVICES if device.get("ssh_enabled")}
-
-SSH_HOST_KEY_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ssh_host_key")
-SSH_HOST_KEY_PATH = os.path.join(SSH_HOST_KEY_DIR, "id_rsa")
-
-
-def load_or_create_ssh_host_key():
-    os.makedirs(SSH_HOST_KEY_DIR, exist_ok=True)
-    if not os.path.exists(SSH_HOST_KEY_PATH):
-        key = paramiko.RSAKey.generate(4096)
-        key.write_private_key_file(SSH_HOST_KEY_PATH)
-        os.chmod(SSH_HOST_KEY_PATH, 0o600)
-        public_line = f"{key.get_name()} {key.get_base64()} vitazgio-console"
-        with open(SSH_HOST_KEY_PATH + ".pub", "w", encoding="utf-8") as pub_file:
-            pub_file.write(public_line + "\n")
-        print(f"[console] Сгенерирован новый SSH-ключ. Добавь в authorized_keys на устройствах:\n{public_line}")
-        return key
-    return paramiko.RSAKey.from_private_key_file(SSH_HOST_KEY_PATH)
-
-
-ssh_host_key = load_or_create_ssh_host_key() if ssh_devices_by_ip else None
+ssh_enabled_ips = {device["ip"] for device in NETBIRD_DEVICES if device.get("ssh_enabled")}
 
 SSH_GATE_PASSWORD_PREFIX = os.environ.get("SSH_GATE_PASSWORD_PREFIX")
 CONSOLE_LOGIN_WINDOW_SECONDS = 300
@@ -205,17 +185,29 @@ def console_ws(ws, ip):
     if not session.get("authenticated") or not session.get("console_authenticated"):
         ws.close()
         return
-    device = ssh_devices_by_ip.get(ip)
-    if device is None:
+    if ip not in ssh_enabled_ips:
+        ws.close()
+        return
+
+    message = ws.receive(timeout=15)
+    try:
+        auth = json.loads(message) if message else {}
+    except ValueError:
+        auth = {}
+    username = auth.get("username") if auth.get("type") == "auth" else None
+    password = auth.get("password") if auth.get("type") == "auth" else None
+    if not username or not password:
         ws.close()
         return
 
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     try:
-        client.connect(ip, username=device["ssh_user"], pkey=ssh_host_key, timeout=5)
+        client.connect(
+            ip, username=username, password=password, timeout=5, look_for_keys=False, allow_agent=False
+        )
     except (paramiko.SSHException, OSError):
-        ws.send(json.dumps({"type": "data", "data": "\r\nНе удалось подключиться по SSH.\r\n"}))
+        ws.send(json.dumps({"type": "data", "data": "\r\nНе удалось подключиться (проверь логин/пароль).\r\n"}))
         ws.close()
         return
 
@@ -340,6 +332,7 @@ def cabinet():
         .gate-panel h2 { margin: 0 0 18px; font-size: 1.3rem; }
         .gate-panel input { width: 100%; height: 46px; padding: 0 14px; color: #f4fbff; font: 700 1rem "Cascadia Code", Consolas, monospace; border: 1px solid rgba(255,255,255,.12); outline: none; background: rgba(4,10,20,.65); }
         .gate-panel input:focus { border-color: #ff782f; }
+        .gate-panel input + input { margin-top: 10px; }
         .gate-submit { width: 100%; height: 46px; margin-top: 12px; color: #1a0d04; font: 800 .8rem "Cascadia Code", Consolas, monospace; letter-spacing: .06em; text-transform: uppercase; border: 0; background: linear-gradient(90deg, #ff782f, #ffb35c); cursor: pointer; }
         .gate-error { min-height: 18px; margin: 10px 0 0; color: #ff6ba8; font-size: .78rem; }
         .gate-close { position: absolute; top: 12px; right: 14px; padding: 5px; color: #7d8799; font-size: 1.3rem; border: 0; background: none; cursor: pointer; }
@@ -380,6 +373,20 @@ def cabinet():
             <input id="gate-password" name="password" type="password" autocomplete="off" required>
             <button class="gate-submit" type="submit">Войти</button>
             <p id="gate-error" class="gate-error" role="alert"></p>
+          </form>
+        </section>
+      </div>
+
+      <div id="ssh-login-modal" class="gate-modal" hidden>
+        <div class="gate-backdrop" data-ssh-login-close></div>
+        <section class="gate-panel" role="dialog" aria-modal="true" aria-labelledby="ssh-login-title">
+          <button class="gate-close" type="button" data-ssh-login-close aria-label="Закрыть">×</button>
+          <h2 id="ssh-login-title">SSH-логин</h2>
+          <form id="ssh-login-form">
+            <input id="ssh-login-username" name="username" type="text" autocomplete="off" placeholder="Имя пользователя" required>
+            <input id="ssh-login-password" name="password" type="password" autocomplete="off" placeholder="Пароль" required>
+            <button class="gate-submit" type="submit">Подключиться</button>
+            <p id="ssh-login-error" class="gate-error" role="alert"></p>
           </form>
         </section>
       </div>
@@ -472,6 +479,11 @@ def cabinet():
           const gateForm = document.getElementById("gate-form");
           const gatePassword = document.getElementById("gate-password");
           const gateError = document.getElementById("gate-error");
+          const sshLoginModal = document.getElementById("ssh-login-modal");
+          const sshLoginForm = document.getElementById("ssh-login-form");
+          const sshLoginUsername = document.getElementById("ssh-login-username");
+          const sshLoginPassword = document.getElementById("ssh-login-password");
+          const sshLoginError = document.getElementById("ssh-login-error");
           const termOverlay = document.getElementById("term-overlay");
           const termTitle = document.getElementById("term-title");
           const termBody = document.getElementById("term-body");
@@ -487,10 +499,12 @@ def cabinet():
             gateModal.hidden = true;
             gateForm.reset();
             gateError.textContent = "";
-            pendingDevice = null;
           };
 
-          document.querySelectorAll("[data-gate-close]").forEach((el) => el.addEventListener("click", closeGate));
+          document.querySelectorAll("[data-gate-close]").forEach((el) => el.addEventListener("click", () => {
+            closeGate();
+            pendingDevice = null;
+          }));
 
           gateForm.addEventListener("submit", async (event) => {
             event.preventDefault();
@@ -508,12 +522,37 @@ def cabinet():
                 return;
               }
               consoleAuthenticated = true;
-              const device = pendingDevice;
               closeGate();
-              if (device) openTerminal(device.ip, device.name);
+              openSshLogin();
             } catch {
               gateError.textContent = "Сервер недоступен.";
             }
+          });
+
+          const closeSshLogin = () => {
+            sshLoginModal.hidden = true;
+            sshLoginForm.reset();
+            sshLoginError.textContent = "";
+            pendingDevice = null;
+          };
+
+          document.querySelectorAll("[data-ssh-login-close]").forEach((el) => el.addEventListener("click", closeSshLogin));
+
+          const openSshLogin = () => {
+            sshLoginModal.hidden = false;
+            requestAnimationFrame(() => sshLoginUsername.focus());
+          };
+
+          sshLoginForm.addEventListener("submit", (event) => {
+            event.preventDefault();
+            const device = pendingDevice;
+            const username = sshLoginUsername.value;
+            const password = sshLoginPassword.value;
+            sshLoginModal.hidden = true;
+            sshLoginForm.reset();
+            sshLoginError.textContent = "";
+            pendingDevice = null;
+            if (device) openTerminal(device.ip, device.name, username, password);
           });
 
           const closeTerminal = () => {
@@ -524,7 +563,7 @@ def cabinet():
           };
           termClose.addEventListener("click", closeTerminal);
 
-          const openTerminal = (ip, name) => {
+          const openTerminal = (ip, name, username, password) => {
             termTitle.textContent = name + " — " + ip;
             termOverlay.hidden = false;
             if (typeof Terminal === "undefined" || typeof FitAddon === "undefined") {
@@ -541,6 +580,12 @@ def cabinet():
             let gotData = false;
             ws = new WebSocket(`${protocol}//${location.host}/ws/console/${ip}`);
 
+            ws.addEventListener("open", () => {
+              ws.send(JSON.stringify({ type: "auth", username, password }));
+              fitAddon.fit();
+              ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
+            });
+
             ws.addEventListener("message", (event) => {
               gotData = true;
               try {
@@ -550,10 +595,7 @@ def cabinet():
             });
 
             ws.addEventListener("close", () => {
-              if (!gotData) {
-                term.write("\\r\\nНе удалось подключиться (проверь пароль консоли).\\r\\n");
-                consoleAuthenticated = false;
-              }
+              if (!gotData) term.write("\\r\\nСоединение закрыто.\\r\\n");
             });
 
             term.onData((data) => {
@@ -568,16 +610,14 @@ def cabinet():
             };
             term.onResize(() => sendResize());
             window.addEventListener("resize", () => fitAddon.fit());
-            ws.addEventListener("open", sendResize);
           };
 
           document.querySelectorAll(".connect-btn").forEach((button) => {
             button.addEventListener("click", () => {
-              const device = { ip: button.dataset.ip, name: button.dataset.name };
+              pendingDevice = { ip: button.dataset.ip, name: button.dataset.name };
               if (consoleAuthenticated) {
-                openTerminal(device.ip, device.name);
+                openSshLogin();
               } else {
-                pendingDevice = device;
                 gateModal.hidden = false;
                 requestAnimationFrame(() => gatePassword.focus());
               }

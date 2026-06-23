@@ -3,4 +3,3 @@
 __pycache__/
 *.pyc
 actions-runner/
-ssh_host_key/
