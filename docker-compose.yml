@@ -4,6 +4,7 @@ services:
     container_name: vitazgio-site
     network_mode: host
     environment:
+      - VITAZGIO_SESSION_SECRET=${VITAZGIO_SESSION_SECRET}
       - SSH_GATE_PASSWORD_PREFIX=${SSH_GATE_PASSWORD_PREFIX}
     volumes:
       - .:/app

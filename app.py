@@ -516,6 +516,10 @@ def cabinet():
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ password: gatePassword.value }),
               });
+              if (!response.headers.get("content-type")?.includes("application/json")) {
+                gateError.textContent = "Сессия истекла, обновите страницу и войдите заново.";
+                return;
+              }
               const result = await response.json();
               if (!response.ok) {
                 gateError.textContent = result.error || "Не удалось войти.";
