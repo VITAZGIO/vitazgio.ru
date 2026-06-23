@@ -2,7 +2,10 @@ import base64
 import hashlib
 import hmac
 import os
+import platform
+import re
 import secrets
+import subprocess
 import threading
 import time
 from collections import defaultdict, deque
@@ -25,6 +28,52 @@ LOGIN_WINDOW_SECONDS = 300
 LOGIN_MAX_ATTEMPTS = 5
 login_attempts = defaultdict(deque)
 login_attempts_lock = threading.Lock()
+
+NETBIRD_DEVICES = [
+    {"ip": "100.104.188.141", "name": "NOUTBOOK"},
+    {"ip": "100.104.140.4", "name": "VitazComp"},
+    {"ip": "100.104.1.172", "name": "windows10proxmox"},
+    {"ip": "100.104.67.89", "name": "orangepizero3"},
+    {"ip": "100.104.221.91", "name": "ubuntu-server"},
+    {"ip": "100.104.160.121", "name": "windows10V"},
+    {"ip": "100.104.111.39", "name": "ubuntuvitaz1"},
+    {"ip": "100.104.86.103", "name": "MOBILA"},
+]
+PING_INTERVAL_SECONDS = 10
+PING_TIMEOUT_SECONDS = 1
+PING_LATENCY_RE = re.compile(r"time[=<]\s*([\d.]+)\s*ms", re.IGNORECASE)
+
+netbird_status = {device["ip"]: {"online": False, "latency_ms": None} for device in NETBIRD_DEVICES}
+netbird_status_lock = threading.Lock()
+
+
+def ping_once(ip):
+    if platform.system().lower() == "windows":
+        command = ["ping", "-n", "1", "-w", str(PING_TIMEOUT_SECONDS * 1000), ip]
+    else:
+        command = ["ping", "-c", "1", "-W", str(PING_TIMEOUT_SECONDS), ip]
+    try:
+        result = subprocess.run(
+            command, capture_output=True, text=True, timeout=PING_TIMEOUT_SECONDS + 1
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return False, None
+    if result.returncode != 0:
+        return False, None
+    match = PING_LATENCY_RE.search(result.stdout)
+    return True, float(match.group(1)) if match else None
+
+
+def netbird_ping_loop():
+    while True:
+        for device in NETBIRD_DEVICES:
+            online, latency_ms = ping_once(device["ip"])
+            with netbird_status_lock:
+                netbird_status[device["ip"]] = {"online": online, "latency_ms": latency_ms}
+        time.sleep(PING_INTERVAL_SECONDS)
+
+
+threading.Thread(target=netbird_ping_loop, daemon=True).start()
 
 
 def login_required(view):
@@ -77,10 +126,26 @@ def logout():
     return redirect(url_for("home"))
 
 
+@app.get("/api/netbird/status")
+@login_required
+def netbird_status_api():
+    with netbird_status_lock:
+        return jsonify(netbird_status)
+
+
 @app.get("/cabinet")
 @login_required
 def cabinet():
-    return """
+    device_items = "".join(
+        f'<li class="device" data-ip="{device["ip"]}">'
+        f'<button class="copy-ip" type="button" data-ip="{device["ip"]}">{device["ip"]}</button>'
+        f'<span class="device-name">{device["name"]}</span>'
+        f'<span class="device-status" data-status>проверка…</span>'
+        f'<span class="copy-status">Скопировано</span>'
+        f"</li>"
+        for device in NETBIRD_DEVICES
+    )
+    html = """
     <!DOCTYPE html>
     <html lang="ru">
     <head>
@@ -108,11 +173,15 @@ def cabinet():
         .netbird-arrow { margin-left: auto; color: #ff782f; font-size: 1.3rem; transition: transform .25s ease; }
         .netbird-toggle[aria-expanded="true"] .netbird-arrow { transform: rotate(180deg); }
         .device-list { margin: 0; padding: 8px 18px 18px; list-style: none; border-top: 1px solid rgba(255,255,255,.07); }
-        .device { min-height: 48px; display: grid; grid-template-columns: 150px 1fr 82px; align-items: center; gap: 12px; border-bottom: 1px solid rgba(255,255,255,.06); }
+        .device { min-height: 48px; display: grid; grid-template-columns: 150px 1fr 70px 82px; align-items: center; gap: 12px; border-bottom: 1px solid rgba(255,255,255,.06); }
         .device:last-child { border-bottom: 0; }
         .copy-ip { padding: 7px 8px; color: #69e8ff; text-align: left; border: 0; background: transparent; }
         .copy-ip:hover, .copy-ip:focus-visible { color: #fff; border: 0; outline: 1px solid rgba(45,226,255,.28); background: rgba(45,226,255,.08); }
         .device-name { color: #c4cad5; font-size: .84rem; overflow-wrap: anywhere; }
+        .device-status { color: #6b7385; font-size: .76rem; text-align: right; white-space: nowrap; }
+        .device-status::before { content: "● "; }
+        .device-status.online { color: #63f5ad; }
+        .device-status.offline { color: #ff6b81; }
         .copy-status { color: #63f5ad; font-size: .7rem; opacity: 0; transition: opacity .18s ease; }
         .copy-status.visible { opacity: 1; }
         @media (max-width: 900px) {
@@ -123,7 +192,8 @@ def cabinet():
           .cabinet-header { align-items: flex-start; justify-content: space-between; gap: 12px; }
           .device { grid-template-columns: 1fr auto; gap: 4px 10px; padding: 8px 0; }
           .device-name { grid-column: 1; grid-row: 2; padding-left: 8px; }
-          .copy-status { grid-column: 2; grid-row: 1 / span 2; }
+          .device-status { grid-column: 2; grid-row: 1; }
+          .copy-status { grid-column: 2; grid-row: 2; text-align: right; }
         }
       </style>
     </head>
@@ -141,16 +211,7 @@ def cabinet():
             <span class="netbird-arrow" aria-hidden="true">⌄</span>
           </button>
           <div id="netbird-devices" hidden>
-            <ul class="device-list">
-              <li class="device"><button class="copy-ip" type="button" data-ip="100.104.188.141">100.104.188.141</button><span class="device-name">NOUTBOOK</span><span class="copy-status">Скопировано</span></li>
-              <li class="device"><button class="copy-ip" type="button" data-ip="100.104.140.4">100.104.140.4</button><span class="device-name">VitazComp</span><span class="copy-status">Скопировано</span></li>
-              <li class="device"><button class="copy-ip" type="button" data-ip="100.104.1.172">100.104.1.172</button><span class="device-name">windows10proxmox</span><span class="copy-status">Скопировано</span></li>
-              <li class="device"><button class="copy-ip" type="button" data-ip="100.104.67.89">100.104.67.89</button><span class="device-name">orangepizero3</span><span class="copy-status">Скопировано</span></li>
-              <li class="device"><button class="copy-ip" type="button" data-ip="100.104.221.91">100.104.221.91</button><span class="device-name">ubuntu-server</span><span class="copy-status">Скопировано</span></li>
-              <li class="device"><button class="copy-ip" type="button" data-ip="100.104.160.121">100.104.160.121</button><span class="device-name">windows10V</span><span class="copy-status">Скопировано</span></li>
-              <li class="device"><button class="copy-ip" type="button" data-ip="100.104.111.39">100.104.111.39</button><span class="device-name">ubuntuvitaz1</span><span class="copy-status">Скопировано</span></li>
-              <li class="device"><button class="copy-ip" type="button" data-ip="100.104.86.103">100.104.86.103</button><span class="device-name">MOBILA</span><span class="copy-status">Скопировано</span></li>
-            </ul>
+            <ul class="device-list">{{DEVICE_ITEMS}}</ul>
           </div>
           </section>
         </div>
@@ -199,10 +260,38 @@ def cabinet():
             });
           });
         })();
+
+        (() => {
+          const refreshStatus = async () => {
+            let data;
+            try {
+              const response = await fetch("/api/netbird/status", { credentials: "same-origin" });
+              if (!response.ok) return;
+              data = await response.json();
+            } catch {
+              return;
+            }
+            document.querySelectorAll(".device").forEach((item) => {
+              const info = data[item.dataset.ip];
+              const statusEl = item.querySelector(".device-status");
+              if (!info) return;
+              if (info.online) {
+                statusEl.textContent = info.latency_ms != null ? `${Math.round(info.latency_ms)} ms` : "онлайн";
+                statusEl.className = "device-status online";
+              } else {
+                statusEl.textContent = "офлайн";
+                statusEl.className = "device-status offline";
+              }
+            });
+          };
+          refreshStatus();
+          setInterval(refreshStatus, 10000);
+        })();
       </script>
     </body>
     </html>
     """
+    return html.replace("{{DEVICE_ITEMS}}", device_items)
 
 
 @app.route("/")
