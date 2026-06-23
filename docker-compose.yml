@@ -3,6 +3,8 @@ services:
     build: .
     container_name: vitazgio-site
     network_mode: host
+    environment:
+      - SSH_GATE_PASSWORD_PREFIX=${SSH_GATE_PASSWORD_PREFIX}
     volumes:
       - .:/app
     restart: unless-stopped

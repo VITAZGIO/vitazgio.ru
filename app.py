@@ -1,6 +1,7 @@
 import base64
 import hashlib
 import hmac
+import json
 import os
 import platform
 import re
@@ -9,9 +10,13 @@ import subprocess
 import threading
 import time
 from collections import defaultdict, deque
+from datetime import datetime
 from functools import wraps
+from zoneinfo import ZoneInfo
 
+import paramiko
 from flask import Flask, jsonify, redirect, request, session, url_for
+from flask_sock import Sock
 
 app = Flask(__name__)
 app.config.update(
@@ -20,6 +25,7 @@ app.config.update(
     SESSION_COOKIE_SAMESITE="Strict",
     SESSION_COOKIE_SECURE=os.environ.get("SESSION_COOKIE_SECURE", "false").lower() == "true",
 )
+sock = Sock(app)
 
 PASSWORD_SALT = base64.b64decode("vLsGUQ/owFhcITf4A6CVjw==")
 PASSWORD_HASH = base64.b64decode("T+E27QxamfCbhsdxJ1JlEXo4yuBwfwQFtw9ODFkA+kg=")
@@ -33,10 +39,10 @@ NETBIRD_DEVICES = [
     {"ip": "100.104.188.141", "name": "NOUTBOOK"},
     {"ip": "100.104.140.4", "name": "VitazComp"},
     {"ip": "100.104.1.172", "name": "windows10proxmox"},
-    {"ip": "100.104.67.89", "name": "orangepizero3"},
-    {"ip": "100.104.221.91", "name": "ubuntu-server"},
+    {"ip": "100.104.67.89", "name": "orangepizero3", "ssh_enabled": True, "ssh_user": "CHANGE_ME"},
+    {"ip": "100.104.221.91", "name": "ubuntu-server", "ssh_enabled": True, "ssh_user": "CHANGE_ME"},
     {"ip": "100.104.160.121", "name": "windows10V"},
-    {"ip": "100.104.111.39", "name": "ubuntuvitaz1"},
+    {"ip": "100.104.111.39", "name": "ubuntuvitaz1", "ssh_enabled": True, "ssh_user": "CHANGE_ME"},
     {"ip": "100.104.86.103", "name": "MOBILA"},
 ]
 PING_INTERVAL_SECONDS = 10
@@ -45,6 +51,38 @@ PING_LATENCY_RE = re.compile(r"time[=<]\s*([\d.]+)\s*ms", re.IGNORECASE)
 
 netbird_status = {device["ip"]: {"online": False, "latency_ms": None} for device in NETBIRD_DEVICES}
 netbird_status_lock = threading.Lock()
+ssh_devices_by_ip = {device["ip"]: device for device in NETBIRD_DEVICES if device.get("ssh_enabled")}
+
+SSH_HOST_KEY_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ssh_host_key")
+SSH_HOST_KEY_PATH = os.path.join(SSH_HOST_KEY_DIR, "id_rsa")
+
+
+def load_or_create_ssh_host_key():
+    os.makedirs(SSH_HOST_KEY_DIR, exist_ok=True)
+    if not os.path.exists(SSH_HOST_KEY_PATH):
+        key = paramiko.RSAKey.generate(4096)
+        key.write_private_key_file(SSH_HOST_KEY_PATH)
+        os.chmod(SSH_HOST_KEY_PATH, 0o600)
+        public_line = f"{key.get_name()} {key.get_base64()} vitazgio-console"
+        with open(SSH_HOST_KEY_PATH + ".pub", "w", encoding="utf-8") as pub_file:
+            pub_file.write(public_line + "\n")
+        print(f"[console] Сгенерирован новый SSH-ключ. Добавь в authorized_keys на устройствах:\n{public_line}")
+        return key
+    return paramiko.RSAKey.from_private_key_file(SSH_HOST_KEY_PATH)
+
+
+ssh_host_key = load_or_create_ssh_host_key() if ssh_devices_by_ip else None
+
+SSH_GATE_PASSWORD_PREFIX = os.environ.get("SSH_GATE_PASSWORD_PREFIX")
+CONSOLE_LOGIN_WINDOW_SECONDS = 300
+CONSOLE_LOGIN_MAX_ATTEMPTS = 5
+console_login_attempts = defaultdict(deque)
+console_login_attempts_lock = threading.Lock()
+
+
+def console_password_today():
+    now = datetime.now(ZoneInfo("Europe/Moscow"))
+    return f"{SSH_GATE_PASSWORD_PREFIX}{now:%d%m}"
 
 
 def ping_once(ip):
@@ -133,6 +171,97 @@ def netbird_status_api():
         return jsonify(netbird_status)
 
 
+@app.post("/api/console/login")
+@login_required
+def console_login():
+    if not SSH_GATE_PASSWORD_PREFIX:
+        return jsonify(error="Консоль не настроена."), 503
+
+    client = request.remote_addr or "unknown"
+    now = time.monotonic()
+
+    with console_login_attempts_lock:
+        attempts = console_login_attempts[client]
+        while attempts and now - attempts[0] > CONSOLE_LOGIN_WINDOW_SECONDS:
+            attempts.popleft()
+        if len(attempts) >= CONSOLE_LOGIN_MAX_ATTEMPTS:
+            return jsonify(error="Слишком много попыток. Попробуйте через 5 минут."), 429
+
+    payload = request.get_json(silent=True) or {}
+    password = payload.get("password", "")
+    if not isinstance(password, str) or not hmac.compare_digest(password, console_password_today()):
+        with console_login_attempts_lock:
+            console_login_attempts[client].append(now)
+        return jsonify(error="Неверный пароль."), 401
+
+    with console_login_attempts_lock:
+        console_login_attempts.pop(client, None)
+    session["console_authenticated"] = True
+    return jsonify(ok=True)
+
+
+@sock.route("/ws/console/<ip>")
+def console_ws(ws, ip):
+    if not session.get("authenticated") or not session.get("console_authenticated"):
+        ws.close()
+        return
+    device = ssh_devices_by_ip.get(ip)
+    if device is None:
+        ws.close()
+        return
+
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    try:
+        client.connect(ip, username=device["ssh_user"], pkey=ssh_host_key, timeout=5)
+    except (paramiko.SSHException, OSError):
+        ws.send(json.dumps({"type": "data", "data": "\r\nНе удалось подключиться по SSH.\r\n"}))
+        ws.close()
+        return
+
+    channel = client.invoke_shell(term="xterm")
+    channel.settimeout(0.0)
+
+    def pump_channel_to_ws():
+        try:
+            while True:
+                if channel.recv_ready():
+                    chunk = channel.recv(4096)
+                    if not chunk:
+                        break
+                    ws.send(json.dumps({"type": "data", "data": chunk.decode(errors="replace")}))
+                else:
+                    time.sleep(0.03)
+                if channel.closed:
+                    break
+        except (OSError, ValueError):
+            pass
+
+    reader = threading.Thread(target=pump_channel_to_ws, daemon=True)
+    reader.start()
+
+    try:
+        while True:
+            message = ws.receive()
+            if message is None:
+                break
+            try:
+                payload = json.loads(message)
+            except ValueError:
+                continue
+            if payload.get("type") == "data":
+                channel.send(payload.get("data", ""))
+            elif payload.get("type") == "resize":
+                cols = int(payload.get("cols", 80))
+                rows = int(payload.get("rows", 24))
+                channel.resize_pty(width=cols, height=rows)
+    except (OSError, ValueError):
+        pass
+    finally:
+        channel.close()
+        client.close()
+
+
 @app.get("/cabinet")
 @login_required
 def cabinet():
@@ -141,8 +270,13 @@ def cabinet():
         f'<button class="copy-ip" type="button" data-ip="{device["ip"]}">{device["ip"]}</button>'
         f'<span class="device-name">{device["name"]}</span>'
         f'<span class="device-status" data-status>проверка…</span>'
-        f'<span class="copy-status">Скопировано</span>'
-        f"</li>"
+        + (
+            f'<button class="connect-btn" type="button" data-ip="{device["ip"]}" data-name="{device["name"]}">Подключиться</button>'
+            if device.get("ssh_enabled")
+            else '<span class="connect-btn-empty"></span>'
+        )
+        + '<span class="copy-status">Скопировано</span>'
+        + "</li>"
         for device in NETBIRD_DEVICES
     )
     html = """
@@ -173,7 +307,7 @@ def cabinet():
         .netbird-arrow { margin-left: auto; color: #ff782f; font-size: 1.3rem; transition: transform .25s ease; }
         .netbird-toggle[aria-expanded="true"] .netbird-arrow { transform: rotate(180deg); }
         .device-list { margin: 0; padding: 8px 18px 18px; list-style: none; border-top: 1px solid rgba(255,255,255,.07); }
-        .device { min-height: 48px; display: grid; grid-template-columns: 150px 1fr 70px 82px; align-items: center; gap: 12px; border-bottom: 1px solid rgba(255,255,255,.06); }
+        .device { min-height: 48px; display: grid; grid-template-columns: 150px 1fr 70px 116px 82px; align-items: center; gap: 12px; border-bottom: 1px solid rgba(255,255,255,.06); }
         .device:last-child { border-bottom: 0; }
         .copy-ip { padding: 7px 8px; color: #69e8ff; text-align: left; border: 0; background: transparent; }
         .copy-ip:hover, .copy-ip:focus-visible { color: #fff; border: 0; outline: 1px solid rgba(45,226,255,.28); background: rgba(45,226,255,.08); }
@@ -182,6 +316,9 @@ def cabinet():
         .device-status::before { content: "● "; }
         .device-status.online { color: #63f5ad; }
         .device-status.offline { color: #ff6b81; }
+        .connect-btn { padding: 6px 10px; color: #ff782f; font: 700 .7rem "Cascadia Code", Consolas, monospace; letter-spacing: .04em; text-transform: uppercase; border: 1px solid rgba(255,120,47,.35); background: rgba(255,120,47,.07); cursor: pointer; }
+        .connect-btn:hover, .connect-btn:focus-visible { color: #fff; background: rgba(255,120,47,.22); outline: none; }
+        .connect-btn-empty { display: block; }
         .copy-status { color: #63f5ad; font-size: .7rem; opacity: 0; transition: opacity .18s ease; }
         .copy-status.visible { opacity: 1; }
         @media (max-width: 900px) {
@@ -193,8 +330,25 @@ def cabinet():
           .device { grid-template-columns: 1fr auto; gap: 4px 10px; padding: 8px 0; }
           .device-name { grid-column: 1; grid-row: 2; padding-left: 8px; }
           .device-status { grid-column: 2; grid-row: 1; }
+          .connect-btn, .connect-btn-empty { grid-column: 1; grid-row: 3; justify-self: start; margin-left: 8px; }
           .copy-status { grid-column: 2; grid-row: 2; text-align: right; }
         }
+
+        .gate-modal { position: fixed; z-index: 100; inset: 0; display: grid; place-items: center; padding: 20px; }
+        .gate-backdrop { position: absolute; inset: 0; background: rgba(3, 6, 13, .82); backdrop-filter: blur(12px); }
+        .gate-panel { position: relative; width: min(380px, 100%); padding: 30px; color: #e8fbff; border: 1px solid rgba(255,120,47,.3); background: linear-gradient(145deg, rgba(16, 30, 47, .98), rgba(20, 16, 37, .98)); box-shadow: 0 32px 100px rgba(0,0,0,.65); }
+        .gate-panel h2 { margin: 0 0 18px; font-size: 1.3rem; }
+        .gate-panel input { width: 100%; height: 46px; padding: 0 14px; color: #f4fbff; font: 700 1rem "Cascadia Code", Consolas, monospace; border: 1px solid rgba(255,255,255,.12); outline: none; background: rgba(4,10,20,.65); }
+        .gate-panel input:focus { border-color: #ff782f; }
+        .gate-submit { width: 100%; height: 46px; margin-top: 12px; color: #1a0d04; font: 800 .8rem "Cascadia Code", Consolas, monospace; letter-spacing: .06em; text-transform: uppercase; border: 0; background: linear-gradient(90deg, #ff782f, #ffb35c); cursor: pointer; }
+        .gate-error { min-height: 18px; margin: 10px 0 0; color: #ff6ba8; font-size: .78rem; }
+        .gate-close { position: absolute; top: 12px; right: 14px; padding: 5px; color: #7d8799; font-size: 1.3rem; border: 0; background: none; cursor: pointer; }
+
+        .term-overlay { position: fixed; z-index: 100; inset: 0; display: flex; flex-direction: column; background: #05070c; }
+        .term-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 18px; color: #c4cad5; font-size: .82rem; background: rgba(255,255,255,.04); border-bottom: 1px solid rgba(255,255,255,.08); }
+        .term-close { padding: 7px 12px; color: #dffaff; font: 700 .76rem "Cascadia Code", Consolas, monospace; border: 1px solid rgba(255,255,255,.16); background: transparent; cursor: pointer; }
+        .term-close:hover { background: rgba(255,255,255,.08); }
+        .term-body { flex: 1; padding: 10px; overflow: hidden; }
       </style>
     </head>
     <body>
@@ -216,6 +370,31 @@ def cabinet():
           </section>
         </div>
       </main>
+
+      <div id="gate-modal" class="gate-modal" hidden>
+        <div class="gate-backdrop" data-gate-close></div>
+        <section class="gate-panel" role="dialog" aria-modal="true" aria-labelledby="gate-title">
+          <button class="gate-close" type="button" data-gate-close aria-label="Закрыть">×</button>
+          <h2 id="gate-title">Пароль консоли</h2>
+          <form id="gate-form">
+            <input id="gate-password" name="password" type="password" autocomplete="off" required>
+            <button class="gate-submit" type="submit">Войти</button>
+            <p id="gate-error" class="gate-error" role="alert"></p>
+          </form>
+        </section>
+      </div>
+
+      <div id="term-overlay" class="term-overlay" hidden>
+        <div class="term-header">
+          <span id="term-title"></span>
+          <button id="term-close" class="term-close" type="button">Закрыть</button>
+        </div>
+        <div id="term-body" class="term-body"></div>
+      </div>
+
+      <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css">
+      <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
+      <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
       <script>
         (() => {
           const toggle = document.getElementById("netbird-toggle");
@@ -286,6 +465,120 @@ def cabinet():
           };
           refreshStatus();
           setInterval(refreshStatus, 10000);
+        })();
+
+        (() => {
+          const gateModal = document.getElementById("gate-modal");
+          const gateForm = document.getElementById("gate-form");
+          const gatePassword = document.getElementById("gate-password");
+          const gateError = document.getElementById("gate-error");
+          const termOverlay = document.getElementById("term-overlay");
+          const termTitle = document.getElementById("term-title");
+          const termBody = document.getElementById("term-body");
+          const termClose = document.getElementById("term-close");
+
+          let consoleAuthenticated = false;
+          let pendingDevice = null;
+          let term = null;
+          let fitAddon = null;
+          let ws = null;
+
+          const closeGate = () => {
+            gateModal.hidden = true;
+            gateForm.reset();
+            gateError.textContent = "";
+            pendingDevice = null;
+          };
+
+          document.querySelectorAll("[data-gate-close]").forEach((el) => el.addEventListener("click", closeGate));
+
+          gateForm.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            gateError.textContent = "";
+            try {
+              const response = await fetch("/api/console/login", {
+                method: "POST",
+                credentials: "same-origin",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ password: gatePassword.value }),
+              });
+              const result = await response.json();
+              if (!response.ok) {
+                gateError.textContent = result.error || "Не удалось войти.";
+                return;
+              }
+              consoleAuthenticated = true;
+              const device = pendingDevice;
+              closeGate();
+              if (device) openTerminal(device.ip, device.name);
+            } catch {
+              gateError.textContent = "Сервер недоступен.";
+            }
+          });
+
+          const closeTerminal = () => {
+            termOverlay.hidden = true;
+            if (ws) { ws.close(); ws = null; }
+            if (term) { term.dispose(); term = null; }
+            termBody.innerHTML = "";
+          };
+          termClose.addEventListener("click", closeTerminal);
+
+          const openTerminal = (ip, name) => {
+            termTitle.textContent = name + " — " + ip;
+            termOverlay.hidden = false;
+            term = new Terminal({ convertEol: true, fontFamily: "Cascadia Code, Consolas, monospace", fontSize: 14, theme: { background: "#05070c" } });
+            fitAddon = new FitAddon.FitAddon();
+            term.loadAddon(fitAddon);
+            term.open(termBody);
+            fitAddon.fit();
+
+            const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+            let gotData = false;
+            ws = new WebSocket(`${protocol}//${location.host}/ws/console/${ip}`);
+
+            ws.addEventListener("message", (event) => {
+              gotData = true;
+              try {
+                const payload = JSON.parse(event.data);
+                if (payload.type === "data") term.write(payload.data);
+              } catch {}
+            });
+
+            ws.addEventListener("close", () => {
+              if (!gotData) {
+                term.write("\r\nНе удалось подключиться (проверь пароль консоли).\r\n");
+                consoleAuthenticated = false;
+              }
+            });
+
+            term.onData((data) => {
+              if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "data", data }));
+            });
+
+            const sendResize = () => {
+              fitAddon.fit();
+              if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
+              }
+            };
+            term.onResize(() => sendResize());
+            window.addEventListener("resize", () => fitAddon.fit());
+            ws.addEventListener("open", sendResize);
+          };
+
+          document.querySelectorAll(".connect-btn").forEach((button) => {
+            button.addEventListener("click", () => {
+              const device = { ip: button.dataset.ip, name: button.dataset.name };
+              if (consoleAuthenticated) {
+                openTerminal(device.ip, device.name);
+              } else {
+                pendingDevice = device;
+                gateModal.hidden = false;
+                requestAnimationFrame(() => gatePassword.focus());
+              }
+            });
+          });
         })();
       </script>
     </body>
@@ -850,4 +1143,4 @@ def home():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    app.run(host="0.0.0.0", port=5000, threaded=True)

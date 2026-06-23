@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(py -3 \"C:\\\\Users\\\\vitaz\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--TRASH-NextCloud--------Programs-vitazgio-ru\\\\85300249-8f9b-4460-ad23-784e2efa2845\\\\scratchpad\\\\test_console.py\")"
+    ]
+  }
+}
