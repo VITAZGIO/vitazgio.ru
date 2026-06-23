@@ -393,8 +393,8 @@ def cabinet():
       </div>
 
       <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css">
-      <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
-      <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
+      <script defer src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
+      <script defer src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
       <script>
         (() => {
           const toggle = document.getElementById("netbird-toggle");
@@ -527,6 +527,10 @@ def cabinet():
           const openTerminal = (ip, name) => {
             termTitle.textContent = name + " — " + ip;
             termOverlay.hidden = false;
+            if (typeof Terminal === "undefined" || typeof FitAddon === "undefined") {
+              termBody.textContent = "Не удалось загрузить библиотеку терминала (xterm.js) — проверьте сеть/CDN.";
+              return;
+            }
             term = new Terminal({ convertEol: true, fontFamily: "Cascadia Code, Consolas, monospace", fontSize: 14, theme: { background: "#05070c" } });
             fitAddon = new FitAddon.FitAddon();
             term.loadAddon(fitAddon);
