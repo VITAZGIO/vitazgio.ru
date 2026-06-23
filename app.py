@@ -551,7 +551,7 @@ def cabinet():
 
             ws.addEventListener("close", () => {
               if (!gotData) {
-                term.write("\r\nНе удалось подключиться (проверь пароль консоли).\r\n");
+                term.write("\\r\\nНе удалось подключиться (проверь пароль консоли).\\r\\n");
                 consoleAuthenticated = false;
               }
             });
