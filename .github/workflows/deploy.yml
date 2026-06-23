@@ -16,7 +16,7 @@ jobs:
           git fetch origin
           git reset --hard origin/main
 
-      - name: Restart Docker
+      - name: Rebuild and restart Docker
         run: |
           cd /opt/sites/vitazgio.ru
-          docker compose restart web
+          docker compose up -d --build

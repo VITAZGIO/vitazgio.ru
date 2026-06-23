@@ -16,7 +16,7 @@
 
 - [Dockerfile](Dockerfile) + [docker-compose.yml](docker-compose.yml) — `python:3.11-slim` + `iputils-ping` (нужен для пингов), ставит `requirements.txt` (там только `flask`), запускает `python app.py` на порту 5000.
 - **Контейнер работает в `network_mode: host`** — это специально, иначе он не видит NetBird-интерфейс хоста и не может пинговать адреса 100.104.x.x. Из-за этого секция `ports` в docker-compose.yml не нужна (порт 5000 публикуется напрямую через сеть хоста).
-- [.github/workflows/deploy.yml](.github/workflows/deploy.yml) — на пуш в `main` self-hosted runner делает `git fetch && git reset --hard origin/main` в `/opt/sites/vitazgio.ru` и `docker compose restart web`.
+- [.github/workflows/deploy.yml](.github/workflows/deploy.yml) — на пуш в `main` self-hosted runner делает `git fetch && git reset --hard origin/main` в `/opt/sites/vitazgio.ru` и `docker compose up -d --build` (важно: именно `up -d --build`, а не `restart` — `restart` не пересобирает образ и не применяет изменения `docker-compose.yml`/`Dockerfile`, из-за этого один раз уже не подтянулись `network_mode: host` и `ping`).
 
 ### Команды для ручного деплоя
 
