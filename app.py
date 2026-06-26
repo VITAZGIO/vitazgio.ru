@@ -39,7 +39,7 @@ login_attempts_lock = threading.Lock()
 
 NETBIRD_DEVICES = [
     {"ip": "100.104.188.141", "name": "NOUTBOOK", "rdp_enabled": True},
-    {"ip": "100.104.140.4", "name": "VitazComp"},
+    {"ip": "100.104.140.4", "name": "VitazComp", "rdp_enabled": True},
     {"ip": "100.104.1.172", "name": "windows10proxmox", "rdp_enabled": True},
     {"ip": "100.104.67.89", "name": "orangepizero3", "ssh_enabled": True},
     {"ip": "100.104.221.91", "name": "ubuntu-server", "ssh_enabled": True},
@@ -492,6 +492,7 @@ def cabinet():
         .device-status.offline { color: #ff6b81; }
         .connect-btn { padding: 6px 10px; color: #ff782f; font: 700 .7rem "Cascadia Code", Consolas, monospace; letter-spacing: .04em; text-transform: uppercase; border: 1px solid rgba(255,120,47,.35); background: rgba(255,120,47,.07); cursor: pointer; }
         .connect-btn:hover, .connect-btn:focus-visible { color: #fff; background: rgba(255,120,47,.22); outline: none; }
+        .connect-btn.btn-offline { color: #4a5060; border-color: rgba(100,100,110,.2); background: rgba(60,65,75,.06); cursor: not-allowed; pointer-events: none; }
         .connect-btn-empty { display: block; }
         .copy-status { color: #63f5ad; font-size: .7rem; opacity: 0; transition: opacity .18s ease; }
         .copy-status.visible { opacity: 1; }
@@ -608,6 +609,7 @@ def cabinet():
         <div class="term-header">
           <span id="rdp-title"></span>
           <div class="rdp-header-actions">
+            <button id="rdp-toolbar-toggle" class="term-close" type="button" hidden>☰</button>
             <button id="rdp-touch-toggle" class="term-close" type="button" hidden>Touchpad</button>
             <button id="rdp-close" class="term-close" type="button">Закрыть</button>
           </div>
@@ -703,12 +705,15 @@ def cabinet():
               const info = data[item.dataset.ip];
               const statusEl = item.querySelector(".device-status");
               if (!info) return;
+              const btn = item.querySelector(".connect-btn");
               if (info.online) {
                 statusEl.textContent = info.latency_ms != null ? `${Math.round(info.latency_ms)} ms` : "онлайн";
                 statusEl.className = "device-status online";
+                if (btn) btn.classList.remove("btn-offline");
               } else {
                 statusEl.textContent = "офлайн";
                 statusEl.className = "device-status offline";
+                if (btn) btn.classList.add("btn-offline");
               }
             });
           };
@@ -819,6 +824,7 @@ def cabinet():
           }));
 
           const openRdpLogin = () => {
+            document.getElementById("rdp-login-title").textContent = pendingDevice ? `RDP — ${pendingDevice.name}` : "Windows RDP";
             rdpLoginModal.hidden = false;
             requestAnimationFrame(() => rdpLoginUsername.focus());
           };
@@ -848,13 +854,16 @@ def cabinet():
             rdpTitleEl.textContent = name + " — " + ip;
             rdpOverlay.hidden = false;
 
-            const toolbar         = document.getElementById("rdp-toolbar");
-            const touchToggleBtn  = document.getElementById("rdp-touch-toggle");
-            const kbdBtn          = document.getElementById("rdp-kbd-btn");
-            const kbdInput        = document.getElementById("rdp-kbd-input");
-            toolbar.hidden        = false;
-            kbdBtn.hidden         = !isMobile;
-            touchToggleBtn.hidden = !isMobile;
+            const toolbar            = document.getElementById("rdp-toolbar");
+            const touchToggleBtn     = document.getElementById("rdp-touch-toggle");
+            const kbdBtn             = document.getElementById("rdp-kbd-btn");
+            const kbdInput           = document.getElementById("rdp-kbd-input");
+            const toolbarToggleBtn   = document.getElementById("rdp-toolbar-toggle");
+            toolbar.hidden           = isMobile;
+            kbdBtn.hidden            = !isMobile;
+            touchToggleBtn.hidden    = !isMobile;
+            toolbarToggleBtn.hidden  = !isMobile;
+            toolbarToggleBtn.onclick = () => { toolbar.hidden = !toolbar.hidden; };
 
             const displayRect = rdpDisplay.getBoundingClientRect();
             const width  = Math.round(displayRect.width)  || window.innerWidth;
@@ -1061,6 +1070,7 @@ def cabinet():
           document.querySelectorAll("[data-ssh-login-close]").forEach((el) => el.addEventListener("click", closeSshLogin));
 
           const openSshLogin = () => {
+            document.getElementById("ssh-login-title").textContent = pendingDevice ? `SSH — ${pendingDevice.name}` : "SSH-логин";
             sshLoginModal.hidden = false;
             requestAnimationFrame(() => sshLoginUsername.focus());
           };
