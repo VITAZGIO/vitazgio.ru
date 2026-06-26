@@ -354,28 +354,40 @@ def rdp_ws(ws, ip):
 
     try:
         guac_sock = socket.create_connection(("127.0.0.1", 4822), timeout=5)
-    except OSError:
+    except OSError as e:
+        print(f"[rdp] guacd connect error ({ip}): {e}", flush=True)
         ws.close()
         return
 
     try:
         _guac_handshake(guac_sock, ip, username, password, width, height)
-    except Exception:
+    except Exception as e:
+        print(f"[rdp] handshake error ({ip}): {e}", flush=True)
         guac_sock.close()
         ws.close()
         return
+
+    # After handshake, switch to short recv timeout so the pump thread
+    # can periodically check stop_event when the screen is static.
+    # Without this, create_connection's timeout=5 causes recv() to raise
+    # socket.timeout after 5 s of idle screen, silently killing the session.
+    guac_sock.settimeout(2.0)
 
     stop_event = threading.Event()
 
     def pump_guac_to_ws():
         try:
             while not stop_event.is_set():
-                data = guac_sock.recv(8192)
+                try:
+                    data = guac_sock.recv(8192)
+                except socket.timeout:
+                    continue  # screen idle — no data from guacd, keep waiting
                 if not data:
+                    print(f"[rdp] guacd closed connection ({ip})", flush=True)
                     break
                 ws.send(data.decode(errors="replace"))
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[rdp] pump error ({ip}): {e}", flush=True)
         finally:
             stop_event.set()
 
@@ -383,12 +395,12 @@ def rdp_ws(ws, ip):
 
     try:
         while not stop_event.is_set():
-            message = ws.receive(timeout=35)
+            message = ws.receive(timeout=120)
             if message is None:
                 break
             guac_sock.sendall(message.encode() if isinstance(message, str) else message)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[rdp] ws error ({ip}): {e}", flush=True)
     finally:
         stop_event.set()
         guac_sock.close()
@@ -709,6 +721,7 @@ def cabinet():
           let rdpClient = null;
           let rdpKeyboard = null;
           let toolbarAbort = null;
+          let rdpKeepalive = null;
 
           // ── RDP helpers ──────────────────────────────────────────────
           function GuacAuthTunnel(ip, authPayload) {
@@ -780,6 +793,7 @@ def cabinet():
             rdpOverlay.hidden = true;
             if (document.pointerLockElement) document.exitPointerLock();
             if (toolbarAbort) { toolbarAbort.abort(); toolbarAbort = null; }
+            if (rdpKeepalive) { clearInterval(rdpKeepalive); rdpKeepalive = null; }
             if (rdpClient) { rdpClient.disconnect(); rdpClient = null; }
             if (rdpKeyboard) { rdpKeyboard.onkeydown = rdpKeyboard.onkeyup = null; rdpKeyboard = null; }
             document.getElementById("rdp-toolbar").querySelectorAll(".rdp-key.active").forEach(el => el.classList.remove("active"));
@@ -949,6 +963,9 @@ def cabinet():
                 rdpDisplay.insertAdjacentHTML("beforeend", '<p style="color:#8f99ab;padding:10px 20px;font-family:monospace;position:absolute;bottom:0">Соединение закрыто.</p>');
             };
             rdpClient.connect();
+            rdpKeepalive = setInterval(() => {
+              if (tunnel.state === Guacamole.Tunnel.State.OPEN) tunnel.sendMessage("nop");
+            }, 20000);
           };
 
           rdpLoginForm.addEventListener("submit", (event) => {
