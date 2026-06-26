@@ -487,6 +487,18 @@ def cabinet():
         .rdp-overlay { position: fixed; z-index: 100; inset: 0; display: flex; flex-direction: column; background: #000; }
         .rdp-display { flex: 1; overflow: hidden; cursor: none; position: relative; }
         .rdp-display > div { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); }
+        .rdp-header-actions { display: flex; align-items: center; gap: 8px; }
+        .rdp-toolbar { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 8px; background: rgba(16,24,38,.96); border-top: 1px solid rgba(255,255,255,.07); flex-shrink: 0; }
+        .rdp-key { padding: 7px 10px; min-width: 38px; color: #c4cad5; font: 600 .72rem "Cascadia Code", Consolas, monospace; text-align: center; border: 1px solid rgba(255,255,255,.13); background: rgba(255,255,255,.05); cursor: pointer; touch-action: manipulation; user-select: none; -webkit-user-select: none; }
+        .rdp-key:active, .rdp-key.active { color: #ff782f; border-color: rgba(255,120,47,.55); background: rgba(255,120,47,.13); }
+        .rdp-key-combo { padding: 7px 10px; color: #ff6b81; font: 600 .7rem "Cascadia Code", Consolas, monospace; border: 1px solid rgba(255,107,129,.28); background: rgba(255,107,129,.06); cursor: pointer; touch-action: manipulation; user-select: none; -webkit-user-select: none; }
+        .rdp-key-combo:active { background: rgba(255,107,129,.2); }
+        .rdp-kbd-input { position: fixed; left: -9999px; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
+        @media (max-width: 900px) {
+          .term-header { padding: 8px 12px; }
+          .rdp-display > div { top: 0; left: 0; transform: none; }
+          .rdp-display > div canvas { display: block; max-width: 100%; max-height: 100%; }
+        }
       </style>
     </head>
     <body>
@@ -553,9 +565,27 @@ def cabinet():
       <div id="rdp-overlay" class="rdp-overlay" hidden>
         <div class="term-header">
           <span id="rdp-title"></span>
-          <button id="rdp-close" class="term-close" type="button">Закрыть</button>
+          <div class="rdp-header-actions">
+            <button id="rdp-touch-toggle" class="term-close" type="button" hidden>Touchpad</button>
+            <button id="rdp-close" class="term-close" type="button">Закрыть</button>
+          </div>
         </div>
         <div id="rdp-display" class="rdp-display"></div>
+        <div id="rdp-toolbar" class="rdp-toolbar" hidden>
+          <button class="rdp-key" data-keysym="65307">Esc</button>
+          <button class="rdp-key" data-keysym="65289">Tab</button>
+          <button class="rdp-key" data-mod="65507">Ctrl</button>
+          <button class="rdp-key" data-mod="65513">Alt</button>
+          <button class="rdp-key" data-mod="65515">Win</button>
+          <button class="rdp-key" data-keysym="65288">⌫</button>
+          <button class="rdp-key" data-keysym="65361">◀</button>
+          <button class="rdp-key" data-keysym="65362">▲</button>
+          <button class="rdp-key" data-keysym="65364">▼</button>
+          <button class="rdp-key" data-keysym="65363">▶</button>
+          <button class="rdp-key-combo" data-combo="65507,65513,65535">Ctrl+Alt+Del</button>
+          <button id="rdp-kbd-btn" class="rdp-key" type="button" hidden>⌨</button>
+        </div>
+        <input id="rdp-kbd-input" class="rdp-kbd-input" type="text" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" inputmode="text">
       </div>
 
       <div id="term-overlay" class="term-overlay" hidden>
@@ -674,6 +704,7 @@ def cabinet():
           const rdpCloseBtn = document.getElementById("rdp-close");
           let rdpClient = null;
           let rdpKeyboard = null;
+          let toolbarAbort = null;
 
           // ── RDP helpers ──────────────────────────────────────────────
           function GuacAuthTunnel(ip, authPayload) {
@@ -746,8 +777,10 @@ def cabinet():
 
           const closeRdp = () => {
             rdpOverlay.hidden = true;
+            if (toolbarAbort) { toolbarAbort.abort(); toolbarAbort = null; }
             if (rdpClient) { rdpClient.disconnect(); rdpClient = null; }
             if (rdpKeyboard) { rdpKeyboard.onkeydown = rdpKeyboard.onkeyup = null; rdpKeyboard = null; }
+            document.getElementById("rdp-toolbar").querySelectorAll(".rdp-key.active").forEach(el => el.classList.remove("active"));
             rdpDisplay.innerHTML = "";
           };
           rdpCloseBtn.addEventListener("click", closeRdp);
@@ -757,29 +790,110 @@ def cabinet():
               alert("Не удалось загрузить guacamole-common-js — проверьте сеть/CDN.");
               return;
             }
-            const width = window.innerWidth;
-            const height = window.innerHeight - 45;
+            const isMobile = window.innerWidth <= 900 || navigator.maxTouchPoints > 0 ||
+                             /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+            const width  = window.innerWidth;
+            const height = window.innerHeight - (isMobile ? 0 : 45);
+
             rdpTitleEl.textContent = name + " — " + ip;
             rdpOverlay.hidden = false;
+
+            const toolbar         = document.getElementById("rdp-toolbar");
+            const touchToggleBtn  = document.getElementById("rdp-touch-toggle");
+            const kbdBtn          = document.getElementById("rdp-kbd-btn");
+            const kbdInput        = document.getElementById("rdp-kbd-input");
+            toolbar.hidden        = false;
+            kbdBtn.hidden         = !isMobile;
+            touchToggleBtn.hidden = !isMobile;
+
+            // ── tunnel + client ─────────────────────────────────────────
             const tunnel = new GuacAuthTunnel(ip, { type: "auth", username, password, width, height });
             rdpClient = new Guacamole.Client(tunnel);
             const displayEl = rdpClient.getDisplay().getElement();
             rdpDisplay.innerHTML = "";
             rdpDisplay.appendChild(displayEl);
-            const mouse = new Guacamole.Mouse(displayEl);
-            mouse.onmousedown = mouse.onmouseup = mouse.onmousemove = (mouseState) => {
-              rdpClient.sendMouseState(mouseState.state ?? mouseState);
+
+            // ── mouse / touch ────────────────────────────────────────────
+            let touchMode = "touchpad";
+            let inputHandler = null;
+            const attachInput = () => {
+              if (inputHandler) { inputHandler.onmousedown = inputHandler.onmouseup = inputHandler.onmousemove = null; }
+              const Ctor = !isMobile              ? Guacamole.Mouse
+                         : touchMode === "touchpad" ? Guacamole.Mouse.Touchpad
+                         : Guacamole.Mouse.Touchscreen;
+              inputHandler = new Ctor(displayEl);
+              inputHandler.onmousedown = inputHandler.onmouseup = inputHandler.onmousemove =
+                (e) => rdpClient?.sendMouseState(e.state ?? e);
             };
+            attachInput();
+
+            touchToggleBtn.textContent = "Touchpad";
+            touchToggleBtn.onclick = () => {
+              touchMode = touchMode === "touchpad" ? "touchscreen" : "touchpad";
+              touchToggleBtn.textContent = touchMode === "touchpad" ? "Touchpad" : "Touchscreen";
+              attachInput();
+            };
+
+            // ── hardware keyboard ────────────────────────────────────────
             rdpKeyboard = new Guacamole.Keyboard(document);
-            rdpKeyboard.onkeydown = (keysym) => { if (!rdpOverlay.hidden && rdpClient) rdpClient.sendKeyEvent(1, keysym); };
-            rdpKeyboard.onkeyup   = (keysym) => { if (!rdpOverlay.hidden && rdpClient) rdpClient.sendKeyEvent(0, keysym); };
+            rdpKeyboard.onkeydown = (k) => { if (!rdpOverlay.hidden && rdpClient) rdpClient.sendKeyEvent(1, k); };
+            rdpKeyboard.onkeyup   = (k) => { if (!rdpOverlay.hidden && rdpClient) rdpClient.sendKeyEvent(0, k); };
+
+            // ── toolbar (AbortController keeps listeners single-shot) ────
+            if (toolbarAbort) toolbarAbort.abort();
+            toolbarAbort = new AbortController();
+            const sig = toolbarAbort.signal;
+            const activeModifiers = new Set();
+
+            const clearMods = () => {
+              activeModifiers.forEach(k => rdpClient?.sendKeyEvent(0, k));
+              activeModifiers.clear();
+              toolbar.querySelectorAll(".rdp-key.active").forEach(el => el.classList.remove("active"));
+            };
+
+            toolbar.addEventListener("pointerdown", (e) => {
+              const btn = e.target.closest("[data-keysym],[data-mod],[data-combo]");
+              if (!btn) return;
+              e.preventDefault();
+              if (btn.dataset.keysym) {
+                const k = parseInt(btn.dataset.keysym, 10);
+                activeModifiers.forEach(m => rdpClient?.sendKeyEvent(1, m));
+                rdpClient?.sendKeyEvent(1, k);
+                rdpClient?.sendKeyEvent(0, k);
+                clearMods();
+              } else if (btn.dataset.mod) {
+                const k = parseInt(btn.dataset.mod, 10);
+                if (activeModifiers.has(k)) { activeModifiers.delete(k); btn.classList.remove("active"); }
+                else                         { activeModifiers.add(k);    btn.classList.add("active"); }
+              } else if (btn.dataset.combo) {
+                clearMods();
+                const keys = btn.dataset.combo.split(",").map(Number);
+                keys.forEach(k => rdpClient?.sendKeyEvent(1, k));
+                [...keys].reverse().forEach(k => rdpClient?.sendKeyEvent(0, k));
+              }
+            }, { signal: sig });
+
+            // ── virtual (soft) keyboard ──────────────────────────────────
+            kbdBtn.onclick = () => { kbdInput.value = ""; kbdInput.focus(); };
+            kbdInput.addEventListener("input", (e) => {
+              for (const ch of (e.data ?? "")) {
+                const k = ch.codePointAt(0);
+                rdpClient?.sendKeyEvent(1, k);
+                rdpClient?.sendKeyEvent(0, k);
+              }
+              kbdInput.value = "";
+            }, { signal: sig });
+            kbdInput.addEventListener("keydown", (e) => {
+              const map = { Backspace: 65288, Enter: 65293, Tab: 65289, Escape: 65307 };
+              if (e.key in map) { e.preventDefault(); rdpClient?.sendKeyEvent(1, map[e.key]); rdpClient?.sendKeyEvent(0, map[e.key]); }
+            }, { signal: sig });
+
             rdpClient.onerror = (err) => {
               rdpDisplay.innerHTML = `<p style="color:#ff6b81;padding:20px;font-family:monospace">Ошибка RDP: ${err?.message ?? JSON.stringify(err)}</p>`;
             };
             tunnel.onstatechange = (state) => {
-              if (state === Guacamole.Tunnel.State.CLOSED && !rdpOverlay.hidden) {
+              if (state === Guacamole.Tunnel.State.CLOSED && !rdpOverlay.hidden)
                 rdpDisplay.insertAdjacentHTML("beforeend", '<p style="color:#8f99ab;padding:10px 20px;font-family:monospace;position:absolute;bottom:0">Соединение закрыто.</p>');
-              }
             };
             rdpClient.connect();
           };
