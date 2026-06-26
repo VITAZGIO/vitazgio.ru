@@ -485,10 +485,12 @@ def cabinet():
         .term-close:hover { background: rgba(255,255,255,.08); }
         .term-body { flex: 1; padding: 10px; overflow: hidden; }
         .rdp-overlay { position: fixed; z-index: 100; inset: 0; display: flex; flex-direction: column; background: #000; }
-        .rdp-display { flex: 1; overflow: hidden; cursor: none; position: relative; }
+        .rdp-content { display: flex; flex: 1; min-height: 0; overflow: hidden; }
+        .rdp-display { flex: 1; overflow: hidden; cursor: none; position: relative; min-width: 0; }
         .rdp-display > div { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); }
         .rdp-header-actions { display: flex; align-items: center; gap: 8px; }
-        .rdp-toolbar { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 8px; background: rgba(16,24,38,.96); border-top: 1px solid rgba(255,255,255,.07); flex-shrink: 0; }
+        .rdp-toolbar { display: flex; flex-direction: column; flex-wrap: nowrap; gap: 4px; padding: 6px; background: rgba(16,24,38,.96); border-left: 1px solid rgba(255,255,255,.07); flex-shrink: 0; overflow-y: auto; align-items: stretch; }
+        .rdp-lock-hint { position: absolute; inset: 0; display: grid; place-items: center; color: rgba(140,150,168,.6); font: .78rem "Cascadia Code", Consolas, monospace; pointer-events: none; z-index: 1; }
         .rdp-key { padding: 7px 10px; min-width: 38px; color: #c4cad5; font: 600 .72rem "Cascadia Code", Consolas, monospace; text-align: center; border: 1px solid rgba(255,255,255,.13); background: rgba(255,255,255,.05); cursor: pointer; touch-action: manipulation; user-select: none; -webkit-user-select: none; }
         .rdp-key:active, .rdp-key.active { color: #ff782f; border-color: rgba(255,120,47,.55); background: rgba(255,120,47,.13); }
         .rdp-key-combo { padding: 7px 10px; color: #ff6b81; font: 600 .7rem "Cascadia Code", Consolas, monospace; border: 1px solid rgba(255,107,129,.28); background: rgba(255,107,129,.06); cursor: pointer; touch-action: manipulation; user-select: none; -webkit-user-select: none; }
@@ -570,20 +572,22 @@ def cabinet():
             <button id="rdp-close" class="term-close" type="button">Закрыть</button>
           </div>
         </div>
-        <div id="rdp-display" class="rdp-display"></div>
-        <div id="rdp-toolbar" class="rdp-toolbar" hidden>
-          <button class="rdp-key" data-keysym="65307">Esc</button>
-          <button class="rdp-key" data-keysym="65289">Tab</button>
-          <button class="rdp-key" data-mod="65507">Ctrl</button>
-          <button class="rdp-key" data-mod="65513">Alt</button>
-          <button class="rdp-key" data-mod="65515">Win</button>
-          <button class="rdp-key" data-keysym="65288">⌫</button>
-          <button class="rdp-key" data-keysym="65361">◀</button>
-          <button class="rdp-key" data-keysym="65362">▲</button>
-          <button class="rdp-key" data-keysym="65364">▼</button>
-          <button class="rdp-key" data-keysym="65363">▶</button>
-          <button class="rdp-key-combo" data-combo="65507,65513,65535">Ctrl+Alt+Del</button>
-          <button id="rdp-kbd-btn" class="rdp-key" type="button" hidden>⌨</button>
+        <div class="rdp-content">
+          <div id="rdp-display" class="rdp-display"></div>
+          <div id="rdp-toolbar" class="rdp-toolbar" hidden>
+            <button class="rdp-key" data-keysym="65307">Esc</button>
+            <button class="rdp-key" data-keysym="65289">Tab</button>
+            <button class="rdp-key" data-mod="65507">Ctrl</button>
+            <button class="rdp-key" data-mod="65513">Alt</button>
+            <button class="rdp-key" data-mod="65515">Win</button>
+            <button class="rdp-key" data-keysym="65288">⌫</button>
+            <button class="rdp-key" data-keysym="65361">◀</button>
+            <button class="rdp-key" data-keysym="65362">▲</button>
+            <button class="rdp-key" data-keysym="65364">▼</button>
+            <button class="rdp-key" data-keysym="65363">▶</button>
+            <button class="rdp-key-combo" data-combo="65507,65513,65535">C+A+D</button>
+            <button id="rdp-kbd-btn" class="rdp-key" type="button" hidden>⌨</button>
+          </div>
         </div>
         <input id="rdp-kbd-input" class="rdp-kbd-input" type="text" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" inputmode="text">
       </div>
@@ -774,6 +778,7 @@ def cabinet():
 
           const closeRdp = () => {
             rdpOverlay.hidden = true;
+            if (document.pointerLockElement) document.exitPointerLock();
             if (toolbarAbort) { toolbarAbort.abort(); toolbarAbort = null; }
             if (rdpClient) { rdpClient.disconnect(); rdpClient = null; }
             if (rdpKeyboard) { rdpKeyboard.onkeydown = rdpKeyboard.onkeyup = null; rdpKeyboard = null; }
@@ -832,6 +837,45 @@ def cabinet():
               touchToggleBtn.textContent = touchMode === "touchpad" ? "Touchpad" : "Touchscreen";
               attachInput();
             };
+
+            // ── pointer lock (desktop only) ──────────────────────────────
+            if (!isMobile && rdpDisplay.requestPointerLock) {
+              let plLocked = false, plX = width / 2, plY = height / 2;
+              const lockHint = document.createElement("div");
+              lockHint.className = "rdp-lock-hint";
+              lockHint.textContent = "Кликни для захвата мыши · Esc — отпустить";
+              rdpDisplay.appendChild(lockHint);
+              const plSend = (x, y, btns) => rdpClient?.sendMouseState(
+                new Guacamole.Mouse.State(x, y, (btns&1)!==0, (btns&4)!==0, (btns&2)!==0, false, false));
+              displayEl.addEventListener("mousedown", (e) => {
+                if (!plLocked) {
+                  if (inputHandler) inputHandler.onmousedown = inputHandler.onmouseup = inputHandler.onmousemove = null;
+                  rdpDisplay.requestPointerLock();
+                  e.stopImmediatePropagation();
+                  return;
+                }
+                plSend(plX, plY, e.buttons);
+              }, { signal: sig, capture: true });
+              displayEl.addEventListener("mouseup", (e) => { if (plLocked) plSend(plX, plY, e.buttons); }, { signal: sig });
+              displayEl.addEventListener("mousemove", (e) => {
+                if (!plLocked) return;
+                plX = Math.max(0, Math.min(width - 1, plX + e.movementX));
+                plY = Math.max(0, Math.min(height - 1, plY + e.movementY));
+                plSend(plX, plY, e.buttons);
+              }, { signal: sig });
+              displayEl.addEventListener("wheel", (e) => {
+                if (!plLocked) return;
+                e.preventDefault();
+                const up = e.deltaY < 0;
+                rdpClient?.sendMouseState(new Guacamole.Mouse.State(plX, plY, false, false, false, up, !up));
+                rdpClient?.sendMouseState(new Guacamole.Mouse.State(plX, plY, false, false, false, false, false));
+              }, { signal: sig, passive: false });
+              document.addEventListener("pointerlockchange", () => {
+                plLocked = document.pointerLockElement === rdpDisplay;
+                lockHint.hidden = plLocked;
+                if (!plLocked) attachInput();
+              }, { signal: sig });
+            }
 
             // ── hardware keyboard ────────────────────────────────────────
             rdpKeyboard = new Guacamole.Keyboard(document);
