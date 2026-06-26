@@ -545,7 +545,8 @@ def cabinet():
         .rdp-key-combo { padding: 7px 10px; color: #ff6b81; font: 600 .7rem "Cascadia Code", Consolas, monospace; border: 1px solid rgba(255,107,129,.28); background: rgba(255,107,129,.06); cursor: pointer; touch-action: manipulation; user-select: none; -webkit-user-select: none; }
         .rdp-key-combo:active { background: rgba(255,107,129,.2); }
         .rdp-kbd-input { position: fixed; left: -9999px; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
-        .conn-quality { position: absolute; bottom: 10px; left: 10px; z-index: 10; padding: 3px 8px; border-radius: 3px; font: 600 .7rem "Cascadia Code", Consolas, monospace; background: rgba(0,0,0,.45); color: #8f99ab; pointer-events: none; transition: color .3s; backdrop-filter: blur(2px); }
+        .conn-quality { display: inline-block; padding: 2px 7px; border-radius: 3px; font: 600 .7rem "Cascadia Code", Consolas, monospace; background: rgba(255,255,255,.07); color: #8f99ab; pointer-events: none; transition: color .3s; vertical-align: middle; margin-left: 8px; }
+        .conn-quality:empty { display: none; }
         .conn-quality.good { color: #4ade80; }
         .conn-quality.warn { color: #fbbf24; }
         .conn-quality.bad  { color: #f87171; }
@@ -619,7 +620,7 @@ def cabinet():
 
       <div id="rdp-overlay" class="rdp-overlay" hidden>
         <div class="term-header">
-          <span id="rdp-title"></span>
+          <span id="rdp-title"></span><span id="rdp-quality" class="conn-quality"></span>
           <div class="rdp-header-actions">
             <button id="rdp-toolbar-toggle" class="term-close" type="button" hidden>☰</button>
             <button id="rdp-touch-toggle" class="term-close" type="button" hidden>Touchpad</button>
@@ -627,7 +628,7 @@ def cabinet():
           </div>
         </div>
         <div class="rdp-content">
-          <div id="rdp-display" class="rdp-display"><div id="rdp-quality" class="conn-quality"></div></div>
+          <div id="rdp-display" class="rdp-display"></div>
           <div id="rdp-toolbar" class="rdp-toolbar" hidden>
             <button class="rdp-key" data-keysym="65307">Esc</button>
             <button class="rdp-key" data-keysym="65289">Tab</button>
@@ -650,9 +651,8 @@ def cabinet():
       </div>
 
       <div id="term-overlay" class="term-overlay" hidden>
-        <div id="ssh-quality" class="conn-quality"></div>
         <div class="term-header">
-          <span id="term-title"></span>
+          <span id="term-title"></span><span id="ssh-quality" class="conn-quality"></span>
           <button id="term-close" class="term-close" type="button">Закрыть</button>
         </div>
         <div id="term-body" class="term-body"></div>
