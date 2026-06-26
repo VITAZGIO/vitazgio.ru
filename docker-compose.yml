@@ -9,3 +9,9 @@ services:
     volumes:
       - .:/app
     restart: unless-stopped
+
+  guacd:
+    image: guacamole/guacd
+    container_name: guacd
+    network_mode: host
+    restart: unless-stopped
