@@ -858,6 +858,8 @@ def cabinet():
 
           const closeRdp = () => {
             rdpOverlay.hidden = true;
+            rdpOverlay.style.height = "";
+            rdpOverlay.style.top = "";
             rdpNopSentAt = null;
             rdpQuality.textContent = "";
             rdpQuality.className = "conn-quality";
@@ -1033,6 +1035,59 @@ def cabinet():
               const map = { Backspace: 65288, Enter: 65293, Tab: 65289, Escape: 65307 };
               if (e.key in map) { e.preventDefault(); rdpClient?.sendKeyEvent(1, map[e.key]); rdpClient?.sendKeyEvent(0, map[e.key]); }
             }, { signal: sig });
+
+            // ── mobile: 2-finger scroll + keyboard resize ────────────────
+            if (isMobile) {
+              // Track RDP cursor position from single-touch moves
+              let lastRdpX = Math.round(width / 2), lastRdpY = Math.round(height / 2);
+              displayEl.addEventListener("touchmove", (e) => {
+                if (e.touches.length === 1) {
+                  const rect = displayEl.getBoundingClientRect();
+                  const sc = rdpClient?.getDisplay()?.getScale() ?? 1;
+                  lastRdpX = Math.round((e.touches[0].clientX - rect.left) / sc);
+                  lastRdpY = Math.round((e.touches[0].clientY - rect.top)  / sc);
+                }
+              }, { signal: sig });
+
+              // 2-finger drag = scroll wheel
+              let scrollStart = null;
+              displayEl.addEventListener("touchstart", (e) => {
+                if (e.touches.length === 2) {
+                  scrollStart = { y: (e.touches[0].clientY + e.touches[1].clientY) / 2 };
+                  e.preventDefault();
+                  e.stopImmediatePropagation();
+                }
+              }, { passive: false, capture: true, signal: sig });
+
+              displayEl.addEventListener("touchmove", (e) => {
+                if (e.touches.length !== 2 || !scrollStart || !rdpClient) return;
+                const cy = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+                const dy = cy - scrollStart.y;
+                if (Math.abs(dy) >= 8) {
+                  const up = dy > 0;
+                  const st = { x: lastRdpX, y: lastRdpY, left: false, middle: false, right: false, up, down: !up };
+                  rdpClient.sendMouseState(st);
+                  rdpClient.sendMouseState({ ...st, up: false, down: false });
+                  scrollStart.y = cy;
+                }
+                e.preventDefault();
+                e.stopImmediatePropagation();
+              }, { passive: false, capture: true, signal: sig });
+
+              displayEl.addEventListener("touchend", (e) => {
+                if (e.touches.length < 2) scrollStart = null;
+              }, { capture: true, signal: sig });
+
+              // Shrink overlay when software keyboard opens
+              if (window.visualViewport) {
+                const vvHandler = () => {
+                  rdpOverlay.style.height = window.visualViewport.height + "px";
+                  rdpOverlay.style.top    = window.visualViewport.offsetTop + "px";
+                  fitDisplay();
+                };
+                window.visualViewport.addEventListener("resize", vvHandler, { signal: sig });
+              }
+            }
 
             const fitDisplay = () => {
               if (!rdpClient) return;
