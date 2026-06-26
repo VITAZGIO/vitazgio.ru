@@ -211,6 +211,7 @@ def console_ws(ws, ip):
         ws.close()
         return
 
+    client.get_transport().set_keepalive(20)
     channel = client.invoke_shell(term="xterm")
     channel.settimeout(0.0)
 
