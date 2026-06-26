@@ -852,30 +852,36 @@ def cabinet():
               lockHint.className = "rdp-lock-hint";
               lockHint.textContent = "Кликни для захвата мыши · Esc — отпустить";
               rdpDisplay.appendChild(lockHint);
-              const plSend = (x, y, btns) => rdpClient?.sendMouseState(
-                new Guacamole.Mouse.State(x, y, (btns&1)!==0, (btns&4)!==0, (btns&2)!==0, false, false));
+              const plSend = (x, y, btns) => rdpClient?.sendMouseState({
+                x, y,
+                left:   (btns & 1) !== 0,
+                middle: (btns & 4) !== 0,
+                right:  (btns & 2) !== 0,
+                up: false, down: false
+              });
+              // До захвата: клик на displayEl запрашивает lock
               displayEl.addEventListener("mousedown", (e) => {
                 if (!plLocked) {
                   if (inputHandler) inputHandler.onmousedown = inputHandler.onmouseup = inputHandler.onmousemove = null;
                   rdpDisplay.requestPointerLock();
                   e.stopImmediatePropagation();
-                  return;
                 }
-                plSend(plX, plY, e.buttons);
               }, { signal: sig, capture: true });
-              displayEl.addEventListener("mouseup", (e) => { if (plLocked) plSend(plX, plY, e.buttons); }, { signal: sig });
-              displayEl.addEventListener("mousemove", (e) => {
+              // После захвата: все события идут на rdpDisplay (locked element)
+              rdpDisplay.addEventListener("mousedown", (e) => { if (plLocked) plSend(plX, plY, e.buttons); }, { signal: sig });
+              rdpDisplay.addEventListener("mouseup",   (e) => { if (plLocked) plSend(plX, plY, e.buttons); }, { signal: sig });
+              rdpDisplay.addEventListener("mousemove", (e) => {
                 if (!plLocked) return;
                 plX = Math.max(0, Math.min(width - 1, plX + e.movementX));
                 plY = Math.max(0, Math.min(height - 1, plY + e.movementY));
                 plSend(plX, plY, e.buttons);
               }, { signal: sig });
-              displayEl.addEventListener("wheel", (e) => {
+              rdpDisplay.addEventListener("wheel", (e) => {
                 if (!plLocked) return;
                 e.preventDefault();
                 const up = e.deltaY < 0;
-                rdpClient?.sendMouseState(new Guacamole.Mouse.State(plX, plY, false, false, false, up, !up));
-                rdpClient?.sendMouseState(new Guacamole.Mouse.State(plX, plY, false, false, false, false, false));
+                rdpClient?.sendMouseState({ x: plX, y: plY, left: false, middle: false, right: false, up, down: !up });
+                rdpClient?.sendMouseState({ x: plX, y: plY, left: false, middle: false, right: false, up: false, down: false });
               }, { signal: sig, passive: false });
               document.addEventListener("pointerlockchange", () => {
                 plLocked = document.pointerLockElement === rdpDisplay;
