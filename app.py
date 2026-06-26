@@ -796,8 +796,6 @@ def cabinet():
             GuacAuthTunnel.prototype.constructor = GuacAuthTunnel;
             const isMobile = window.innerWidth <= 900 || navigator.maxTouchPoints > 0 ||
                              /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-            const width  = window.innerWidth;
-            const height = window.innerHeight - (isMobile ? 0 : 45);
 
             rdpTitleEl.textContent = name + " — " + ip;
             rdpOverlay.hidden = false;
@@ -809,6 +807,10 @@ def cabinet():
             toolbar.hidden        = false;
             kbdBtn.hidden         = !isMobile;
             touchToggleBtn.hidden = !isMobile;
+
+            const displayRect = rdpDisplay.getBoundingClientRect();
+            const width  = Math.round(displayRect.width)  || window.innerWidth;
+            const height = Math.round(displayRect.height) || (window.innerHeight - 45);
 
             // ── tunnel + client ─────────────────────────────────────────
             const tunnel = new GuacAuthTunnel(ip, { type: "auth", username, password, width, height });
@@ -837,6 +839,11 @@ def cabinet():
               touchToggleBtn.textContent = touchMode === "touchpad" ? "Touchpad" : "Touchscreen";
               attachInput();
             };
+
+            // ── AbortController (shared by pointer lock + toolbar) ───────
+            if (toolbarAbort) toolbarAbort.abort();
+            toolbarAbort = new AbortController();
+            const sig = toolbarAbort.signal;
 
             // ── pointer lock (desktop only) ──────────────────────────────
             if (!isMobile && rdpDisplay.requestPointerLock) {
@@ -882,10 +889,7 @@ def cabinet():
             rdpKeyboard.onkeydown = (k) => { if (!rdpOverlay.hidden && rdpClient) rdpClient.sendKeyEvent(1, k); };
             rdpKeyboard.onkeyup   = (k) => { if (!rdpOverlay.hidden && rdpClient) rdpClient.sendKeyEvent(0, k); };
 
-            // ── toolbar (AbortController keeps listeners single-shot) ────
-            if (toolbarAbort) toolbarAbort.abort();
-            toolbarAbort = new AbortController();
-            const sig = toolbarAbort.signal;
+            // ── toolbar ──────────────────────────────────────────────────
             const activeModifiers = new Set();
 
             const clearMods = () => {
