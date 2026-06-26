@@ -239,11 +239,23 @@ def console_ws(ws, ip):
     reader = threading.Thread(target=pump_channel_to_ws, daemon=True)
     reader.start()
 
+    def ssh_keepalive():
+        while not stop_event.is_set():
+            time.sleep(10)
+            if stop_event.is_set():
+                break
+            try:
+                ws.send(json.dumps({"type": "ping"}))
+            except Exception:
+                stop_event.set()
+
+    threading.Thread(target=ssh_keepalive, daemon=True).start()
+
     try:
         while not stop_event.is_set():
-            message = ws.receive(timeout=35)
+            message = ws.receive(timeout=120)
             if message is None:
-                break
+                continue
             try:
                 payload = json.loads(message)
             except ValueError:
@@ -397,11 +409,23 @@ def rdp_ws(ws, ip):
 
     threading.Thread(target=pump_guac_to_ws, daemon=True).start()
 
+    def rdp_keepalive():
+        while not stop_event.is_set():
+            time.sleep(10)
+            if stop_event.is_set():
+                break
+            try:
+                ws.send("3.nop;")
+            except Exception:
+                stop_event.set()
+
+    threading.Thread(target=rdp_keepalive, daemon=True).start()
+
     try:
         while not stop_event.is_set():
             message = ws.receive(timeout=120)
             if message is None:
-                break
+                continue
             guac_sock.sendall(message.encode() if isinstance(message, str) else message)
     except Exception as e:
         print(f"[rdp] ws error ({ip}): {e}", flush=True)
