@@ -553,7 +553,6 @@ def cabinet():
         @media (max-width: 900px) {
           .term-header { padding: 8px 12px; }
           .rdp-display > div { top: 0; left: 0; transform: none; }
-          .rdp-display > div canvas { display: block; max-width: 100%; max-height: 100%; }
         }
       </style>
     </head>
@@ -1034,6 +1033,19 @@ def cabinet():
               const map = { Backspace: 65288, Enter: 65293, Tab: 65289, Escape: 65307 };
               if (e.key in map) { e.preventDefault(); rdpClient?.sendKeyEvent(1, map[e.key]); rdpClient?.sendKeyEvent(0, map[e.key]); }
             }, { signal: sig });
+
+            const fitDisplay = () => {
+              if (!rdpClient) return;
+              const d = rdpClient.getDisplay();
+              if (!d.getWidth() || !d.getHeight()) return;
+              const s = Math.min(
+                rdpDisplay.clientWidth  / d.getWidth(),
+                rdpDisplay.clientHeight / d.getHeight()
+              );
+              d.scale(s);
+            };
+            rdpClient.getDisplay().onresize = fitDisplay;
+            window.addEventListener("resize", fitDisplay, { signal: sig });
 
             rdpClient.onerror = (err) => {
               rdpDisplay.innerHTML = `<p style="color:#ff6b81;padding:20px;font-family:monospace">Ошибка RDP: ${err?.message ?? JSON.stringify(err)}</p>`;
