@@ -113,6 +113,14 @@ def password_matches(password):
     return hmac.compare_digest(candidate, PASSWORD_HASH)
 
 
+@app.after_request
+def security_headers(response):
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    return response
+
+
 @app.post("/api/login")
 def login():
     client = request.remote_addr or "unknown"
@@ -628,6 +636,9 @@ def cabinet():
             <button class="rdp-key" data-keysym="65364">▼</button>
             <button class="rdp-key" data-keysym="65363">▶</button>
             <button class="rdp-key-combo" data-combo="65507,65513,65535">C+A+D</button>
+            <button class="rdp-key-combo" data-combo="65507,65505">C+Shift</button>
+            <button class="rdp-key-combo" data-combo="65513,65505">A+Shift</button>
+            <button class="rdp-key-combo" data-combo="65515,65513">Win+A</button>
             <button id="rdp-kbd-btn" class="rdp-key" type="button" hidden>⌨</button>
           </div>
         </div>
@@ -951,6 +962,12 @@ def cabinet():
             rdpKeyboard = new Guacamole.Keyboard(document);
             rdpKeyboard.onkeydown = (k) => { if (!rdpOverlay.hidden && rdpClient) rdpClient.sendKeyEvent(1, k); };
             rdpKeyboard.onkeyup   = (k) => { if (!rdpOverlay.hidden && rdpClient) rdpClient.sendKeyEvent(0, k); };
+            // Intercept Win/Meta key — prevents Start menu on host when RDP is open
+            document.addEventListener("keydown", (e) => {
+              if (!rdpOverlay.hidden && (e.key === "Meta" || e.key === "OS" || e.code === "MetaLeft" || e.code === "MetaRight")) {
+                e.preventDefault();
+              }
+            }, { capture: true, signal: sig });
 
             // ── toolbar ──────────────────────────────────────────────────
             const activeModifiers = new Set();
