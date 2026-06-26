@@ -1,4 +1,5 @@
 import base64
+import codecs
 import hashlib
 import hmac
 import json
@@ -376,6 +377,7 @@ def rdp_ws(ws, ip):
     stop_event = threading.Event()
 
     def pump_guac_to_ws():
+        decoder = codecs.getincrementaldecoder("utf-8")()
         try:
             while not stop_event.is_set():
                 try:
@@ -385,7 +387,9 @@ def rdp_ws(ws, ip):
                 if not data:
                     print(f"[rdp] guacd closed connection ({ip})", flush=True)
                     break
-                ws.send(data.decode(errors="replace"))
+                text = decoder.decode(data)
+                if text:
+                    ws.send(text)
         except Exception as e:
             print(f"[rdp] pump error ({ip}): {e}", flush=True)
         finally:
@@ -965,7 +969,7 @@ def cabinet():
             rdpClient.connect();
             rdpKeepalive = setInterval(() => {
               if (tunnel.state === Guacamole.Tunnel.State.OPEN) tunnel.sendMessage("nop");
-            }, 20000);
+            }, 10000);
           };
 
           rdpLoginForm.addEventListener("submit", (event) => {
@@ -1076,7 +1080,7 @@ def cabinet():
 
             const pingInterval = setInterval(() => {
               if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "ping" }));
-            }, 25000);
+            }, 10000);
 
             ws.addEventListener("message", (event) => {
               gotData = true;
