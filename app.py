@@ -214,9 +214,11 @@ def console_ws(ws, ip):
     channel = client.invoke_shell(term="xterm")
     channel.settimeout(0.0)
 
+    stop_event = threading.Event()
+
     def pump_channel_to_ws():
         try:
-            while True:
+            while not stop_event.is_set():
                 if channel.recv_ready():
                     chunk = channel.recv(4096)
                     if not chunk:
@@ -226,30 +228,36 @@ def console_ws(ws, ip):
                     time.sleep(0.03)
                 if channel.closed:
                     break
-        except (OSError, ValueError):
+        except Exception:
             pass
+        finally:
+            stop_event.set()
 
     reader = threading.Thread(target=pump_channel_to_ws, daemon=True)
     reader.start()
 
     try:
-        while True:
-            message = ws.receive()
+        while not stop_event.is_set():
+            message = ws.receive(timeout=35)
             if message is None:
                 break
             try:
                 payload = json.loads(message)
             except ValueError:
                 continue
-            if payload.get("type") == "data":
+            ptype = payload.get("type")
+            if ptype == "data":
                 channel.send(payload.get("data", ""))
-            elif payload.get("type") == "resize":
+            elif ptype == "resize":
                 cols = int(payload.get("cols", 80))
                 rows = int(payload.get("rows", 24))
                 channel.resize_pty(width=cols, height=rows)
-    except (OSError, ValueError):
+            elif ptype == "ping":
+                ws.send(json.dumps({"type": "pong"}))
+    except Exception:
         pass
     finally:
+        stop_event.set()
         channel.close()
         client.close()
 
@@ -590,6 +598,10 @@ def cabinet():
               ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
             });
 
+            const pingInterval = setInterval(() => {
+              if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "ping" }));
+            }, 25000);
+
             ws.addEventListener("message", (event) => {
               gotData = true;
               try {
@@ -599,7 +611,8 @@ def cabinet():
             });
 
             ws.addEventListener("close", () => {
-              if (!gotData) term.write("\\r\\nСоединение закрыто.\\r\\n");
+              clearInterval(pingInterval);
+              term.write("\\r\\nСоединение закрыто.\\r\\n");
             });
 
             term.onData((data) => {
