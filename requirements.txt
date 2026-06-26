@@ -1,3 +1,5 @@
 flask
 flask-sock
 paramiko
+gunicorn
+gevent
