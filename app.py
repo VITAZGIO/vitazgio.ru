@@ -599,7 +599,7 @@ def cabinet():
       <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css">
       <script defer src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
       <script defer src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
-      <script defer src="https://cdn.jsdelivr.net/npm/guacamole-common-js@1.5.0/dist/guacamole-common.min.js"></script>
+      <script defer src="https://cdn.jsdelivr.net/npm/guacamole-common-js@1.5.0/dist/cjs/guacamole-common.min.js"></script>
       <script>
         (() => {
           const toggle = document.getElementById("netbird-toggle");
