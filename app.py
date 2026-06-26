@@ -757,9 +757,6 @@ def cabinet():
             };
             this.disconnect = function() { if (ws) { ws.close(); ws = null; } };
           }
-          GuacAuthTunnel.prototype = Object.create(Guacamole.Tunnel.prototype);
-          GuacAuthTunnel.prototype.constructor = GuacAuthTunnel;
-
           const closeRdpLogin = () => {
             rdpLoginModal.hidden = true;
             rdpLoginForm.reset();
@@ -790,6 +787,8 @@ def cabinet():
               alert("Не удалось загрузить guacamole-common-js — проверьте сеть/CDN.");
               return;
             }
+            GuacAuthTunnel.prototype = Object.create(Guacamole.Tunnel.prototype);
+            GuacAuthTunnel.prototype.constructor = GuacAuthTunnel;
             const isMobile = window.innerWidth <= 900 || navigator.maxTouchPoints > 0 ||
                              /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
             const width  = window.innerWidth;
