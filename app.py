@@ -786,7 +786,13 @@ def cabinet():
                     const sep = guacBuf[pos++];
                     if (sep === ";") break;
                   }
-                  if (parts.length && self.oninstruction) self.oninstruction(parts[0], parts.slice(1));
+                  if (parts.length) {
+                    if (parts[0] === "nop") {
+                      ws.send("3.nop;");
+                    } else if (self.oninstruction) {
+                      self.oninstruction(parts[0], parts.slice(1));
+                    }
+                  }
                 }
                 guacBuf = guacBuf.slice(pos);
               };
