@@ -6,6 +6,7 @@ import os
 import platform
 import re
 import secrets
+import socket
 import subprocess
 import threading
 import time
@@ -36,12 +37,12 @@ login_attempts = defaultdict(deque)
 login_attempts_lock = threading.Lock()
 
 NETBIRD_DEVICES = [
-    {"ip": "100.104.188.141", "name": "NOUTBOOK"},
+    {"ip": "100.104.188.141", "name": "NOUTBOOK", "rdp_enabled": True},
     {"ip": "100.104.140.4", "name": "VitazComp"},
-    {"ip": "100.104.1.172", "name": "windows10proxmox"},
+    {"ip": "100.104.1.172", "name": "windows10proxmox", "rdp_enabled": True},
     {"ip": "100.104.67.89", "name": "orangepizero3", "ssh_enabled": True},
     {"ip": "100.104.221.91", "name": "ubuntu-server", "ssh_enabled": True},
-    {"ip": "100.104.160.121", "name": "windows10V"},
+    {"ip": "100.104.160.121", "name": "windows10V", "rdp_enabled": True},
     {"ip": "100.104.111.39", "name": "ubuntuvitaz1", "ssh_enabled": True},
     {"ip": "100.104.86.103", "name": "MOBILA"},
 ]
@@ -263,6 +264,136 @@ def console_ws(ws, ip):
         client.close()
 
 
+rdp_enabled_ips = {device["ip"] for device in NETBIRD_DEVICES}
+
+
+def _guac_encode(*args):
+    parts = [f"{len(str(a))}.{a}" for a in args]
+    return (",".join(parts) + ";").encode()
+
+
+def _guac_recv_instr(sock_file):
+    parts = []
+    buf = ""
+    while True:
+        while "." not in buf:
+            ch = sock_file.read(1)
+            if not ch:
+                raise ConnectionError("guacd closed")
+            buf += ch.decode()
+        dot = buf.index(".")
+        length = int(buf[:dot])
+        buf = buf[dot + 1:]
+        while len(buf) < length:
+            ch = sock_file.read(1)
+            if not ch:
+                raise ConnectionError("guacd closed")
+            buf += ch.decode()
+        parts.append(buf[:length])
+        buf = buf[length:]
+        while not buf:
+            ch = sock_file.read(1)
+            if not ch:
+                raise ConnectionError("guacd closed")
+            buf += ch.decode()
+        sep, buf = buf[0], buf[1:]
+        if sep == ";":
+            return parts
+
+
+def _guac_handshake(guac_sock, hostname, username, password, width, height):
+    f = guac_sock.makefile("rb", buffering=0)
+    guac_sock.sendall(_guac_encode("select", "rdp"))
+    instr = _guac_recv_instr(f)
+    if not instr or instr[0] != "args":
+        raise ValueError(f"expected args, got {instr}")
+    arg_names = instr[1:]
+    guac_sock.sendall(_guac_encode("size", str(width), str(height), "96"))
+    guac_sock.sendall(_guac_encode("audio"))
+    guac_sock.sendall(_guac_encode("video"))
+    guac_sock.sendall(_guac_encode("image", "image/png", "image/jpeg"))
+    rdp_params = {
+        "hostname": hostname,
+        "port": "3389",
+        "username": username,
+        "password": password,
+        "ignore-cert": "true",
+        "security": "any",
+        "width": str(width),
+        "height": str(height),
+        "dpi": "96",
+    }
+    connect_values = [rdp_params.get(name, "") for name in arg_names]
+    guac_sock.sendall(_guac_encode("connect", *connect_values))
+
+
+@sock.route("/ws/rdp/<ip>")
+def rdp_ws(ws, ip):
+    if not session.get("authenticated") or not session.get("console_authenticated"):
+        ws.close()
+        return
+    if ip not in rdp_enabled_ips:
+        ws.close()
+        return
+
+    message = ws.receive(timeout=15)
+    try:
+        auth = json.loads(message) if message else {}
+    except ValueError:
+        auth = {}
+    if auth.get("type") != "auth":
+        ws.close()
+        return
+    username = auth.get("username")
+    password = auth.get("password")
+    width = int(auth.get("width", 1280))
+    height = int(auth.get("height", 720))
+    if not username or not password:
+        ws.close()
+        return
+
+    try:
+        guac_sock = socket.create_connection(("127.0.0.1", 4822), timeout=5)
+    except OSError:
+        ws.close()
+        return
+
+    try:
+        _guac_handshake(guac_sock, ip, username, password, width, height)
+    except Exception:
+        guac_sock.close()
+        ws.close()
+        return
+
+    stop_event = threading.Event()
+
+    def pump_guac_to_ws():
+        try:
+            while not stop_event.is_set():
+                data = guac_sock.recv(8192)
+                if not data:
+                    break
+                ws.send(data.decode(errors="replace"))
+        except Exception:
+            pass
+        finally:
+            stop_event.set()
+
+    threading.Thread(target=pump_guac_to_ws, daemon=True).start()
+
+    try:
+        while not stop_event.is_set():
+            message = ws.receive(timeout=35)
+            if message is None:
+                break
+            guac_sock.sendall(message.encode() if isinstance(message, str) else message)
+    except Exception:
+        pass
+    finally:
+        stop_event.set()
+        guac_sock.close()
+
+
 @app.get("/cabinet")
 @login_required
 def cabinet():
@@ -272,8 +403,10 @@ def cabinet():
         f'<span class="device-name">{device["name"]}</span>'
         f'<span class="device-status" data-status>проверка…</span>'
         + (
-            f'<button class="connect-btn" type="button" data-ip="{device["ip"]}" data-name="{device["name"]}">Подключиться</button>'
+            f'<button class="connect-btn" type="button" data-ip="{device["ip"]}" data-name="{device["name"]}" data-type="ssh">Подключиться</button>'
             if device.get("ssh_enabled")
+            else f'<button class="connect-btn" type="button" data-ip="{device["ip"]}" data-name="{device["name"]}" data-type="rdp">RDP</button>'
+            if device.get("rdp_enabled")
             else '<span class="connect-btn-empty"></span>'
         )
         + '<span class="copy-status">Скопировано</span>'
@@ -351,6 +484,9 @@ def cabinet():
         .term-close { padding: 7px 12px; color: #dffaff; font: 700 .76rem "Cascadia Code", Consolas, monospace; border: 1px solid rgba(255,255,255,.16); background: transparent; cursor: pointer; }
         .term-close:hover { background: rgba(255,255,255,.08); }
         .term-body { flex: 1; padding: 10px; overflow: hidden; }
+        .rdp-overlay { position: fixed; z-index: 100; inset: 0; display: flex; flex-direction: column; background: #000; }
+        .rdp-display { flex: 1; overflow: hidden; cursor: none; position: relative; }
+        .rdp-display > div { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); }
       </style>
     </head>
     <body>
@@ -400,6 +536,28 @@ def cabinet():
         </section>
       </div>
 
+      <div id="rdp-login-modal" class="gate-modal" hidden>
+        <div class="gate-backdrop" data-rdp-login-close></div>
+        <section class="gate-panel" role="dialog" aria-modal="true" aria-labelledby="rdp-login-title">
+          <button class="gate-close" type="button" data-rdp-login-close aria-label="Закрыть">×</button>
+          <h2 id="rdp-login-title">Windows RDP</h2>
+          <form id="rdp-login-form">
+            <input id="rdp-login-username" name="username" type="text" autocomplete="off" placeholder="Имя пользователя" required>
+            <input id="rdp-login-password" name="password" type="password" autocomplete="off" placeholder="Пароль" required>
+            <button class="gate-submit" type="submit">Подключиться</button>
+            <p id="rdp-login-error" class="gate-error" role="alert"></p>
+          </form>
+        </section>
+      </div>
+
+      <div id="rdp-overlay" class="rdp-overlay" hidden>
+        <div class="term-header">
+          <span id="rdp-title"></span>
+          <button id="rdp-close" class="term-close" type="button">Закрыть</button>
+        </div>
+        <div id="rdp-display" class="rdp-display"></div>
+      </div>
+
       <div id="term-overlay" class="term-overlay" hidden>
         <div class="term-header">
           <span id="term-title"></span>
@@ -411,6 +569,7 @@ def cabinet():
       <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css">
       <script defer src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
       <script defer src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
+      <script defer src="https://cdn.jsdelivr.net/npm/guacamole-common-js@1.5.0/dist/guacamole-common.min.js"></script>
       <script>
         (() => {
           const toggle = document.getElementById("netbird-toggle");
@@ -504,6 +663,137 @@ def cabinet():
           let fitAddon = null;
           let ws = null;
 
+          const rdpLoginModal = document.getElementById("rdp-login-modal");
+          const rdpLoginForm = document.getElementById("rdp-login-form");
+          const rdpLoginUsername = document.getElementById("rdp-login-username");
+          const rdpLoginPassword = document.getElementById("rdp-login-password");
+          const rdpLoginError = document.getElementById("rdp-login-error");
+          const rdpOverlay = document.getElementById("rdp-overlay");
+          const rdpTitleEl = document.getElementById("rdp-title");
+          const rdpDisplay = document.getElementById("rdp-display");
+          const rdpCloseBtn = document.getElementById("rdp-close");
+          let rdpClient = null;
+          let rdpKeyboard = null;
+
+          // ── RDP helpers ──────────────────────────────────────────────
+          function GuacAuthTunnel(ip, authPayload) {
+            Guacamole.Tunnel.call(this);
+            const self = this;
+            let ws = null;
+            let guacBuf = "";
+            this.connect = function() {
+              const proto = location.protocol === "https:" ? "wss:" : "ws:";
+              ws = new WebSocket(`${proto}//${location.host}/ws/rdp/${ip}`);
+              self.state = Guacamole.Tunnel.State.CONNECTING;
+              if (self.onstatechange) self.onstatechange(self.state);
+              ws.onopen = () => {
+                ws.send(JSON.stringify(authPayload));
+                self.state = Guacamole.Tunnel.State.OPEN;
+                if (self.onstatechange) self.onstatechange(self.state);
+              };
+              ws.onmessage = (event) => {
+                guacBuf += event.data;
+                let pos = 0;
+                outer: while (pos < guacBuf.length) {
+                  const instrStart = pos;
+                  const parts = [];
+                  while (true) {
+                    let dot = pos;
+                    while (dot < guacBuf.length && guacBuf[dot] !== ".") dot++;
+                    if (dot >= guacBuf.length) { pos = instrStart; break outer; }
+                    const len = parseInt(guacBuf.slice(pos, dot), 10);
+                    if (isNaN(len)) { pos = dot + 1; break; }
+                    pos = dot + 1;
+                    if (pos + len >= guacBuf.length) { pos = instrStart; break outer; }
+                    parts.push(guacBuf.slice(pos, pos + len));
+                    pos += len;
+                    const sep = guacBuf[pos++];
+                    if (sep === ";") break;
+                  }
+                  if (parts.length && self.oninstruction) self.oninstruction(parts[0], parts.slice(1));
+                }
+                guacBuf = guacBuf.slice(pos);
+              };
+              ws.onclose = () => {
+                self.state = Guacamole.Tunnel.State.CLOSED;
+                if (self.onstatechange) self.onstatechange(self.state);
+              };
+              ws.onerror = () => { if (self.onerror) self.onerror({ code: 0, message: "WebSocket error" }); };
+            };
+            this.sendMessage = function(...args) {
+              if (!ws || ws.readyState !== WebSocket.OPEN) return;
+              ws.send(args.map(v => { const s = String(v); return `${s.length}.${s}`; }).join(",") + ";");
+            };
+            this.disconnect = function() { if (ws) { ws.close(); ws = null; } };
+          }
+          GuacAuthTunnel.prototype = Object.create(Guacamole.Tunnel.prototype);
+          GuacAuthTunnel.prototype.constructor = GuacAuthTunnel;
+
+          const closeRdpLogin = () => {
+            rdpLoginModal.hidden = true;
+            rdpLoginForm.reset();
+            rdpLoginError.textContent = "";
+          };
+          document.querySelectorAll("[data-rdp-login-close]").forEach(el => el.addEventListener("click", () => {
+            closeRdpLogin();
+            pendingDevice = null;
+          }));
+
+          const openRdpLogin = () => {
+            rdpLoginModal.hidden = false;
+            requestAnimationFrame(() => rdpLoginUsername.focus());
+          };
+
+          const closeRdp = () => {
+            rdpOverlay.hidden = true;
+            if (rdpClient) { rdpClient.disconnect(); rdpClient = null; }
+            if (rdpKeyboard) { rdpKeyboard.onkeydown = rdpKeyboard.onkeyup = null; rdpKeyboard = null; }
+            rdpDisplay.innerHTML = "";
+          };
+          rdpCloseBtn.addEventListener("click", closeRdp);
+
+          const openRdp = (ip, name, username, password) => {
+            if (typeof Guacamole === "undefined") {
+              alert("Не удалось загрузить guacamole-common-js — проверьте сеть/CDN.");
+              return;
+            }
+            const width = window.innerWidth;
+            const height = window.innerHeight - 45;
+            rdpTitleEl.textContent = name + " — " + ip;
+            rdpOverlay.hidden = false;
+            const tunnel = new GuacAuthTunnel(ip, { type: "auth", username, password, width, height });
+            rdpClient = new Guacamole.Client(tunnel);
+            const displayEl = rdpClient.getDisplay().getElement();
+            rdpDisplay.innerHTML = "";
+            rdpDisplay.appendChild(displayEl);
+            const mouse = new Guacamole.Mouse(displayEl);
+            mouse.onmousedown = mouse.onmouseup = mouse.onmousemove = (mouseState) => {
+              rdpClient.sendMouseState(mouseState.state ?? mouseState);
+            };
+            rdpKeyboard = new Guacamole.Keyboard(document);
+            rdpKeyboard.onkeydown = (keysym) => { if (!rdpOverlay.hidden && rdpClient) rdpClient.sendKeyEvent(1, keysym); };
+            rdpKeyboard.onkeyup   = (keysym) => { if (!rdpOverlay.hidden && rdpClient) rdpClient.sendKeyEvent(0, keysym); };
+            rdpClient.onerror = (err) => {
+              rdpDisplay.innerHTML = `<p style="color:#ff6b81;padding:20px;font-family:monospace">Ошибка RDP: ${err?.message ?? JSON.stringify(err)}</p>`;
+            };
+            tunnel.onstatechange = (state) => {
+              if (state === Guacamole.Tunnel.State.CLOSED && !rdpOverlay.hidden) {
+                rdpDisplay.insertAdjacentHTML("beforeend", '<p style="color:#8f99ab;padding:10px 20px;font-family:monospace;position:absolute;bottom:0">Соединение закрыто.</p>');
+              }
+            };
+            rdpClient.connect();
+          };
+
+          rdpLoginForm.addEventListener("submit", (event) => {
+            event.preventDefault();
+            const device = pendingDevice;
+            const username = rdpLoginUsername.value;
+            const password = rdpLoginPassword.value;
+            closeRdpLogin();
+            if (device) openRdp(device.ip, device.name, username, password);
+          });
+          // ─────────────────────────────────────────────────────────────
+
           const closeGate = () => {
             gateModal.hidden = true;
             gateForm.reset();
@@ -536,7 +826,8 @@ def cabinet():
               }
               consoleAuthenticated = true;
               closeGate();
-              openSshLogin();
+              if (pendingDevice?.type === "rdp") openRdpLogin();
+              else openSshLogin();
             } catch {
               gateError.textContent = "Сервер недоступен.";
             }
@@ -632,9 +923,10 @@ def cabinet():
 
           document.querySelectorAll(".connect-btn").forEach((button) => {
             button.addEventListener("click", () => {
-              pendingDevice = { ip: button.dataset.ip, name: button.dataset.name };
+              pendingDevice = { ip: button.dataset.ip, name: button.dataset.name, type: button.dataset.type || "ssh" };
               if (consoleAuthenticated) {
-                openSshLogin();
+                if (pendingDevice.type === "rdp") openRdpLogin();
+                else openSshLogin();
               } else {
                 gateModal.hidden = false;
                 requestAnimationFrame(() => gatePassword.focus());
