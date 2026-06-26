@@ -545,6 +545,10 @@ def cabinet():
         .rdp-key-combo { padding: 7px 10px; color: #ff6b81; font: 600 .7rem "Cascadia Code", Consolas, monospace; border: 1px solid rgba(255,107,129,.28); background: rgba(255,107,129,.06); cursor: pointer; touch-action: manipulation; user-select: none; -webkit-user-select: none; }
         .rdp-key-combo:active { background: rgba(255,107,129,.2); }
         .rdp-kbd-input { position: fixed; left: -9999px; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
+        .conn-quality { position: absolute; bottom: 10px; left: 10px; z-index: 10; padding: 3px 8px; border-radius: 3px; font: 600 .7rem "Cascadia Code", Consolas, monospace; background: rgba(0,0,0,.45); color: #8f99ab; pointer-events: none; transition: color .3s; backdrop-filter: blur(2px); }
+        .conn-quality.good { color: #4ade80; }
+        .conn-quality.warn { color: #fbbf24; }
+        .conn-quality.bad  { color: #f87171; }
         @media (max-width: 900px) {
           .term-header { padding: 8px 12px; }
           .rdp-display > div { top: 0; left: 0; transform: none; }
@@ -623,7 +627,7 @@ def cabinet():
           </div>
         </div>
         <div class="rdp-content">
-          <div id="rdp-display" class="rdp-display"></div>
+          <div id="rdp-display" class="rdp-display"><div id="rdp-quality" class="conn-quality"></div></div>
           <div id="rdp-toolbar" class="rdp-toolbar" hidden>
             <button class="rdp-key" data-keysym="65307">Esc</button>
             <button class="rdp-key" data-keysym="65289">Tab</button>
@@ -646,6 +650,7 @@ def cabinet():
       </div>
 
       <div id="term-overlay" class="term-overlay" hidden>
+        <div id="ssh-quality" class="conn-quality"></div>
         <div class="term-header">
           <span id="term-title"></span>
           <button id="term-close" class="term-close" type="button">Закрыть</button>
@@ -766,6 +771,14 @@ def cabinet():
           let rdpKeyboard = null;
           let toolbarAbort = null;
           let rdpKeepalive = null;
+          let rdpNopSentAt = null;
+
+          const rdpQuality = document.getElementById("rdp-quality");
+          const sshQuality = document.getElementById("ssh-quality");
+          const updateQuality = (el, rtt) => {
+            el.textContent = `● ${rtt} ms`;
+            el.className = "conn-quality " + (rtt < 80 ? "good" : rtt < 250 ? "warn" : "bad");
+          };
 
           // ── RDP helpers ──────────────────────────────────────────────
           function GuacAuthTunnel(ip, authPayload) {
@@ -805,6 +818,10 @@ def cabinet():
                   if (parts.length) {
                     if (parts[0] === "nop") {
                       ws.send("3.nop;");
+                      if (rdpNopSentAt !== null) {
+                        updateQuality(rdpQuality, Math.round(performance.now() - rdpNopSentAt));
+                        rdpNopSentAt = null;
+                      }
                     } else if (self.oninstruction) {
                       self.oninstruction(parts[0], parts.slice(1));
                     }
@@ -842,6 +859,9 @@ def cabinet():
 
           const closeRdp = () => {
             rdpOverlay.hidden = true;
+            rdpNopSentAt = null;
+            rdpQuality.textContent = "";
+            rdpQuality.className = "conn-quality";
             if (document.pointerLockElement) document.exitPointerLock();
             if (toolbarAbort) { toolbarAbort.abort(); toolbarAbort = null; }
             if (rdpKeepalive) { clearInterval(rdpKeepalive); rdpKeepalive = null; }
@@ -1023,8 +1043,13 @@ def cabinet():
                 rdpDisplay.insertAdjacentHTML("beforeend", '<p style="color:#8f99ab;padding:10px 20px;font-family:monospace;position:absolute;bottom:0">Соединение закрыто.</p>');
             };
             rdpClient.connect();
+            rdpQuality.textContent = "● …";
+            rdpQuality.className = "conn-quality";
             rdpKeepalive = setInterval(() => {
-              if (tunnel.state === Guacamole.Tunnel.State.OPEN) tunnel.sendMessage("nop");
+              if (tunnel.state === Guacamole.Tunnel.State.OPEN) {
+                rdpNopSentAt = performance.now();
+                tunnel.sendMessage("nop");
+              }
             }, 10000);
           };
 
@@ -1135,8 +1160,14 @@ def cabinet():
               ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
             });
 
+            let sshPingTime = null;
+            sshQuality.textContent = "● …";
+            sshQuality.className = "conn-quality";
             const pingInterval = setInterval(() => {
-              if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "ping" }));
+              if (ws && ws.readyState === WebSocket.OPEN) {
+                sshPingTime = performance.now();
+                ws.send(JSON.stringify({ type: "ping" }));
+              }
             }, 10000);
 
             ws.addEventListener("message", (event) => {
@@ -1144,11 +1175,17 @@ def cabinet():
               try {
                 const payload = JSON.parse(event.data);
                 if (payload.type === "data") term.write(payload.data);
+                else if (payload.type === "pong" && sshPingTime !== null) {
+                  updateQuality(sshQuality, Math.round(performance.now() - sshPingTime));
+                  sshPingTime = null;
+                }
               } catch {}
             });
 
             ws.addEventListener("close", () => {
               clearInterval(pingInterval);
+              sshQuality.textContent = "";
+              sshQuality.className = "conn-quality";
               term.write("\\r\\nСоединение закрыто.\\r\\n");
             });
 
