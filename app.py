@@ -868,9 +868,6 @@ def cabinet():
         .uptime-num { font: 800 2.2rem "Cascadia Code", Consolas, monospace; color: #2de2ff; letter-spacing: -.04em; line-height: 1; }
         .uptime-lbl { font-size: .62rem; color: #6b7385; text-transform: uppercase; letter-spacing: .08em; margin-top: 4px; }
 
-        /* Карта */
-        #netmap-canvas { display: block; width: 100%; cursor: default; }
-
         /* Деплой */
         .deploy-item { display: grid; grid-template-columns: 64px 1fr auto; gap: 6px 10px; align-items: baseline; padding: 9px 0; border-bottom: 1px solid rgba(255,255,255,.06); font-size: .78rem; }
         .deploy-item:last-child { border-bottom: 0; }
@@ -944,16 +941,6 @@ def cabinet():
                 <div class="uptime-unit"><span class="uptime-num" id="up-m">…</span><span class="uptime-lbl">минут</span></div>
                 <div class="uptime-unit"><span class="uptime-num" id="up-s">…</span><span class="uptime-lbl">секунд</span></div>
               </div>
-            </div>
-          </section>
-
-          <!-- Карта NetBird-сети -->
-          <section class="widget">
-            <button class="widget-toggle" id="netmap-toggle" type="button" aria-expanded="false" aria-controls="netmap-body">
-              Карта NetBird-сети <span class="widget-arrow">⌄</span>
-            </button>
-            <div id="netmap-body" hidden style="padding:0 18px 16px">
-              <canvas id="netmap-canvas" height="310"></canvas>
             </div>
           </section>
 
@@ -1809,81 +1796,6 @@ def cabinet():
               base = d.seconds; startTs = Date.now();
               tick(); setInterval(tick, 1000);
             }).catch(() => { if (dEl) dEl.closest(".uptime-value").textContent = "нет данных"; });
-        }
-
-        // ── Карта NetBird ──
-        {
-          const toggle = document.getElementById("netmap-toggle");
-          const canvas = document.getElementById("netmap-canvas");
-          if (toggle && canvas) {
-            const DEVS = [
-              { name:"NOUTBOOK",    ip:"100.104.188.141" },
-              { name:"VitazComp",   ip:"100.104.140.4"   },
-              { name:"win10prx",    ip:"100.104.1.172"   },
-              { name:"orangepi",    ip:"100.104.67.89"   },
-              { name:"ubuntu-srv",  ip:"100.104.221.91"  },
-              { name:"win10V",      ip:"100.104.160.121" },
-              { name:"ubuntuvtz",   ip:"100.104.111.39"  },
-              { name:"MOBILA",      ip:"100.104.86.103"  },
-            ];
-            let stat = {};
-            const draw = () => {
-              const dpr = window.devicePixelRatio || 1;
-              const W = canvas.parentElement.clientWidth - 36;
-              const H = 310;
-              canvas.width = W * dpr; canvas.height = H * dpr;
-              canvas.style.width = W + "px"; canvas.style.height = H + "px";
-              const ctx = canvas.getContext("2d");
-              ctx.scale(dpr, dpr);
-              ctx.clearRect(0, 0, W, H);
-              const cx = W / 2, cy = H / 2, R = Math.min(cx, cy) * 0.74, n = DEVS.length;
-              DEVS.forEach((d, i) => {
-                const a = (i / n) * Math.PI * 2 - Math.PI / 2;
-                const x = cx + Math.cos(a) * R, y = cy + Math.sin(a) * R;
-                ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(x, y);
-                ctx.strokeStyle = stat[d.ip]?.online ? "rgba(45,226,255,.28)" : "rgba(74,80,96,.2)";
-                ctx.lineWidth = 1; ctx.stroke();
-              });
-              // Центральный узел
-              ctx.beginPath(); ctx.arc(cx, cy, 20, 0, Math.PI * 2);
-              ctx.fillStyle = "rgba(255,120,47,.15)"; ctx.fill();
-              ctx.strokeStyle = "#ff782f"; ctx.lineWidth = 2; ctx.stroke();
-              ctx.fillStyle = "#ff782f"; ctx.font = "700 10px Consolas,monospace";
-              ctx.textAlign = "center"; ctx.textBaseline = "middle";
-              ctx.fillText("HOME", cx, cy);
-              // Устройства
-              DEVS.forEach((d, i) => {
-                const a = (i / n) * Math.PI * 2 - Math.PI / 2;
-                const x = cx + Math.cos(a) * R, y = cy + Math.sin(a) * R;
-                const online = stat[d.ip]?.online;
-                const lat = stat[d.ip]?.latency_ms;
-                const col = online ? "#63f5ad" : "#4a5060";
-                if (online) {
-                  ctx.beginPath(); ctx.arc(x, y, 22, 0, Math.PI * 2);
-                  ctx.fillStyle = "rgba(99,245,173,.07)"; ctx.fill();
-                }
-                ctx.beginPath(); ctx.arc(x, y, 15, 0, Math.PI * 2);
-                ctx.fillStyle = online ? "rgba(99,245,173,.13)" : "rgba(74,80,96,.1)"; ctx.fill();
-                ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.stroke();
-                ctx.fillStyle = col; ctx.font = "600 9px Consolas,monospace";
-                ctx.textAlign = "center"; ctx.textBaseline = "middle";
-                ctx.fillText(d.name.length > 8 ? d.name.slice(0,7)+"…" : d.name, x, y);
-                const lby = y + (y > cy ? 22 : -22);
-                ctx.fillStyle = "#8f99ab"; ctx.font = "500 8px Consolas,monospace";
-                if (lat != null) ctx.fillText(Math.round(lat)+"ms", x, lby);
-                else if (online) ctx.fillText("онлайн", x, lby);
-              });
-            };
-            let interval = null;
-            const reload = async () => {
-              try { const r = await fetch("/api/netbird/status",{credentials:"same-origin"}); stat = await r.json(); } catch {}
-              draw();
-            };
-            toggle.addEventListener("widget-open", e => {
-              if (e.detail) { requestAnimationFrame(reload); interval = setInterval(reload, 10000); }
-              else { clearInterval(interval); }
-            });
-          }
         }
 
         // ── Логи деплоя ──
