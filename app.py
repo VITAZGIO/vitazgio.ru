@@ -60,8 +60,6 @@ netbird_status_lock = threading.Lock()
 ssh_enabled_ips = {device["ip"] for device in NETBIRD_DEVICES if device.get("ssh_enabled")}
 
 SSH_GATE_PASSWORD_PREFIX = os.environ.get("SSH_GATE_PASSWORD_PREFIX")
-HA_URL = os.environ.get("HA_URL", "").rstrip("/")
-HA_TOKEN = os.environ.get("HA_TOKEN", "")
 CONSOLE_LOGIN_WINDOW_SECONDS = 300
 CONSOLE_LOGIN_MAX_ATTEMPTS = 5
 console_login_attempts = defaultdict(deque)
@@ -664,17 +662,18 @@ def metrics_api():
 @app.post("/api/pc/shutdown")
 @login_required
 def pc_shutdown():
-    if not HA_URL or not HA_TOKEN:
-        return jsonify(error="HA не настроен."), 503
+    host = os.environ.get("PC_SHUTDOWN_HOST")
+    user = os.environ.get("PC_SHUTDOWN_USER")
+    key_path = os.environ.get("PC_SHUTDOWN_KEY")
+    if not host or not user or not key_path:
+        return jsonify(error="PC_SHUTDOWN_* не настроены в .env"), 503
     try:
-        req = urllib.request.Request(
-            f"{HA_URL}/api/services/shell_command/pc_shutdown_192_168_1_193",
-            data=b"{}",
-            headers={"Authorization": f"Bearer {HA_TOKEN}", "Content-Type": "application/json"},
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=8) as resp:
-            resp.read()
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        client.connect(host, username=user, key_filename=key_path,
+                       timeout=6, look_for_keys=False, allow_agent=False)
+        client.exec_command("shutdown /s /t 0")
+        client.close()
         return jsonify(ok=True)
     except Exception as e:
         return jsonify(error=str(e)), 500
