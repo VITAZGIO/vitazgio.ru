@@ -2,6 +2,7 @@ import base64
 import codecs
 import hashlib
 import hmac
+import io
 import json
 import os
 import platform
@@ -11,13 +12,16 @@ import socket
 import subprocess
 import threading
 import time
+import uuid
+import urllib.error
+import urllib.request
 from collections import defaultdict, deque
 from datetime import datetime
 from functools import wraps
 from zoneinfo import ZoneInfo
 
 import paramiko
-from flask import Flask, jsonify, redirect, request, session, url_for
+from flask import Flask, Response, jsonify, redirect, request, session, url_for
 from flask_sock import Sock
 
 app = Flask(__name__)
@@ -60,6 +64,22 @@ CONSOLE_LOGIN_WINDOW_SECONDS = 300
 CONSOLE_LOGIN_MAX_ATTEMPTS = 5
 console_login_attempts = defaultdict(deque)
 console_login_attempts_lock = threading.Lock()
+
+login_log: deque = deque(maxlen=100)
+login_log_lock = threading.Lock()
+
+drop_items: dict = {}
+drop_lock = threading.Lock()
+DROP_MAX_ITEMS = 20
+DROP_MAX_SIZE = 10 * 1024 * 1024
+
+clipboard_store: dict = {"text": "", "version": 0}
+clipboard_lock = threading.Lock()
+
+_deploy_cache: dict = {"data": None, "ts": 0.0}
+_deploy_cache_lock = threading.Lock()
+DEPLOY_CACHE_TTL = 60
+GITHUB_REPO = "VITAZGIO/vitazgio.ru"
 
 
 def console_password_today():
@@ -145,6 +165,12 @@ def login():
     session.clear()
     session["authenticated"] = True
     session.permanent = False
+    with login_log_lock:
+        login_log.append({
+            "ip": client,
+            "ts": datetime.now(ZoneInfo("Europe/Moscow")).strftime("%d.%m.%Y %H:%M:%S"),
+            "ua": request.headers.get("User-Agent", "")[:120],
+        })
     return jsonify(redirect=url_for("cabinet"))
 
 
@@ -549,6 +575,167 @@ def vnc_ws(ws, ip):
         guac_sock.close()
 
 
+@app.get("/api/uptime")
+@login_required
+def uptime_api():
+    try:
+        with open("/proc/uptime") as f:
+            seconds = int(float(f.read().split()[0]))
+        return jsonify(seconds=seconds)
+    except Exception:
+        return jsonify(seconds=None)
+
+
+@app.get("/api/login-log")
+@login_required
+def login_log_api():
+    with login_log_lock:
+        return jsonify(list(reversed(list(login_log))))
+
+
+@app.get("/api/deploy-logs")
+@login_required
+def deploy_logs_api():
+    now = time.monotonic()
+    with _deploy_cache_lock:
+        if _deploy_cache["data"] is not None and now - _deploy_cache["ts"] < DEPLOY_CACHE_TTL:
+            return jsonify(_deploy_cache["data"])
+    try:
+        headers = {"User-Agent": "vitazgio-site/1.0", "Accept": "application/vnd.github.v3+json"}
+        req = urllib.request.Request(
+            f"https://api.github.com/repos/{GITHUB_REPO}/commits?per_page=8", headers=headers
+        )
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            commits = json.loads(resp.read())
+        req2 = urllib.request.Request(
+            f"https://api.github.com/repos/{GITHUB_REPO}/actions/runs?per_page=10", headers=headers
+        )
+        with urllib.request.urlopen(req2, timeout=8) as resp:
+            runs_data = json.loads(resp.read())
+        run_by_sha = {}
+        for run in runs_data.get("workflow_runs", []):
+            sha = run.get("head_sha", "")
+            if sha and sha not in run_by_sha:
+                run_by_sha[sha] = {
+                    "status": run.get("status"),
+                    "conclusion": run.get("conclusion"),
+                    "url": run.get("html_url"),
+                }
+        result = []
+        for c in commits:
+            sha = c["sha"]
+            result.append({
+                "sha": sha[:7],
+                "message": c["commit"]["message"].split("\n")[0][:80],
+                "author": c["commit"]["author"]["name"],
+                "date": c["commit"]["author"]["date"],
+                "url": c["html_url"],
+                "run": run_by_sha.get(sha),
+            })
+        with _deploy_cache_lock:
+            _deploy_cache["data"] = result
+            _deploy_cache["ts"] = time.monotonic()
+        return jsonify(result)
+    except Exception as e:
+        return jsonify(error=str(e)), 502
+
+
+@app.post("/api/drop/text")
+@login_required
+def drop_upload_text():
+    payload = request.get_json(silent=True) or {}
+    text = payload.get("text", "")
+    if not text:
+        return jsonify(error="Текст пустой."), 400
+    data = text.encode("utf-8")
+    if len(data) > DROP_MAX_SIZE:
+        return jsonify(error="Слишком большой."), 413
+    item_id = str(uuid.uuid4())
+    name = f"Текст {datetime.now().strftime('%d.%m %H:%M')}"
+    with drop_lock:
+        if len(drop_items) >= DROP_MAX_ITEMS:
+            oldest = min(drop_items, key=lambda k: drop_items[k]["created"])
+            del drop_items[oldest]
+        drop_items[item_id] = {"name": name, "content_type": "text/plain; charset=utf-8",
+                               "data": data, "created": time.time(), "is_text": True}
+    return jsonify(id=item_id, name=name)
+
+
+@app.post("/api/drop/upload")
+@login_required
+def drop_upload_file():
+    f = request.files.get("file")
+    if not f:
+        return jsonify(error="Файл не выбран."), 400
+    data = f.read(DROP_MAX_SIZE + 1)
+    if len(data) > DROP_MAX_SIZE:
+        return jsonify(error="Файл слишком большой (макс 10 МБ)."), 413
+    item_id = str(uuid.uuid4())
+    name = f.filename or "файл"
+    with drop_lock:
+        if len(drop_items) >= DROP_MAX_ITEMS:
+            oldest = min(drop_items, key=lambda k: drop_items[k]["created"])
+            del drop_items[oldest]
+        drop_items[item_id] = {"name": name, "content_type": f.content_type or "application/octet-stream",
+                               "data": data, "created": time.time(), "is_text": False}
+    return jsonify(id=item_id, name=name)
+
+
+@app.get("/api/drop/list")
+@login_required
+def drop_list_api():
+    with drop_lock:
+        items = [
+            {"id": k, "name": v["name"], "size": len(v["data"]),
+             "created": v["created"], "is_text": v["is_text"]}
+            for k, v in sorted(drop_items.items(), key=lambda x: -x[1]["created"])
+        ]
+    return jsonify(items)
+
+
+@app.get("/api/drop/download/<item_id>")
+@login_required
+def drop_download(item_id):
+    with drop_lock:
+        item = drop_items.get(item_id)
+    if not item:
+        return "Не найдено", 404
+    return Response(
+        item["data"],
+        mimetype=item["content_type"],
+        headers={"Content-Disposition": f'attachment; filename="{item["name"]}"'},
+    )
+
+
+@app.delete("/api/drop/<item_id>")
+@login_required
+def drop_delete(item_id):
+    with drop_lock:
+        drop_items.pop(item_id, None)
+    return jsonify(ok=True)
+
+
+@app.get("/api/clipboard")
+@login_required
+def clipboard_get():
+    with clipboard_lock:
+        return jsonify(text=clipboard_store["text"], version=clipboard_store["version"])
+
+
+@app.post("/api/clipboard")
+@login_required
+def clipboard_set():
+    payload = request.get_json(silent=True) or {}
+    text = payload.get("text", "")
+    if len(text) > 100_000:
+        return jsonify(error="Текст слишком длинный."), 400
+    with clipboard_lock:
+        clipboard_store["text"] = text
+        clipboard_store["version"] += 1
+        ver = clipboard_store["version"]
+    return jsonify(ok=True, version=ver)
+
+
 @app.get("/cabinet")
 @login_required
 def cabinet():
@@ -663,6 +850,70 @@ def cabinet():
           .term-header { padding: 8px 12px; }
           .rdp-display > div { top: 0; left: 0; transform: none; }
         }
+
+        /* ── Новые виджеты ── */
+        .widget { margin-top: 14px; border: 1px solid rgba(45,226,255,.14); background: rgba(10,17,30,.72); }
+        .widget-toggle { width: 100%; display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; color: #e8fbff; font: 700 .88rem "Cascadia Code", Consolas, monospace; text-align: left; border: 0; background: transparent; cursor: pointer; }
+        .widget-toggle:hover { background: rgba(45,226,255,.05); }
+        .widget-arrow { color: #2de2ff; font-size: 1.1rem; transition: transform .25s; }
+        .widget-toggle[aria-expanded="true"] .widget-arrow { transform: rotate(180deg); }
+        .widget-body { padding: 0 18px 16px; }
+        .widget-empty { color: #4a5060; font-size: .8rem; margin: 0; padding: 4px 0; }
+
+        /* Аптайм */
+        .uptime-widget { padding: 14px 18px 18px; }
+        .uptime-title { font: 700 .88rem "Cascadia Code", Consolas, monospace; color: #8f99ab; margin-bottom: 12px; }
+        .uptime-value { display: flex; gap: 18px; flex-wrap: wrap; }
+        .uptime-unit { display: flex; flex-direction: column; align-items: center; min-width: 44px; }
+        .uptime-num { font: 800 2.2rem "Cascadia Code", Consolas, monospace; color: #2de2ff; letter-spacing: -.04em; line-height: 1; }
+        .uptime-lbl { font-size: .62rem; color: #6b7385; text-transform: uppercase; letter-spacing: .08em; margin-top: 4px; }
+
+        /* Карта */
+        #netmap-canvas { display: block; width: 100%; cursor: default; }
+
+        /* Деплой */
+        .deploy-item { display: grid; grid-template-columns: 64px 1fr auto; gap: 6px 10px; align-items: baseline; padding: 9px 0; border-bottom: 1px solid rgba(255,255,255,.06); font-size: .78rem; }
+        .deploy-item:last-child { border-bottom: 0; }
+        .deploy-sha { color: #69e8ff; font-family: Consolas, monospace; white-space: nowrap; }
+        .deploy-msg { color: #c4cad5; word-break: break-word; }
+        .deploy-meta { color: #6b7385; font-size: .7rem; white-space: nowrap; text-align: right; }
+        .ds { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
+        .ds-ok { background: #63f5ad; } .ds-fail { background: #ff6b81; } .ds-run { background: #fbbf24; } .ds-none { background: #4a5060; }
+
+        /* Дроп */
+        .drop-zone { border: 2px dashed rgba(45,226,255,.22); padding: 16px; text-align: center; color: #6b7385; font-size: .8rem; cursor: pointer; transition: all .2s; }
+        .drop-zone:hover, .drop-zone.drag-over { border-color: #2de2ff; color: #2de2ff; background: rgba(45,226,255,.04); }
+        .drop-textarea { width: 100%; height: 74px; margin-top: 10px; padding: 9px; color: #e8fbff; font: .8rem "Cascadia Code", Consolas, monospace; border: 1px solid rgba(255,255,255,.12); background: rgba(4,10,20,.65); resize: vertical; outline: none; }
+        .drop-textarea:focus { border-color: #2de2ff; }
+        .drop-send-btn { margin-top: 8px; padding: 8px 16px; color: #0d1321; font: 700 .74rem "Cascadia Code", Consolas, monospace; letter-spacing: .04em; background: linear-gradient(90deg,#2de2ff,#69e8ff); border: 0; cursor: pointer; }
+        .drop-list { margin-top: 12px; }
+        .drop-file { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,.06); }
+        .drop-file:last-child { border-bottom: 0; }
+        .drop-fname { flex: 1; color: #c4cad5; font-size: .78rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .drop-fsize { color: #6b7385; font-size: .7rem; white-space: nowrap; }
+        .drop-btn { padding: 4px 9px; font: 600 .7rem "Cascadia Code", Consolas, monospace; border: 1px solid; cursor: pointer; background: transparent; }
+        .drop-btn-dl { color: #2de2ff; border-color: rgba(45,226,255,.3); }
+        .drop-btn-dl:hover { background: rgba(45,226,255,.1); }
+        .drop-btn-rm { color: #ff6b81; border-color: rgba(255,107,129,.3); }
+        .drop-btn-rm:hover { background: rgba(255,107,129,.1); }
+
+        /* Буфер обмена */
+        .cb-area { width: 100%; height: 96px; padding: 10px; color: #e8fbff; font: .8rem "Cascadia Code", Consolas, monospace; border: 1px solid rgba(255,255,255,.12); background: rgba(4,10,20,.65); resize: vertical; outline: none; }
+        .cb-area:focus { border-color: #2de2ff; }
+        .cb-actions { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+        .cb-btn { padding: 7px 14px; font: 700 .72rem "Cascadia Code", Consolas, monospace; border: 1px solid; cursor: pointer; background: transparent; }
+        .cb-push { color: #ff782f; border-color: rgba(255,120,47,.35); }
+        .cb-push:hover { background: rgba(255,120,47,.1); }
+        .cb-copy { color: #63f5ad; border-color: rgba(99,245,173,.3); }
+        .cb-copy:hover { background: rgba(99,245,173,.08); }
+        .cb-info { font-size: .7rem; color: #6b7385; margin: 6px 0 0; }
+
+        /* Журнал входов */
+        .log-row { display: grid; grid-template-columns: 150px 1fr; gap: 4px 10px; padding: 7px 0; border-bottom: 1px solid rgba(255,255,255,.06); font-size: .76rem; }
+        .log-row:last-child { border-bottom: 0; }
+        .log-ts { color: #6b7385; white-space: nowrap; }
+        .log-ip { color: #69e8ff; }
+        .log-ua { color: #4a5060; font-size: .68rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; grid-column: 1 / -1; }
       </style>
     </head>
     <body>
@@ -682,6 +933,79 @@ def cabinet():
             <ul class="device-list">{{DEVICE_ITEMS}}</ul>
           </div>
           </section>
+
+          <!-- Сервер жив уже -->
+          <section class="widget">
+            <div class="uptime-widget">
+              <div class="uptime-title">Сервер жив уже</div>
+              <div class="uptime-value">
+                <div class="uptime-unit"><span class="uptime-num" id="up-d">…</span><span class="uptime-lbl">дней</span></div>
+                <div class="uptime-unit"><span class="uptime-num" id="up-h">…</span><span class="uptime-lbl">часов</span></div>
+                <div class="uptime-unit"><span class="uptime-num" id="up-m">…</span><span class="uptime-lbl">минут</span></div>
+                <div class="uptime-unit"><span class="uptime-num" id="up-s">…</span><span class="uptime-lbl">секунд</span></div>
+              </div>
+            </div>
+          </section>
+
+          <!-- Карта NetBird-сети -->
+          <section class="widget">
+            <button class="widget-toggle" id="netmap-toggle" type="button" aria-expanded="false" aria-controls="netmap-body">
+              Карта NetBird-сети <span class="widget-arrow">⌄</span>
+            </button>
+            <div id="netmap-body" hidden style="padding:0 18px 16px">
+              <canvas id="netmap-canvas" height="310"></canvas>
+            </div>
+          </section>
+
+          <!-- Логи деплоя -->
+          <section class="widget">
+            <button class="widget-toggle" id="deploy-toggle" type="button" aria-expanded="false" aria-controls="deploy-body">
+              Логи деплоя <span class="widget-arrow">⌄</span>
+            </button>
+            <div id="deploy-body" hidden class="widget-body">
+              <div id="deploy-list"><p class="widget-empty">Загрузка…</p></div>
+            </div>
+          </section>
+
+          <!-- Личный дроп -->
+          <section class="widget">
+            <button class="widget-toggle" id="drop-toggle" type="button" aria-expanded="false" aria-controls="drop-body">
+              Личный дроп <span class="widget-arrow">⌄</span>
+            </button>
+            <div id="drop-body" hidden class="widget-body">
+              <div class="drop-zone" id="drop-zone">Перетащи файл сюда или <u>нажми для выбора</u></div>
+              <input type="file" id="drop-file-input" style="display:none" multiple>
+              <textarea class="drop-textarea" id="drop-text" placeholder="Или вставь текст сюда…"></textarea>
+              <button class="drop-send-btn" id="drop-send-text" type="button">Отправить текст</button>
+              <div class="drop-list" id="drop-list"></div>
+            </div>
+          </section>
+
+          <!-- Буфер обмена -->
+          <section class="widget">
+            <button class="widget-toggle" id="cb-toggle" type="button" aria-expanded="false" aria-controls="cb-body">
+              Буфер обмена <span class="widget-arrow">⌄</span>
+            </button>
+            <div id="cb-body" hidden class="widget-body">
+              <textarea class="cb-area" id="cb-area" placeholder="Скопированный текст появится здесь…"></textarea>
+              <div class="cb-actions">
+                <button class="cb-btn cb-push" id="cb-push" type="button">Отправить на сервер</button>
+                <button class="cb-btn cb-copy" id="cb-copy" type="button">Копировать</button>
+              </div>
+              <p class="cb-info" id="cb-info">Синхронизация каждые 3 сек</p>
+            </div>
+          </section>
+
+          <!-- Журнал входов -->
+          <section class="widget" style="margin-bottom:32px">
+            <button class="widget-toggle" id="loginlog-toggle" type="button" aria-expanded="false" aria-controls="loginlog-body">
+              Журнал входов <span class="widget-arrow">⌄</span>
+            </button>
+            <div id="loginlog-body" hidden class="widget-body">
+              <div id="loginlog-list"><p class="widget-empty">Загрузка…</p></div>
+            </div>
+          </section>
+
         </div>
       </main>
 
@@ -1447,6 +1771,254 @@ def cabinet():
           });
         })();
       </script>
+      <script>
+      {
+        const esc = s => String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+
+        // ── Раскрытие виджетов ──
+        document.querySelectorAll(".widget-toggle").forEach(btn => {
+          const target = document.getElementById(btn.getAttribute("aria-controls"));
+          if (!target) return;
+          btn.addEventListener("click", () => {
+            const opened = btn.getAttribute("aria-expanded") !== "true";
+            btn.setAttribute("aria-expanded", String(opened));
+            target.hidden = !opened;
+            btn.dispatchEvent(new CustomEvent("widget-open", { detail: opened, bubbles: false }));
+          });
+        });
+
+        // ── Аптайм ──
+        {
+          const dEl = document.getElementById("up-d");
+          const hEl = document.getElementById("up-h");
+          const mEl = document.getElementById("up-m");
+          const sEl = document.getElementById("up-s");
+          const pad = n => String(n).padStart(2, "0");
+          let base = null, startTs = null;
+          const tick = () => {
+            if (base === null) return;
+            const total = base + Math.floor((Date.now() - startTs) / 1000);
+            dEl.textContent = Math.floor(total / 86400);
+            hEl.textContent = pad(Math.floor((total % 86400) / 3600));
+            mEl.textContent = pad(Math.floor((total % 3600) / 60));
+            sEl.textContent = pad(total % 60);
+          };
+          fetch("/api/uptime", { credentials: "same-origin" })
+            .then(r => r.json()).then(d => {
+              if (d.seconds == null) { dEl.closest(".uptime-value").textContent = "нет данных"; return; }
+              base = d.seconds; startTs = Date.now();
+              tick(); setInterval(tick, 1000);
+            }).catch(() => { if (dEl) dEl.closest(".uptime-value").textContent = "нет данных"; });
+        }
+
+        // ── Карта NetBird ──
+        {
+          const toggle = document.getElementById("netmap-toggle");
+          const canvas = document.getElementById("netmap-canvas");
+          if (toggle && canvas) {
+            const DEVS = [
+              { name:"NOUTBOOK",    ip:"100.104.188.141" },
+              { name:"VitazComp",   ip:"100.104.140.4"   },
+              { name:"win10prx",    ip:"100.104.1.172"   },
+              { name:"orangepi",    ip:"100.104.67.89"   },
+              { name:"ubuntu-srv",  ip:"100.104.221.91"  },
+              { name:"win10V",      ip:"100.104.160.121" },
+              { name:"ubuntuvtz",   ip:"100.104.111.39"  },
+              { name:"MOBILA",      ip:"100.104.86.103"  },
+            ];
+            let stat = {};
+            const draw = () => {
+              const dpr = window.devicePixelRatio || 1;
+              const W = canvas.parentElement.clientWidth - 36;
+              const H = 310;
+              canvas.width = W * dpr; canvas.height = H * dpr;
+              canvas.style.width = W + "px"; canvas.style.height = H + "px";
+              const ctx = canvas.getContext("2d");
+              ctx.scale(dpr, dpr);
+              ctx.clearRect(0, 0, W, H);
+              const cx = W / 2, cy = H / 2, R = Math.min(cx, cy) * 0.74, n = DEVS.length;
+              DEVS.forEach((d, i) => {
+                const a = (i / n) * Math.PI * 2 - Math.PI / 2;
+                const x = cx + Math.cos(a) * R, y = cy + Math.sin(a) * R;
+                ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(x, y);
+                ctx.strokeStyle = stat[d.ip]?.online ? "rgba(45,226,255,.28)" : "rgba(74,80,96,.2)";
+                ctx.lineWidth = 1; ctx.stroke();
+              });
+              // Центральный узел
+              ctx.beginPath(); ctx.arc(cx, cy, 20, 0, Math.PI * 2);
+              ctx.fillStyle = "rgba(255,120,47,.15)"; ctx.fill();
+              ctx.strokeStyle = "#ff782f"; ctx.lineWidth = 2; ctx.stroke();
+              ctx.fillStyle = "#ff782f"; ctx.font = "700 10px Consolas,monospace";
+              ctx.textAlign = "center"; ctx.textBaseline = "middle";
+              ctx.fillText("HOME", cx, cy);
+              // Устройства
+              DEVS.forEach((d, i) => {
+                const a = (i / n) * Math.PI * 2 - Math.PI / 2;
+                const x = cx + Math.cos(a) * R, y = cy + Math.sin(a) * R;
+                const online = stat[d.ip]?.online;
+                const lat = stat[d.ip]?.latency_ms;
+                const col = online ? "#63f5ad" : "#4a5060";
+                if (online) {
+                  ctx.beginPath(); ctx.arc(x, y, 22, 0, Math.PI * 2);
+                  ctx.fillStyle = "rgba(99,245,173,.07)"; ctx.fill();
+                }
+                ctx.beginPath(); ctx.arc(x, y, 15, 0, Math.PI * 2);
+                ctx.fillStyle = online ? "rgba(99,245,173,.13)" : "rgba(74,80,96,.1)"; ctx.fill();
+                ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.stroke();
+                ctx.fillStyle = col; ctx.font = "600 9px Consolas,monospace";
+                ctx.textAlign = "center"; ctx.textBaseline = "middle";
+                ctx.fillText(d.name.length > 8 ? d.name.slice(0,7)+"…" : d.name, x, y);
+                const lby = y + (y > cy ? 22 : -22);
+                ctx.fillStyle = "#8f99ab"; ctx.font = "500 8px Consolas,monospace";
+                if (lat != null) ctx.fillText(Math.round(lat)+"ms", x, lby);
+                else if (online) ctx.fillText("онлайн", x, lby);
+              });
+            };
+            let interval = null;
+            const reload = async () => {
+              try { const r = await fetch("/api/netbird/status",{credentials:"same-origin"}); stat = await r.json(); } catch {}
+              draw();
+            };
+            toggle.addEventListener("widget-open", e => {
+              if (e.detail) { requestAnimationFrame(reload); interval = setInterval(reload, 10000); }
+              else { clearInterval(interval); }
+            });
+          }
+        }
+
+        // ── Логи деплоя ──
+        {
+          const toggle = document.getElementById("deploy-toggle");
+          const list = document.getElementById("deploy-list");
+          const si = run => {
+            if (!run) return '<span class="ds ds-none"></span>';
+            const c = run.conclusion, s = run.status;
+            if (c === "success") return '<span class="ds ds-ok"></span>';
+            if (c === "failure") return '<span class="ds ds-fail"></span>';
+            if (s === "in_progress") return '<span class="ds ds-run"></span>';
+            return '<span class="ds ds-none"></span>';
+          };
+          let loaded = false;
+          const load = async () => {
+            list.innerHTML = '<p class="widget-empty">Загрузка…</p>';
+            try {
+              const r = await fetch("/api/deploy-logs", { credentials: "same-origin" });
+              const data = await r.json();
+              if (!Array.isArray(data)) throw new Error(data.error || "ошибка");
+              list.innerHTML = data.map(c => {
+                const dt = new Date(c.date).toLocaleString("ru-RU",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"});
+                return `<div class="deploy-item"><a class="deploy-sha" href="${c.url}" target="_blank" rel="noopener">${esc(c.sha)}</a><span class="deploy-msg">${si(c.run)}${esc(c.message)}</span><span class="deploy-meta">${esc(c.author)}<br>${dt}</span></div>`;
+              }).join("");
+            } catch(e) { list.innerHTML = `<p class="widget-empty">Ошибка: ${esc(e.message)}</p>`; }
+          };
+          if (toggle) toggle.addEventListener("widget-open", e => { if (e.detail && !loaded) { loaded = true; load(); } });
+        }
+
+        // ── Личный дроп ──
+        {
+          const toggle = document.getElementById("drop-toggle");
+          const zone = document.getElementById("drop-zone");
+          const fi = document.getElementById("drop-file-input");
+          const ta = document.getElementById("drop-text");
+          const sendBtn = document.getElementById("drop-send-text");
+          const listEl = document.getElementById("drop-list");
+          const fmt = b => b < 1024 ? b+"Б" : b < 1048576 ? (b/1024).toFixed(1)+"КБ" : (b/1048576).toFixed(1)+"МБ";
+          const renderList = async () => {
+            try {
+              const r = await fetch("/api/drop/list", { credentials: "same-origin" });
+              const items = await r.json();
+              if (!items.length) { listEl.innerHTML = '<p class="widget-empty">Пусто</p>'; return; }
+              listEl.innerHTML = items.map(it =>
+                `<div class="drop-file"><span class="drop-fname" title="${esc(it.name)}">${esc(it.name)}</span><span class="drop-fsize">${fmt(it.size)}</span><a class="drop-btn drop-btn-dl" href="/api/drop/download/${it.id}" download="${esc(it.name)}">↓</a><button class="drop-btn drop-btn-rm" data-id="${it.id}">✕</button></div>`
+              ).join("");
+              listEl.querySelectorAll("[data-id]").forEach(btn => btn.addEventListener("click", async () => {
+                await fetch(`/api/drop/${btn.dataset.id}`, { method:"DELETE", credentials:"same-origin" });
+                renderList();
+              }));
+            } catch {}
+          };
+          const uploadFile = async file => {
+            zone.textContent = `Загрузка ${file.name}…`;
+            const fd = new FormData(); fd.append("file", file);
+            try {
+              const r = await fetch("/api/drop/upload", { method:"POST", credentials:"same-origin", body:fd });
+              if (!r.ok) throw new Error((await r.json()).error);
+              zone.innerHTML = 'Перетащи файл сюда или <u>нажми для выбора</u>';
+              renderList();
+            } catch(e) {
+              zone.textContent = "Ошибка: " + e.message;
+              setTimeout(() => { zone.innerHTML = 'Перетащи файл сюда или <u>нажми для выбора</u>'; }, 2500);
+            }
+          };
+          let listLoaded = false;
+          if (toggle) toggle.addEventListener("widget-open", e => { if (e.detail && !listLoaded) { listLoaded = true; renderList(); } });
+          if (zone) {
+            zone.addEventListener("click", () => fi.click());
+            zone.addEventListener("dragover", e => { e.preventDefault(); zone.classList.add("drag-over"); });
+            zone.addEventListener("dragleave", () => zone.classList.remove("drag-over"));
+            zone.addEventListener("drop", e => { e.preventDefault(); zone.classList.remove("drag-over"); if (e.dataTransfer.files[0]) uploadFile(e.dataTransfer.files[0]); });
+          }
+          if (fi) fi.addEventListener("change", () => { if (fi.files[0]) { uploadFile(fi.files[0]); fi.value=""; } });
+          if (sendBtn) sendBtn.addEventListener("click", async () => {
+            const text = ta.value.trim(); if (!text) return;
+            try {
+              const r = await fetch("/api/drop/text", { method:"POST", credentials:"same-origin", headers:{"Content-Type":"application/json"}, body:JSON.stringify({text}) });
+              if (!r.ok) throw new Error((await r.json()).error);
+              ta.value = ""; renderList();
+            } catch(e) { alert("Ошибка: " + e.message); }
+          });
+        }
+
+        // ── Буфер обмена ──
+        {
+          const toggle = document.getElementById("cb-toggle");
+          const area = document.getElementById("cb-area");
+          const pushBtn = document.getElementById("cb-push");
+          const copyBtn = document.getElementById("cb-copy");
+          const info = document.getElementById("cb-info");
+          let lastVer = -1, timer = null;
+          const poll = async () => {
+            try {
+              const r = await fetch("/api/clipboard", { credentials: "same-origin" });
+              const d = await r.json();
+              if (d.version !== lastVer) { lastVer = d.version; area.value = d.text; if (info) info.textContent = "Обновлено: " + new Date().toLocaleTimeString("ru-RU"); }
+            } catch {}
+          };
+          if (toggle) toggle.addEventListener("widget-open", e => {
+            if (e.detail) { poll(); timer = setInterval(poll, 3000); }
+            else { clearInterval(timer); }
+          });
+          if (pushBtn) pushBtn.addEventListener("click", async () => {
+            try {
+              await fetch("/api/clipboard", { method:"POST", credentials:"same-origin", headers:{"Content-Type":"application/json"}, body:JSON.stringify({text:area.value}) });
+              lastVer = -1;
+              if (info) info.textContent = "Отправлено: " + new Date().toLocaleTimeString("ru-RU");
+            } catch {}
+          });
+          if (copyBtn) copyBtn.addEventListener("click", async () => {
+            try { await navigator.clipboard.writeText(area.value); const o=copyBtn.textContent; copyBtn.textContent="Скопировано ✓"; setTimeout(()=>{copyBtn.textContent=o;},1500); } catch {}
+          });
+        }
+
+        // ── Журнал входов ──
+        {
+          const toggle = document.getElementById("loginlog-toggle");
+          const listEl = document.getElementById("loginlog-list");
+          let loaded = false;
+          const load = async () => {
+            try {
+              const r = await fetch("/api/login-log", { credentials: "same-origin" });
+              const data = await r.json();
+              if (!data.length) { listEl.innerHTML = '<p class="widget-empty">Нет записей</p>'; return; }
+              listEl.innerHTML = data.map(e =>
+                `<div class="log-row"><span class="log-ts">${esc(e.ts)}</span><span class="log-ip">${esc(e.ip)}</span><span class="log-ua">${esc(e.ua)}</span></div>`
+              ).join("");
+            } catch {}
+          };
+          if (toggle) toggle.addEventListener("widget-open", e => { if (e.detail && !loaded) { loaded = true; load(); } });
+        }
+      }
+      </script>
     </body>
     </html>
     """
@@ -2001,6 +2573,98 @@ def home():
               submit.disabled = false;
             }
           });
+        })();
+
+        // ── Konami code + змейка ──
+        (() => {
+          const SEQ = ["ArrowUp","ArrowUp","ArrowDown","ArrowDown","ArrowLeft","ArrowRight","ArrowLeft","ArrowRight","b","a"];
+          let pos = 0;
+          document.addEventListener("keydown", e => {
+            if (e.key === SEQ[pos]) { pos++; if (pos === SEQ.length) { pos = 0; startSnake(); } }
+            else { pos = e.key === SEQ[0] ? 1 : 0; }
+          });
+
+          const startSnake = () => {
+            if (document.getElementById("snake-overlay")) return;
+            const overlay = document.createElement("div");
+            overlay.id = "snake-overlay";
+            Object.assign(overlay.style, {
+              position:"fixed", inset:"0", zIndex:"9999", background:"rgba(5,7,12,.97)",
+              display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center",
+              fontFamily:"Consolas,monospace",
+            });
+            const info = document.createElement("div");
+            info.style.cssText = "color:#6b7385;font-size:.75rem;margin-bottom:12px;letter-spacing:.06em";
+            info.textContent = "↑↓←→ — движение   Escape — выход";
+            const scoreEl = document.createElement("div");
+            scoreEl.style.cssText = "color:#2de2ff;font-size:1.1rem;font-weight:700;margin-bottom:10px;letter-spacing:.04em";
+            scoreEl.textContent = "ОЧКИ: 0";
+            const canvas = document.createElement("canvas");
+            const SZ = 20, COLS = 24, ROWS = 20;
+            canvas.width = COLS * SZ; canvas.height = ROWS * SZ;
+            canvas.style.cssText = "border:1px solid rgba(45,226,255,.2);";
+            const msgEl = document.createElement("div");
+            msgEl.style.cssText = "color:#ff782f;font-size:1rem;font-weight:700;margin-top:14px;min-height:24px;letter-spacing:.04em";
+            overlay.append(info, scoreEl, canvas, msgEl);
+            document.body.appendChild(overlay);
+            const ctx = canvas.getContext("2d");
+            let snake, dir, nextDir, food, score, running, raf;
+            const rnd = n => Math.floor(Math.random() * n);
+            const reset = () => {
+              snake = [{x:12,y:10},{x:11,y:10},{x:10,y:10}];
+              dir = {x:1,y:0}; nextDir = {x:1,y:0};
+              food = {x:rnd(COLS), y:rnd(ROWS)};
+              score = 0; running = true; msgEl.textContent = "";
+              scoreEl.textContent = "ОЧКИ: 0";
+            };
+            const draw = () => {
+              ctx.fillStyle = "#05070c"; ctx.fillRect(0,0,canvas.width,canvas.height);
+              // Grid
+              ctx.strokeStyle = "rgba(255,255,255,.04)"; ctx.lineWidth = .5;
+              for (let x=0;x<COLS;x++) { ctx.beginPath(); ctx.moveTo(x*SZ,0); ctx.lineTo(x*SZ,canvas.height); ctx.stroke(); }
+              for (let y=0;y<ROWS;y++) { ctx.beginPath(); ctx.moveTo(0,y*SZ); ctx.lineTo(canvas.width,y*SZ); ctx.stroke(); }
+              // Food
+              ctx.fillStyle = "#ff782f";
+              ctx.fillRect(food.x*SZ+3, food.y*SZ+3, SZ-6, SZ-6);
+              // Snake
+              snake.forEach((s,i) => {
+                ctx.fillStyle = i===0 ? "#2de2ff" : `rgba(45,226,255,${0.75 - i*0.02})`;
+                ctx.fillRect(s.x*SZ+1, s.y*SZ+1, SZ-2, SZ-2);
+              });
+            };
+            let last = 0;
+            const SPEED = 130;
+            const step = ts => {
+              if (!running) return;
+              raf = requestAnimationFrame(step);
+              if (ts - last < SPEED) return;
+              last = ts;
+              dir = nextDir;
+              const head = { x: (snake[0].x + dir.x + COLS) % COLS, y: (snake[0].y + dir.y + ROWS) % ROWS };
+              if (snake.some(s => s.x===head.x && s.y===head.y)) {
+                running = false;
+                msgEl.textContent = `GAME OVER — очков: ${score}. Enter — заново`;
+                draw(); return;
+              }
+              snake.unshift(head);
+              if (head.x===food.x && head.y===food.y) {
+                score++;
+                scoreEl.textContent = `ОЧКИ: ${score}`;
+                food = {x:rnd(COLS), y:rnd(ROWS)};
+              } else { snake.pop(); }
+              draw();
+            };
+            const keyFn = e => {
+              const m = {ArrowUp:{x:0,y:-1},ArrowDown:{x:0,y:1},ArrowLeft:{x:-1,y:0},ArrowRight:{x:1,y:0}};
+              if (e.key === "Escape") { cancelAnimationFrame(raf); overlay.remove(); document.removeEventListener("keydown",keyFn); return; }
+              if (e.key === "Enter" && !running) { reset(); raf = requestAnimationFrame(step); return; }
+              const nd = m[e.key];
+              if (nd && !(nd.x===-dir.x && nd.y===-dir.y)) { nextDir = nd; e.preventDefault(); }
+            };
+            document.addEventListener("keydown", keyFn);
+            reset();
+            raf = requestAnimationFrame(step);
+          };
         })();
       </script>
     </body>
