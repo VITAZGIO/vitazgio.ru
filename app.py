@@ -68,6 +68,79 @@ console_login_attempts_lock = threading.Lock()
 login_log: deque = deque(maxlen=100)
 login_log_lock = threading.Lock()
 
+# Машины для сбора метрик через SSH
+METRICS_TARGETS = [
+    {
+        "ip": "100.104.67.89",
+        "name": "orangepizero3",
+        "user_env": "METRICS_ORANGEPI_USER",
+        "pass_env": "METRICS_ORANGEPI_PASS",
+    },
+    {
+        "ip": "100.104.221.91",
+        "name": "ubuntu-server",
+        "user_env": "METRICS_UBUNTUSERVER_USER",
+        "pass_env": "METRICS_UBUNTUSERVER_PASS",
+    },
+    {
+        "ip": "100.104.111.39",
+        "name": "ubuntuvitaz1",
+        "user_env": "METRICS_UBUNTUVITAZ1_USER",
+        "pass_env": "METRICS_UBUNTUVITAZ1_PASS",
+    },
+]
+METRICS_INTERVAL = 30
+metrics_data: dict = {t["ip"]: None for t in METRICS_TARGETS}
+metrics_lock = threading.Lock()
+
+# Команда сбора метрик (CPU%, RAM%, disk%, uptime_sec, temp_C)
+_METRICS_CMD = (
+    "awk '/^cpu /{u=$2+$4;t=$2+$3+$4+$5;if(t>0)printf \"%.1f\\n\",u/t*100;else print 0}' /proc/stat; "
+    "awk '/MemTotal/{t=$2}/MemAvailable/{a=$2}END{if(t>0)printf \"%.1f\\n\",(t-a)/t*100;else print 0}' /proc/meminfo; "
+    "df / --output=pcent 2>/dev/null | tail -1 | tr -d ' %'; "
+    "awk '{printf \"%.0f\\n\",$1}' /proc/uptime; "
+    "cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null | awk '{printf \"%.1f\\n\",$1/1000}' || echo ''"
+)
+
+
+def _collect_metrics_for(target: dict) -> dict | None:
+    user = os.environ.get(target["user_env"])
+    passwd = os.environ.get(target["pass_env"])
+    if not user or not passwd:
+        return None
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    try:
+        client.connect(target["ip"], username=user, password=passwd,
+                       timeout=6, look_for_keys=False, allow_agent=False)
+        _, stdout, _ = client.exec_command(_METRICS_CMD, timeout=8)
+        lines = stdout.read().decode(errors="replace").strip().splitlines()
+        result = {
+            "cpu": float(lines[0]) if len(lines) > 0 and lines[0] else None,
+            "ram": float(lines[1]) if len(lines) > 1 and lines[1] else None,
+            "disk": int(lines[2]) if len(lines) > 2 and lines[2].isdigit() else None,
+            "uptime": int(lines[3]) if len(lines) > 3 and lines[3].isdigit() else None,
+            "temp": float(lines[4]) if len(lines) > 4 and lines[4] else None,
+            "ts": time.time(),
+        }
+        return result
+    except Exception:
+        return None
+    finally:
+        client.close()
+
+
+def _metrics_loop():
+    while True:
+        for target in METRICS_TARGETS:
+            data = _collect_metrics_for(target)
+            with metrics_lock:
+                metrics_data[target["ip"]] = data
+        time.sleep(METRICS_INTERVAL)
+
+
+threading.Thread(target=_metrics_loop, daemon=True).start()
+
 drop_items: dict = {}
 drop_lock = threading.Lock()
 DROP_MAX_ITEMS = 20
@@ -575,6 +648,17 @@ def vnc_ws(ws, ip):
         guac_sock.close()
 
 
+@app.get("/api/metrics")
+@login_required
+def metrics_api():
+    with metrics_lock:
+        result = []
+        for t in METRICS_TARGETS:
+            d = metrics_data.get(t["ip"])
+            result.append({"ip": t["ip"], "name": t["name"], "data": d})
+    return jsonify(result)
+
+
 @app.post("/api/wol")
 @login_required
 def wol():
@@ -889,6 +973,21 @@ def cabinet():
         .widget-body { padding: 0 18px 16px; }
         .widget-empty { color: #4a5060; font-size: .8rem; margin: 0; padding: 4px 0; }
 
+        /* Метрики */
+        .metrics-grid { display: flex; flex-direction: column; gap: 14px; }
+        .metrics-host { border: 1px solid rgba(255,255,255,.07); padding: 12px 14px; }
+        .metrics-host-name { font: 700 .82rem "Cascadia Code", Consolas, monospace; color: #c4cad5; margin-bottom: 10px; }
+        .metrics-bars { display: grid; grid-template-columns: 40px 1fr 36px; align-items: center; gap: 5px 8px; font-size: .74rem; }
+        .metrics-label { color: #6b7385; }
+        .metrics-track { height: 6px; background: rgba(255,255,255,.07); border-radius: 3px; overflow: hidden; }
+        .metrics-fill { height: 100%; border-radius: 3px; transition: width .4s ease; }
+        .fill-cpu  { background: linear-gradient(90deg,#2de2ff,#69e8ff); }
+        .fill-ram  { background: linear-gradient(90deg,#ff782f,#ffb35c); }
+        .fill-disk { background: linear-gradient(90deg,#a855f7,#c084fc); }
+        .metrics-val { color: #e8fbff; text-align: right; white-space: nowrap; }
+        .metrics-extra { display: flex; gap: 14px; margin-top: 8px; font-size: .72rem; color: #6b7385; }
+        .metrics-offline { color: #4a5060; font-size: .78rem; font-style: italic; }
+
         /* Аптайм */
         .uptime-widget { padding: 14px 18px 18px; }
         .uptime-title { font: 700 .88rem "Cascadia Code", Consolas, monospace; color: #8f99ab; margin-bottom: 12px; }
@@ -958,6 +1057,16 @@ def cabinet():
           <div id="netbird-devices" hidden>
             <ul class="device-list">{{DEVICE_ITEMS}}</ul>
           </div>
+          </section>
+
+          <!-- Метрики Linux-машин -->
+          <section class="widget">
+            <button class="widget-toggle" id="metrics-toggle" type="button" aria-expanded="false" aria-controls="metrics-body">
+              Метрики машин <span class="widget-arrow">⌄</span>
+            </button>
+            <div id="metrics-body" hidden class="widget-body">
+              <div class="metrics-grid" id="metrics-grid"><p class="widget-empty">Загрузка…</p></div>
+            </div>
           </section>
 
           <!-- Сервер жив уже -->
@@ -1825,6 +1934,48 @@ def cabinet():
             btn.dispatchEvent(new CustomEvent("widget-open", { detail: opened, bubbles: false }));
           });
         });
+
+        // ── Метрики ──
+        {
+          const toggle = document.getElementById("metrics-toggle");
+          const grid = document.getElementById("metrics-grid");
+          let timer = null;
+          const fmtUp = s => {
+            if (!s) return "";
+            const d = Math.floor(s/86400), h = Math.floor((s%86400)/3600), m = Math.floor((s%3600)/60);
+            return d ? `${d}д ${h}ч` : h ? `${h}ч ${m}м` : `${m}м`;
+          };
+          const bar = (cls, pct) => {
+            const w = Math.min(100, Math.max(0, pct || 0));
+            const color = pct > 85 ? "#ef4444" : pct > 60 ? "#fbbf24" : "";
+            return `<div class="metrics-track"><div class="metrics-fill ${cls}" style="width:${w}%;${color?"background:"+color:""}"></div></div>`;
+          };
+          const render = async () => {
+            try {
+              const r = await fetch("/api/metrics", { credentials: "same-origin" });
+              const items = await r.json();
+              grid.innerHTML = items.map(({ name, data: d }) => {
+                if (!d) return `<div class="metrics-host"><div class="metrics-host-name">${esc(name)}</div><div class="metrics-offline">нет данных / офлайн</div></div>`;
+                return `<div class="metrics-host">
+                  <div class="metrics-host-name">${esc(name)}</div>
+                  <div class="metrics-bars">
+                    <span class="metrics-label">CPU</span>${bar("fill-cpu",d.cpu)}<span class="metrics-val">${d.cpu!=null?d.cpu.toFixed(1)+"%" :"—"}</span>
+                    <span class="metrics-label">RAM</span>${bar("fill-ram",d.ram)}<span class="metrics-val">${d.ram!=null?d.ram.toFixed(1)+"%":"—"}</span>
+                    <span class="metrics-label">Disk</span>${bar("fill-disk",d.disk)}<span class="metrics-val">${d.disk!=null?d.disk+"%":"—"}</span>
+                  </div>
+                  <div class="metrics-extra">
+                    ${d.uptime!=null?`<span>⏱ ${fmtUp(d.uptime)}</span>`:""}
+                    ${d.temp!=null?`<span>🌡 ${d.temp.toFixed(1)}°C</span>`:""}
+                  </div>
+                </div>`;
+              }).join("");
+            } catch {}
+          };
+          if (toggle) toggle.addEventListener("widget-open", e => {
+            if (e.detail) { render(); timer = setInterval(render, 32000); }
+            else { clearInterval(timer); }
+          });
+        }
 
         // ── Аптайм ──
         {
