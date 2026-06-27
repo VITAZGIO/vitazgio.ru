@@ -2415,7 +2415,7 @@ def home():
         .service--cloud { --accent: #1687d9; --glow: rgba(22,135,217,.22); }
         .service--jellyfin { --accent: #aa5cc3; --glow: rgba(170,92,195,.22); }
         .service--npm { --accent: #f04477; --glow: rgba(240,68,119,.2); }
-        .service--mc { --accent: #7fbd58; --glow: rgba(127,189,88,.2); }
+        .service--qb { --accent: #4fa8e8; --glow: rgba(79,168,232,.22); }
 
         .service-top { display: flex; align-items: flex-start; justify-content: space-between; }
 
@@ -2586,27 +2586,23 @@ def home():
               <div class="service-copy"><h2>Nginx Proxy</h2><p>Управление доменами и прокси</p><span class="domain">npm.vitazgio.ru</span></div>
             </a>
 
-            <a class="service service--mc" href="https://mc.vitazgio.ru" aria-label="Открыть Minecraft сервер">
+            <a class="service service--qb" href="https://qb.vitazgio.ru" aria-label="Открыть qBittorrent">
               <div class="service-top">
                 <span class="logo" aria-hidden="true">
-                  <svg viewBox="0 0 48 48" fill="none" shape-rendering="geometricPrecision">
+                  <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
                     <defs>
-                      <linearGradient id="grass-top" x1="8" y1="9" x2="39" y2="23" gradientUnits="userSpaceOnUse"><stop stop-color="#a8db68"/><stop offset="1" stop-color="#6eae48"/></linearGradient>
-                      <linearGradient id="dirt-left" x1="7" y1="17" x2="25" y2="42" gradientUnits="userSpaceOnUse"><stop stop-color="#b98253"/><stop offset="1" stop-color="#855333"/></linearGradient>
-                      <linearGradient id="dirt-right" x1="24" y1="24" x2="41" y2="39" gradientUnits="userSpaceOnUse"><stop stop-color="#98623d"/><stop offset="1" stop-color="#6b4029"/></linearGradient>
+                      <radialGradient id="qb-bg" cx="50%" cy="40%" r="55%"><stop offset="0%" stop-color="#4fa8e8"/><stop offset="100%" stop-color="#1a5fa8"/></radialGradient>
+                      <radialGradient id="qb-shine" cx="38%" cy="30%" r="42%"><stop offset="0%" stop-color="#ffffff" stop-opacity=".55"/><stop offset="100%" stop-color="#ffffff" stop-opacity="0"/></radialGradient>
                     </defs>
-                    <path d="m24 5 18 9.5L24 24 6 14.5 24 5Z" fill="url(#grass-top)"/>
-                    <path d="m6 14.5 18 9.5v19L6 33.5v-19Z" fill="url(#dirt-left)"/>
-                    <path d="M42 14.5 24 24v19l18-9.5v-19Z" fill="url(#dirt-right)"/>
-                    <path d="m6 14.5 18 9.5 18-9.5M24 24v19" stroke="#d6efa5" stroke-opacity=".42" stroke-width="1.2"/>
-                    <path d="m6 14.5 18 9.5v4l-4-2.1v3.4l-4-2.1v-3.4l-4-2.1v3.4L6 22v-7.5Z" fill="#79b64d"/>
-                    <path d="M42 14.5 24 24v4l4-2.1v3.4l4-2.1v-3.4l4-2.1v3.4l6-3.1v-7.5Z" fill="#659b40"/>
-                    <path d="m10 27 4 2.1v4.2L10 31v-4Zm8 7.2 3 1.6v4.1l-3-1.6v-4.1Zm18-6.4 3-1.6v4.2L36 32v-4.2Zm-8 5.3 4-2.1v4.2l-4 2.1v-4.2Z" fill="#5b3523" fill-opacity=".68"/>
+                    <circle cx="24" cy="24" r="22" fill="url(#qb-bg)"/>
+                    <circle cx="24" cy="24" r="22" fill="url(#qb-shine)"/>
+                    <text x="24" y="32" text-anchor="middle" font-family="'Arial Black',Arial,sans-serif" font-weight="900" font-size="22" fill="#ffffff" letter-spacing="-1">qb</text>
+                    <circle cx="24" cy="24" r="21.5" stroke="#ffffff" stroke-opacity=".18" stroke-width="1"/>
                   </svg>
                 </span>
                 <span class="arrow" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M7 17 17 7m0 0H8m9 0v9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
               </div>
-              <div class="service-copy"><h2>Minecraft</h2><p>Игровой сервер для друзей</p><span class="domain">mc.vitazgio.ru</span></div>
+              <div class="service-copy"><h2>qBittorrent</h2><p>Веб-интерфейс торрент-клиента</p><span class="domain">qb.vitazgio.ru</span></div>
             </a>
           </div>
         </nav>
