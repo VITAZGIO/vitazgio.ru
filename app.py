@@ -60,6 +60,8 @@ netbird_status_lock = threading.Lock()
 ssh_enabled_ips = {device["ip"] for device in NETBIRD_DEVICES if device.get("ssh_enabled")}
 
 SSH_GATE_PASSWORD_PREFIX = os.environ.get("SSH_GATE_PASSWORD_PREFIX")
+HA_URL = os.environ.get("HA_URL", "").rstrip("/")
+HA_TOKEN = os.environ.get("HA_TOKEN", "")
 CONSOLE_LOGIN_WINDOW_SECONDS = 300
 CONSOLE_LOGIN_MAX_ATTEMPTS = 5
 console_login_attempts = defaultdict(deque)
@@ -659,6 +661,25 @@ def metrics_api():
     return jsonify(result)
 
 
+@app.post("/api/pc/shutdown")
+@login_required
+def pc_shutdown():
+    if not HA_URL or not HA_TOKEN:
+        return jsonify(error="HA не настроен."), 503
+    try:
+        req = urllib.request.Request(
+            f"{HA_URL}/api/services/shell_command/pc_shutdown_192_168_1_193",
+            data=b"{}",
+            headers={"Authorization": f"Bearer {HA_TOKEN}", "Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            resp.read()
+        return jsonify(ok=True)
+    except Exception as e:
+        return jsonify(error=str(e)), 500
+
+
 @app.post("/api/wol")
 @login_required
 def wol():
@@ -906,8 +927,10 @@ def cabinet():
         .connect-btn:hover, .connect-btn:focus-visible { color: #fff; background: rgba(255,120,47,.22); outline: none; }
         .connect-btn.btn-offline { color: #4a5060; border-color: rgba(100,100,110,.2); background: rgba(60,65,75,.06); cursor: not-allowed; pointer-events: none; }
         .connect-btn-empty { display: block; }
-        .wol-btn { padding: 5px 7px; color: #fbbf24; font-size: .9rem; border: 1px solid rgba(251,191,36,.3); background: rgba(251,191,36,.07); cursor: pointer; }
+        .wol-btn { padding: 5px 7px; color: #fbbf24; font-size: .9rem; border: 1px solid rgba(251,191,36,.3); background: rgba(251,191,36,.07); cursor: pointer; transition: all .2s; }
         .wol-btn:hover { background: rgba(251,191,36,.18); border-color: #fbbf24; }
+        .wol-btn.wol-online { color: #ff6b81; border-color: rgba(255,107,129,.3); background: rgba(255,107,129,.07); }
+        .wol-btn.wol-online:hover { background: rgba(255,107,129,.18); border-color: #ff6b81; }
         .wol-btn.wol-sent { color: #63f5ad; border-color: rgba(99,245,173,.4); background: rgba(99,245,173,.1); }
         .wol-empty { display: block; }
         .copy-status { color: #63f5ad; font-size: .7rem; opacity: 0; transition: opacity .18s ease; }
@@ -1292,14 +1315,17 @@ def cabinet():
               const statusEl = item.querySelector(".device-status");
               if (!info) return;
               const btn = item.querySelector(".connect-btn");
+              const wolBtn = item.querySelector(".wol-btn");
               if (info.online) {
                 statusEl.textContent = info.latency_ms != null ? `${Math.round(info.latency_ms)} ms` : "онлайн";
                 statusEl.className = "device-status online";
                 if (btn) btn.classList.remove("btn-offline");
+                if (wolBtn) { wolBtn.classList.add("wol-online"); wolBtn.title = "Выключить ПК"; wolBtn.textContent = "⏻"; }
               } else {
                 statusEl.textContent = "офлайн";
                 statusEl.className = "device-status offline";
                 if (btn) btn.classList.add("btn-offline");
+                if (wolBtn) { wolBtn.classList.remove("wol-online"); wolBtn.title = "Wake-on-LAN"; wolBtn.textContent = "⚡"; }
               }
             });
           };
@@ -1310,21 +1336,28 @@ def cabinet():
         (() => {
           document.querySelectorAll(".wol-btn").forEach(btn => {
             btn.addEventListener("click", async () => {
-              const mac = btn.dataset.mac;
+              const isOnline = btn.classList.contains("wol-online");
               btn.disabled = true;
+              const origText = btn.textContent;
               try {
-                const r = await fetch("/api/wol", {
-                  method: "POST", credentials: "same-origin",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ mac }),
-                });
-                if (!r.ok) throw new Error((await r.json()).error);
+                if (isOnline) {
+                  if (!confirm("Выключить ПК?")) { btn.disabled = false; return; }
+                  const r = await fetch("/api/pc/shutdown", { method: "POST", credentials: "same-origin" });
+                  if (!r.ok) throw new Error((await r.json()).error);
+                } else {
+                  const r = await fetch("/api/wol", {
+                    method: "POST", credentials: "same-origin",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ mac: btn.dataset.mac }),
+                  });
+                  if (!r.ok) throw new Error((await r.json()).error);
+                }
                 btn.textContent = "✓";
                 btn.classList.add("wol-sent");
-                setTimeout(() => { btn.textContent = "⚡"; btn.classList.remove("wol-sent"); btn.disabled = false; }, 4000);
+                setTimeout(() => { btn.textContent = origText; btn.classList.remove("wol-sent"); btn.disabled = false; }, 4000);
               } catch (e) {
                 btn.textContent = "✗";
-                setTimeout(() => { btn.textContent = "⚡"; btn.disabled = false; }, 2000);
+                setTimeout(() => { btn.textContent = origText; btn.disabled = false; }, 2000);
               }
             });
           });
