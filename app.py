@@ -45,7 +45,7 @@ NETBIRD_DEVICES = [
     {"ip": "100.104.221.91", "name": "ubuntu-server", "ssh_enabled": True},
     {"ip": "100.104.160.121", "name": "windows10V", "rdp_enabled": True},
     {"ip": "100.104.111.39", "name": "ubuntuvitaz1", "ssh_enabled": True},
-    {"ip": "100.104.86.103", "name": "MOBILA"},
+    {"ip": "100.104.86.103", "name": "MOBILA", "vnc_enabled": True},
 ]
 PING_INTERVAL_SECONDS = 10
 PING_TIMEOUT_SECONDS = 1
@@ -286,6 +286,7 @@ def console_ws(ws, ip):
 
 
 rdp_enabled_ips = {device["ip"] for device in NETBIRD_DEVICES}
+vnc_enabled_ips = {device["ip"] for device in NETBIRD_DEVICES if device.get("vnc_enabled")}
 
 
 def _guac_encode(*args):
@@ -442,6 +443,112 @@ def rdp_ws(ws, ip):
         guac_sock.close()
 
 
+def _guac_handshake_vnc(guac_sock, hostname, password, width, height):
+    f = guac_sock.makefile("rb", buffering=0)
+    guac_sock.sendall(_guac_encode("select", "vnc"))
+    instr = _guac_recv_instr(f)
+    if not instr or instr[0] != "args":
+        raise ValueError(f"expected args, got {instr}")
+    arg_names = instr[1:]
+    guac_sock.sendall(_guac_encode("size", str(width), str(height), "96"))
+    guac_sock.sendall(_guac_encode("audio"))
+    guac_sock.sendall(_guac_encode("video"))
+    guac_sock.sendall(_guac_encode("image", "image/png", "image/jpeg"))
+    vnc_params = {
+        "hostname": hostname,
+        "port": "5900",
+        "password": password,
+        "color-depth": "24",
+        "encodings": "zrle ultra copyrect hextile zlib corre rre raw",
+    }
+    connect_values = [vnc_params.get(name, "") for name in arg_names]
+    guac_sock.sendall(_guac_encode("connect", *connect_values))
+
+
+@sock.route("/ws/vnc/<ip>")
+def vnc_ws(ws, ip):
+    if not session.get("authenticated") or not session.get("console_authenticated"):
+        ws.close()
+        return
+    if ip not in vnc_enabled_ips:
+        ws.close()
+        return
+
+    message = ws.receive(timeout=15)
+    try:
+        auth = json.loads(message) if message else {}
+    except ValueError:
+        auth = {}
+    if auth.get("type") != "auth":
+        ws.close()
+        return
+    password = auth.get("password", "")
+    width = int(auth.get("width", 1280))
+    height = int(auth.get("height", 720))
+
+    try:
+        guac_sock = socket.create_connection(("127.0.0.1", 4822), timeout=5)
+    except OSError as e:
+        print(f"[vnc] guacd connect error ({ip}): {e}", flush=True)
+        ws.close()
+        return
+
+    try:
+        _guac_handshake_vnc(guac_sock, ip, password, width, height)
+    except Exception as e:
+        print(f"[vnc] handshake error ({ip}): {e}", flush=True)
+        guac_sock.close()
+        ws.close()
+        return
+
+    guac_sock.settimeout(2.0)
+    stop_event = threading.Event()
+
+    def pump_guac_to_ws():
+        decoder = codecs.getincrementaldecoder("utf-8")()
+        try:
+            while not stop_event.is_set():
+                try:
+                    data = guac_sock.recv(8192)
+                except socket.timeout:
+                    continue
+                if not data:
+                    break
+                text = decoder.decode(data)
+                if text:
+                    ws.send(text)
+        except Exception as e:
+            print(f"[vnc] pump error ({ip}): {e}", flush=True)
+        finally:
+            stop_event.set()
+
+    threading.Thread(target=pump_guac_to_ws, daemon=True).start()
+
+    def vnc_keepalive():
+        while not stop_event.is_set():
+            time.sleep(10)
+            if stop_event.is_set():
+                break
+            try:
+                ws.send("3.nop;")
+            except Exception:
+                stop_event.set()
+
+    threading.Thread(target=vnc_keepalive, daemon=True).start()
+
+    try:
+        while not stop_event.is_set():
+            message = ws.receive(timeout=120)
+            if message is None:
+                continue
+            guac_sock.sendall(message.encode() if isinstance(message, str) else message)
+    except Exception as e:
+        print(f"[vnc] ws error ({ip}): {e}", flush=True)
+    finally:
+        stop_event.set()
+        guac_sock.close()
+
+
 @app.get("/cabinet")
 @login_required
 def cabinet():
@@ -451,10 +558,12 @@ def cabinet():
         f'<span class="device-name">{device["name"]}</span>'
         f'<span class="device-status" data-status>проверка…</span>'
         + (
-            f'<button class="connect-btn" type="button" data-ip="{device["ip"]}" data-name="{device["name"]}" data-type="ssh">Подключиться</button>'
+            f'<button class="connect-btn" type="button" data-ip="{device["ip"]}" data-name="{device["name"]}" data-type="ssh">SSH</button>'
             if device.get("ssh_enabled")
             else f'<button class="connect-btn" type="button" data-ip="{device["ip"]}" data-name="{device["name"]}" data-type="rdp">RDP</button>'
             if device.get("rdp_enabled")
+            else f'<button class="connect-btn" type="button" data-ip="{device["ip"]}" data-name="{device["name"]}" data-type="vnc">VNC</button>'
+            if device.get("vnc_enabled")
             else '<span class="connect-btn-empty"></span>'
         )
         + '<span class="copy-status">Скопировано</span>'
@@ -599,6 +708,19 @@ def cabinet():
             <input id="ssh-login-password" name="password" type="password" autocomplete="off" placeholder="Пароль" required>
             <button class="gate-submit" type="submit">Подключиться</button>
             <p id="ssh-login-error" class="gate-error" role="alert"></p>
+          </form>
+        </section>
+      </div>
+
+      <div id="vnc-login-modal" class="gate-modal" hidden>
+        <div class="gate-backdrop" data-vnc-login-close></div>
+        <section class="gate-panel" role="dialog" aria-modal="true" aria-labelledby="vnc-login-title">
+          <button class="gate-close" type="button" data-vnc-login-close aria-label="Закрыть">×</button>
+          <h2 id="vnc-login-title">VNC</h2>
+          <form id="vnc-login-form">
+            <input id="vnc-login-password" name="password" type="password" autocomplete="off" placeholder="Пароль (если задан)" required>
+            <button class="gate-submit" type="submit">Подключиться</button>
+            <p id="vnc-login-error" class="gate-error" role="alert"></p>
           </form>
         </section>
       </div>
@@ -779,15 +901,44 @@ def cabinet():
             el.className = "conn-quality " + (rtt < 80 ? "good" : rtt < 250 ? "warn" : "bad");
           };
 
+          // ── VNC login modal ───────────────────────────────────────────
+          const vncLoginModal    = document.getElementById("vnc-login-modal");
+          const vncLoginForm     = document.getElementById("vnc-login-form");
+          const vncLoginPassword = document.getElementById("vnc-login-password");
+          const vncLoginError    = document.getElementById("vnc-login-error");
+
+          const closeVncLogin = () => {
+            vncLoginModal.hidden = true;
+            vncLoginForm.reset();
+            vncLoginError.textContent = "";
+          };
+          document.querySelectorAll("[data-vnc-login-close]").forEach(el => el.addEventListener("click", () => {
+            closeVncLogin(); pendingDevice = null;
+          }));
+
+          const openVncLogin = () => {
+            document.getElementById("vnc-login-title").textContent = pendingDevice ? `VNC — ${pendingDevice.name}` : "VNC";
+            vncLoginModal.hidden = false;
+            requestAnimationFrame(() => vncLoginPassword.focus());
+          };
+
+          vncLoginForm.addEventListener("submit", (event) => {
+            event.preventDefault();
+            const device = pendingDevice;
+            const password = vncLoginPassword.value;
+            closeVncLogin();
+            if (device) openRdp(device.ip, device.name, "", password, "vnc");
+          });
+
           // ── RDP helpers ──────────────────────────────────────────────
-          function GuacAuthTunnel(ip, authPayload) {
+          function GuacAuthTunnel(ip, authPayload, protocol) {
             Guacamole.Tunnel.call(this);
             const self = this;
             let ws = null;
             let guacBuf = "";
             this.connect = function() {
               const proto = location.protocol === "https:" ? "wss:" : "ws:";
-              ws = new WebSocket(`${proto}//${location.host}/ws/rdp/${ip}`);
+              ws = new WebSocket(`${proto}//${location.host}/ws/${protocol ?? "rdp"}/${ip}`);
               self.state = Guacamole.Tunnel.State.CONNECTING;
               if (self.onstatechange) self.onstatechange(self.state);
               ws.onopen = () => {
@@ -873,7 +1024,7 @@ def cabinet():
           };
           rdpCloseBtn.addEventListener("click", closeRdp);
 
-          const openRdp = (ip, name, username, password) => {
+          const openRdp = (ip, name, username, password, protocol = "rdp") => {
             if (typeof Guacamole === "undefined") {
               alert("Не удалось загрузить guacamole-common-js — проверьте сеть/CDN.");
               return;
@@ -902,7 +1053,7 @@ def cabinet():
             const height = Math.round(displayRect.height) || (window.innerHeight - 45);
 
             // ── tunnel + client ─────────────────────────────────────────
-            const tunnel = new GuacAuthTunnel(ip, { type: "auth", username, password, width, height });
+            const tunnel = new GuacAuthTunnel(ip, { type: "auth", username, password, width, height }, protocol);
             rdpClient = new Guacamole.Client(tunnel);
             const displayEl = rdpClient.getDisplay().getElement();
             rdpDisplay.innerHTML = "";
@@ -1163,6 +1314,7 @@ def cabinet():
               consoleAuthenticated = true;
               closeGate();
               if (pendingDevice?.type === "rdp") openRdpLogin();
+              else if (pendingDevice?.type === "vnc") openVncLogin();
               else openSshLogin();
             } catch {
               gateError.textContent = "Сервер недоступен.";
@@ -1275,6 +1427,7 @@ def cabinet():
               pendingDevice = { ip: button.dataset.ip, name: button.dataset.name, type: button.dataset.type || "ssh" };
               if (consoleAuthenticated) {
                 if (pendingDevice.type === "rdp") openRdpLogin();
+                else if (pendingDevice.type === "vnc") openVncLogin();
                 else openSshLogin();
               } else {
                 gateModal.hidden = false;
