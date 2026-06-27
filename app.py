@@ -43,7 +43,7 @@ login_attempts_lock = threading.Lock()
 
 NETBIRD_DEVICES = [
     {"ip": "100.104.188.141", "name": "NOUTBOOK", "rdp_enabled": True},
-    {"ip": "100.104.140.4", "name": "VitazComp", "rdp_enabled": True},
+    {"ip": "100.104.140.4", "name": "VitazComp", "rdp_enabled": True, "wol_mac": "d8:bb:c1:a6:d4:81"},
     {"ip": "100.104.1.172", "name": "windows10proxmox", "rdp_enabled": True},
     {"ip": "100.104.67.89", "name": "orangepizero3", "ssh_enabled": True},
     {"ip": "100.104.221.91", "name": "ubuntu-server", "ssh_enabled": True},
@@ -575,6 +575,26 @@ def vnc_ws(ws, ip):
         guac_sock.close()
 
 
+@app.post("/api/wol")
+@login_required
+def wol():
+    payload = request.get_json(silent=True) or {}
+    mac = payload.get("mac", "")
+    mac_clean = mac.replace(":", "").replace("-", "").upper()
+    if len(mac_clean) != 12 or not all(c in "0123456789ABCDEF" for c in mac_clean):
+        return jsonify(error="Неверный MAC-адрес."), 400
+    mac_bytes = bytes.fromhex(mac_clean)
+    packet = b"\xff" * 6 + mac_bytes * 16
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            s.sendto(packet, ("255.255.255.255", 9))
+            s.sendto(packet, ("192.168.1.255", 9))
+    except OSError as e:
+        return jsonify(error=str(e)), 500
+    return jsonify(ok=True)
+
+
 @app.get("/api/uptime")
 @login_required
 def uptime_api():
@@ -745,6 +765,10 @@ def cabinet():
         f'<span class="device-name">{device["name"]}</span>'
         f'<span class="device-status" data-status>проверка…</span>'
         + (
+            f'<button class="wol-btn" type="button" data-mac="{device["wol_mac"]}" title="Wake-on-LAN">⚡</button>'
+            if device.get("wol_mac") else '<span class="wol-empty"></span>'
+        )
+        + (
             f'<button class="connect-btn" type="button" data-ip="{device["ip"]}" data-name="{device["name"]}" data-type="ssh">SSH</button>'
             if device.get("ssh_enabled")
             else f'<button class="connect-btn" type="button" data-ip="{device["ip"]}" data-name="{device["name"]}" data-type="rdp">RDP</button>'
@@ -785,7 +809,7 @@ def cabinet():
         .netbird-arrow { margin-left: auto; color: #ff782f; font-size: 1.3rem; transition: transform .25s ease; }
         .netbird-toggle[aria-expanded="true"] .netbird-arrow { transform: rotate(180deg); }
         .device-list { margin: 0; padding: 8px 18px 18px; list-style: none; border-top: 1px solid rgba(255,255,255,.07); }
-        .device { min-height: 48px; display: grid; grid-template-columns: 150px 1fr 70px 116px 82px; align-items: center; gap: 12px; border-bottom: 1px solid rgba(255,255,255,.06); }
+        .device { min-height: 48px; display: grid; grid-template-columns: 150px 1fr 70px 36px 116px 82px; align-items: center; gap: 12px; border-bottom: 1px solid rgba(255,255,255,.06); }
         .device:last-child { border-bottom: 0; }
         .copy-ip { padding: 7px 8px; color: #69e8ff; text-align: left; border: 0; background: transparent; }
         .copy-ip:hover, .copy-ip:focus-visible { color: #fff; border: 0; outline: 1px solid rgba(45,226,255,.28); background: rgba(45,226,255,.08); }
@@ -798,6 +822,10 @@ def cabinet():
         .connect-btn:hover, .connect-btn:focus-visible { color: #fff; background: rgba(255,120,47,.22); outline: none; }
         .connect-btn.btn-offline { color: #4a5060; border-color: rgba(100,100,110,.2); background: rgba(60,65,75,.06); cursor: not-allowed; pointer-events: none; }
         .connect-btn-empty { display: block; }
+        .wol-btn { padding: 5px 7px; color: #fbbf24; font-size: .9rem; border: 1px solid rgba(251,191,36,.3); background: rgba(251,191,36,.07); cursor: pointer; }
+        .wol-btn:hover { background: rgba(251,191,36,.18); border-color: #fbbf24; }
+        .wol-btn.wol-sent { color: #63f5ad; border-color: rgba(99,245,173,.4); background: rgba(99,245,173,.1); }
+        .wol-empty { display: block; }
         .copy-status { color: #63f5ad; font-size: .7rem; opacity: 0; transition: opacity .18s ease; }
         .copy-status.visible { opacity: 1; }
         @media (max-width: 900px) {
@@ -810,6 +838,7 @@ def cabinet():
           .device-name { grid-column: 1; grid-row: 2; padding-left: 8px; }
           .device-status { grid-column: 2; grid-row: 1; }
           .connect-btn, .connect-btn-empty { grid-column: 1; grid-row: 3; justify-self: start; margin-left: 8px; }
+          .wol-btn, .wol-empty { grid-column: 2; grid-row: 3; justify-self: end; }
           .copy-status { grid-column: 2; grid-row: 2; text-align: right; }
         }
 
@@ -1167,6 +1196,29 @@ def cabinet():
           };
           refreshStatus();
           setInterval(refreshStatus, 10000);
+        })();
+
+        (() => {
+          document.querySelectorAll(".wol-btn").forEach(btn => {
+            btn.addEventListener("click", async () => {
+              const mac = btn.dataset.mac;
+              btn.disabled = true;
+              try {
+                const r = await fetch("/api/wol", {
+                  method: "POST", credentials: "same-origin",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ mac }),
+                });
+                if (!r.ok) throw new Error((await r.json()).error);
+                btn.textContent = "✓";
+                btn.classList.add("wol-sent");
+                setTimeout(() => { btn.textContent = "⚡"; btn.classList.remove("wol-sent"); btn.disabled = false; }, 4000);
+              } catch (e) {
+                btn.textContent = "✗";
+                setTimeout(() => { btn.textContent = "⚡"; btn.disabled = false; }, 2000);
+              }
+            });
+          });
         })();
 
         (() => {
