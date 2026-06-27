@@ -1062,6 +1062,13 @@ def cabinet():
             // ── mouse / touch ────────────────────────────────────────────
             let touchMode = "touchpad";
             let inputHandler = null;
+            const scaleMouseState = (e) => {
+              const st = e.state ?? e;
+              const sc = rdpClient?.getDisplay()?.getScale() ?? 1;
+              return (sc && sc !== 1)
+                ? { ...st, x: Math.round(st.x / sc), y: Math.round(st.y / sc) }
+                : st;
+            };
             const attachInput = () => {
               if (inputHandler) { inputHandler.onmousedown = inputHandler.onmouseup = inputHandler.onmousemove = null; }
               const Ctor = !isMobile              ? Guacamole.Mouse
@@ -1069,7 +1076,7 @@ def cabinet():
                          : Guacamole.Mouse.Touchscreen;
               inputHandler = new Ctor(displayEl);
               inputHandler.onmousedown = inputHandler.onmouseup = inputHandler.onmousemove =
-                (e) => rdpClient?.sendMouseState(e.state ?? e);
+                (e) => rdpClient?.sendMouseState(scaleMouseState(e));
             };
             attachInput();
 
@@ -1112,8 +1119,11 @@ def cabinet():
               rdpDisplay.addEventListener("mouseup",   (e) => { if (plLocked) plSend(plX, plY, e.buttons); }, { signal: sig });
               rdpDisplay.addEventListener("mousemove", (e) => {
                 if (!plLocked) return;
-                plX = Math.max(0, Math.min(width - 1, plX + e.movementX));
-                plY = Math.max(0, Math.min(height - 1, plY + e.movementY));
+                const d = rdpClient?.getDisplay();
+                const nW = d?.getWidth()  || width;
+                const nH = d?.getHeight() || height;
+                plX = Math.max(0, Math.min(nW - 1, plX + e.movementX));
+                plY = Math.max(0, Math.min(nH - 1, plY + e.movementY));
                 plSend(plX, plY, e.buttons);
               }, { signal: sig });
               rdpDisplay.addEventListener("wheel", (e) => {
