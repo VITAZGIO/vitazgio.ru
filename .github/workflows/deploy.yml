@@ -20,3 +20,8 @@ jobs:
         run: |
           cd /opt/sites/vitazgio.ru
           docker compose up -d --build
+
+      - name: Clean up Docker cache
+        run: |
+          docker builder prune -f
+          docker image prune -f
