@@ -8,6 +8,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends iputils-ping tz
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY . .
+COPY app.py .
+COPY static/ ./static/
 
 CMD ["python", "app.py"]

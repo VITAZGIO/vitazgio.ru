@@ -1,0 +1,9 @@
+.git
+.github
+actions-runner
+__pycache__
+*.pyc
+*.pyo
+.claude
+ssh_host_key
+.env
