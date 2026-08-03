@@ -16,10 +16,11 @@ jobs:
           git fetch origin
           git reset --hard origin/main
 
-      - name: Rebuild and restart Docker
+      # Дома живёт только guacd — сайт переехал в Амстердам.
+      - name: Restart guacd at home
         run: |
           cd /opt/sites/vitazgio.ru
-          docker compose up -d --build
+          docker compose up -d guacd
 
       - name: Clean up Docker cache
         run: |
