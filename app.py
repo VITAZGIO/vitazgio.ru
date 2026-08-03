@@ -207,10 +207,11 @@ def _drop_discard(item_id):
         for child in _drop_children(item_id):
             _drop_discard(child)
     drop_items.pop(item_id, None)
-    try:
-        os.remove(_drop_path(item_id))
-    except OSError:
-        pass
+    for path in (_drop_path(item_id), os.path.join(DROP_DIR, f"{item_id}.thumb")):
+        try:
+            os.remove(path)
+        except OSError:
+            pass
 
 
 def _drop_path_to_root(item_id):
@@ -277,11 +278,12 @@ def _drop_load_index():
 
     known = set(drop_items)
     for fname in os.listdir(DROP_DIR):
-        if fname.endswith(".bin") and fname[:-4] not in known:
-            try:
-                os.remove(os.path.join(DROP_DIR, fname))
-            except OSError:
-                pass
+        for suffix in (".bin", ".thumb"):
+            if fname.endswith(suffix) and fname[: -len(suffix)] not in known:
+                try:
+                    os.remove(os.path.join(DROP_DIR, fname))
+                except OSError:
+                    pass
     for fname in os.listdir(DROP_TMP_DIR):
         try:
             os.remove(os.path.join(DROP_TMP_DIR, fname))
@@ -1161,6 +1163,53 @@ def deploy_logs_api():
         return jsonify(error=str(e)), 502
 
 
+def _drop_thumb_path(item_id):
+    return os.path.join(DROP_DIR, f"{item_id}.thumb")
+
+
+def _drop_can_thumb(item):
+    """Миниатюры делаем только для растровых картинок. SVG сюда не пускаем:
+    это документ со скриптами, а не картинка."""
+    if item.get("kind") != "file":
+        return False
+    ext = item["name"].rsplit(".", 1)[-1].lower() if "." in item["name"] else ""
+    return ext in {"jpg", "jpeg", "png", "gif", "webp", "bmp", "tif", "tiff"}
+
+
+def _drop_make_thumb(item_id):
+    """Рисует миниатюру рядом с файлом. Возвращает путь или None."""
+    thumb_path = _drop_thumb_path(item_id)
+    if os.path.exists(thumb_path):
+        return thumb_path
+    try:
+        from PIL import Image
+
+        Image.MAX_IMAGE_PIXELS = 80_000_000  # защита от «бомб» с гигантским разрешением
+        with Image.open(_drop_path(item_id)) as image:
+            image.draft("RGB", (256, 256))  # для JPEG декодируем сразу уменьшенным
+            image = image.convert("RGB")
+            image.thumbnail((200, 200))
+            image.save(thumb_path, "JPEG", quality=62, optimize=True)
+        return thumb_path
+    except Exception:
+        return None
+
+
+@app.get("/api/drop/thumb/<item_id>")
+@login_required
+def drop_thumb(item_id):
+    with drop_lock:
+        item = drop_items.get(item_id)
+    if not item or not _drop_can_thumb(item):
+        return "", 404
+    thumb_path = _drop_make_thumb(item_id)
+    if not thumb_path:
+        return "", 404
+    response = send_file(thumb_path, mimetype="image/jpeg", conditional=True)
+    response.headers["Cache-Control"] = "private, max-age=86400"
+    return response
+
+
 def _drop_send(item_id, item):
     """Отдаём всегда вложением: иначе загруженный .html или .svg со скриптом
     выполнился бы на домене сайта и добрался до сессии и токена устройства."""
@@ -1368,6 +1417,7 @@ def drop_list_api():
             {"id": k, "kind": v["kind"], "name": v["name"], "size": v.get("size", 0),
              "created": v["created"], "preview": v.get("preview"),
              "truncated": v.get("truncated", False),
+             "thumb": _drop_can_thumb(v),
              "share": bool(v.get("share")),
              "share_expires": (v.get("share") or {}).get("expires")}
             for k, v in drop_items.items() if v.get("parent") == parent
@@ -2954,21 +3004,34 @@ def drop_page():
         .up.failed .up-pct { color: #ff6b81; }
 
         .items { margin-top: 18px; display: grid; gap: 8px; }
-        .item { display: grid; grid-template-columns: 34px 1fr auto; align-items: center; gap: 4px 12px; padding: 11px 13px; border: 1px solid rgba(255,255,255,.08); background: rgba(10,17,30,.7); transition: border-color .18s, background .18s; }
+        /* Именованные области: без них браузер раскладывал элементы как попало. */
+        .item { display: grid; grid-template-columns: 46px minmax(0, 1fr) auto;
+                grid-template-areas: "ico name acts" "ico meta acts" "body body body";
+                align-items: center; gap: 2px 13px; padding: 11px 13px;
+                border: 1px solid rgba(255,255,255,.08); background: rgba(10,17,30,.7);
+                transition: border-color .18s, background .18s; }
         .item:hover { border-color: rgba(45,226,255,.3); background: rgba(14,24,42,.85); }
         .item.folder { cursor: pointer; }
         .item.drag-over { border-color: #63f5ad; background: rgba(99,245,173,.1); }
         .item.dragging { opacity: .4; }
-        .ico { font-size: 1.3rem; text-align: center; }
-        .nm { min-width: 0; color: #dfe7f3; font-size: .84rem; overflow-wrap: anywhere; }
-        .meta { grid-column: 2; color: #6b7385; font-size: .68rem; }
-        .acts { display: flex; gap: 5px; grid-row: 1 / 3; }
+
+        .ico { grid-area: ico; justify-self: center; width: 34px; height: 42px; display: grid; place-items: center;
+               color: var(--tint, #7d8798); font-size: .5rem; font-weight: 800; letter-spacing: .02em;
+               border: 2px solid var(--tint, #7d8798); border-radius: 5px;
+               background: color-mix(in srgb, var(--tint, #7d8798) 12%, transparent); }
+        .ico.img { border-style: solid; background-size: cover; background-position: center; font-size: 0; }
+        .ico.dir { width: 38px; height: 30px; border: 0; border-radius: 0; background: none; }
+        .ico.dir svg { width: 38px; height: 30px; }
+
+        .nm { grid-area: name; min-width: 0; color: #dfe7f3; font-size: .84rem; overflow-wrap: anywhere; }
+        .meta { grid-area: meta; color: #6b7385; font-size: .68rem; }
+        .acts { grid-area: acts; display: flex; gap: 5px; align-self: center; }
         .act { padding: 5px 7px; color: #6b7385; font-size: .82rem; line-height: 1; border: 1px solid rgba(255,255,255,.1); background: transparent; cursor: pointer; transition: all .16s; }
         .act:hover { color: #fff; border-color: rgba(45,226,255,.4); background: rgba(45,226,255,.1); }
         .act.del:hover { color: #ff6b81; border-color: rgba(255,107,129,.45); background: rgba(255,107,129,.1); }
         .act.on { color: #63f5ad; border-color: rgba(99,245,173,.4); }
 
-        .txt { grid-column: 1 / -1; margin-top: 8px; padding: 10px 12px; color: #b8c2d4; font-size: .76rem; white-space: pre-wrap; overflow-wrap: anywhere; border-left: 2px solid rgba(255,120,47,.5); background: rgba(4,10,20,.5); }
+        .txt { grid-area: body; margin-top: 8px; padding: 10px 12px; color: #b8c2d4; font-size: .76rem; white-space: pre-wrap; overflow-wrap: anywhere; border-left: 2px solid rgba(255,120,47,.5); background: rgba(4,10,20,.5); }
         .txt-more { margin-top: 6px; color: #69e8ff; font-size: .72rem; background: none; border: 0; padding: 0; cursor: pointer; }
 
         .empty { padding: 40px 0; color: #4a5060; font-size: .82rem; text-align: center; }
@@ -2980,7 +3043,8 @@ def drop_page():
 
         @media (max-width: 560px) {
           .quota { margin-left: 0; width: 100%; }
-          .acts { grid-row: auto; grid-column: 1 / -1; justify-content: flex-end; }
+          .item { grid-template-areas: "ico name name" "ico meta meta" "acts acts acts" "body body body"; }
+          .acts { justify-content: flex-end; margin-top: 8px; }
         }
       </style>
     </head>
@@ -3000,7 +3064,8 @@ def drop_page():
           <button class="btn" id="mkdir" type="button">Новая папка</button>
           <input class="search" id="search" type="search" placeholder="Поиск в этой папке…">
           <button class="btn" id="sort" type="button">Сначала новые</button>
-          <input type="file" id="file-input" multiple hidden>
+          <!-- accept обязателен: без него Android показывает только камеру и галерею -->
+          <input type="file" id="file-input" accept="*/*" multiple hidden>
         </div>
 
         <div class="crumbs" id="crumbs"></div>
@@ -3036,20 +3101,37 @@ def drop_page():
         const fmtDate = ts => new Date(ts * 1000).toLocaleString("ru-RU",
           { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" });
 
-        const iconFor = it => {
-          if (it.kind === "folder") return "📁";
-          if (it.kind === "text") return "📝";
-          const ext = (it.name.split(".").pop() || "").toLowerCase();
-          if (["jpg","jpeg","png","gif","webp","bmp","svg","heic"].includes(ext)) return "🖼";
-          if (["zip","7z","rar","tar","gz","xz"].includes(ext)) return "🗜";
-          if (["pdf"].includes(ext)) return "📕";
-          if (["doc","docx","odt","rtf"].includes(ext)) return "📘";
-          if (["xls","xlsx","ods","csv"].includes(ext)) return "📗";
-          if (["ppt","pptx","odp"].includes(ext)) return "📙";
-          if (["mp4","mkv","avi","mov","webm"].includes(ext)) return "🎬";
-          if (["mp3","wav","flac","ogg","m4a"].includes(ext)) return "🎵";
-          if (["exe","msi","apk","deb","appimage"].includes(ext)) return "⚙";
-          return "📄";
+        // Эмодзи выглядят по-разному на каждой платформе, поэтому рисуем
+        // одинаковые значки сами: рамка нужного цвета плюс подпись типа.
+        const TINTS = [
+          [["pdf"], "#ff5a5a"],
+          [["doc","docx","odt","rtf"], "#4a90e2"],
+          [["xls","xlsx","ods","csv"], "#3ec97a"],
+          [["ppt","pptx","odp"], "#ff9f45"],
+          [["zip","7z","rar","tar","gz","xz"], "#f5c344"],
+          [["mp4","mkv","avi","mov","webm","m4v"], "#c77dff"],
+          [["mp3","wav","flac","ogg","m4a","opus"], "#56d4dd"],
+          [["exe","msi","apk","deb","appimage"], "#8b95a5"],
+          [["jpg","jpeg","png","gif","webp","bmp","svg","heic","tif","tiff"], "#63f5ad"],
+          [["txt","md","log","json","xml","yml","yaml","ini","conf"], "#9aa6b8"],
+        ];
+        const extOf = name => (name.includes(".") ? name.split(".").pop() : "").toLowerCase();
+        const tintOf = ext => (TINTS.find(([list]) => list.includes(ext)) || [null, "#7d8798"])[1];
+
+        const iconHtml = it => {
+          if (it.kind === "folder") {
+            return `<span class="ico dir"><svg viewBox="0 0 38 30" fill="none" aria-hidden="true">
+              <path d="M1 5a3 3 0 0 1 3-3h9l4 4h17a3 3 0 0 1 3 3v18a3 3 0 0 1-3 3H4a3 3 0 0 1-3-3V5Z" fill="#f5c344" fill-opacity=".22"/>
+              <path d="M1 5a3 3 0 0 1 3-3h9l4 4h17a3 3 0 0 1 3 3v18a3 3 0 0 1-3 3H4a3 3 0 0 1-3-3V5Z" stroke="#f5c344" stroke-width="2"/>
+            </svg></span>`;
+          }
+          if (it.kind === "text") return `<span class="ico" style="--tint:#ff9f45">ТЕКСТ</span>`;
+          const ext = extOf(it.name);
+          if (it.thumb) {
+            return `<span class="ico img" style="--tint:${tintOf(ext)};background-image:url(/api/drop/thumb/${encodeURIComponent(it.id)})"></span>`;
+          }
+          const label = ext ? ext.slice(0, 4).toUpperCase() : "ФАЙЛ";
+          return `<span class="ico" style="--tint:${tintOf(ext)}">${esc(label)}</span>`;
         };
 
         let toastTimer = null;
@@ -3104,7 +3186,7 @@ def drop_page():
             const meta = isFolder ? "папка · " + fmtDate(it.created)
                                   : fmtSize(it.size) + " · " + fmtDate(it.created);
             return `<div class="item ${it.kind}" data-id="${esc(it.id)}" draggable="true">
-              <span class="ico">${iconFor(it)}</span>
+              ${iconHtml(it)}
               <span class="nm">${esc(it.name)}</span>
               <span class="acts">
                 ${isFolder ? "" : `<button class="act" data-act="dl" title="Скачать">⤓</button>`}
