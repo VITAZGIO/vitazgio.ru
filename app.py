@@ -21,7 +21,7 @@ from functools import wraps
 from zoneinfo import ZoneInfo
 
 import paramiko
-from flask import Flask, Response, jsonify, redirect, request, session, url_for
+from flask import Flask, Response, jsonify, redirect, request, send_file, session, url_for
 from flask_sock import Sock
 
 app = Flask(__name__)
@@ -141,10 +141,73 @@ def _metrics_loop():
 
 threading.Thread(target=_metrics_loop, daemon=True).start()
 
-drop_items: dict = {}
-drop_lock = threading.Lock()
+DROP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "drop_data")
+DROP_INDEX_PATH = os.path.join(DROP_DIR, "index.json")
 DROP_MAX_ITEMS = 20
 DROP_MAX_SIZE = 10 * 1024 * 1024
+DROP_TTL_SECONDS = 7 * 24 * 3600
+
+drop_items: dict = {}
+drop_lock = threading.Lock()
+os.makedirs(DROP_DIR, exist_ok=True)
+
+
+def _drop_path(item_id):
+    return os.path.join(DROP_DIR, f"{item_id}.bin")
+
+
+def _drop_write_index():
+    """Вызывать под drop_lock."""
+    tmp = DROP_INDEX_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(drop_items, fh, ensure_ascii=False)
+    os.replace(tmp, DROP_INDEX_PATH)
+
+
+def _drop_discard(item_id):
+    """Вызывать под drop_lock."""
+    drop_items.pop(item_id, None)
+    try:
+        os.remove(_drop_path(item_id))
+    except OSError:
+        pass
+
+
+def _drop_prune_expired():
+    """Вызывать под drop_lock. Возвращает число удалённых."""
+    now = time.time()
+    stale = [k for k, v in drop_items.items() if now - v["created"] > DROP_TTL_SECONDS]
+    for item_id in stale:
+        _drop_discard(item_id)
+    return len(stale)
+
+
+def _drop_make_room():
+    """Вызывать под drop_lock: освобождает место под новый элемент."""
+    while len(drop_items) >= DROP_MAX_ITEMS:
+        _drop_discard(min(drop_items, key=lambda k: drop_items[k]["created"]))
+
+
+def _drop_load_index():
+    try:
+        with open(DROP_INDEX_PATH, encoding="utf-8") as fh:
+            saved = json.load(fh)
+    except (OSError, ValueError):
+        saved = {}
+    for item_id, meta in saved.items():
+        if os.path.exists(_drop_path(item_id)):
+            drop_items[item_id] = meta
+    for fname in os.listdir(DROP_DIR):
+        if fname.endswith(".bin") and fname[:-4] not in drop_items:
+            try:
+                os.remove(os.path.join(DROP_DIR, fname))
+            except OSError:
+                pass
+    _drop_prune_expired()
+    _drop_write_index()
+
+
+_drop_load_index()
 
 clipboard_store: dict = {"text": "", "version": 0}
 clipboard_lock = threading.Lock()
@@ -777,11 +840,16 @@ def drop_upload_text():
     item_id = str(uuid.uuid4())
     name = f"Текст {datetime.now().strftime('%d.%m %H:%M')}"
     with drop_lock:
-        if len(drop_items) >= DROP_MAX_ITEMS:
-            oldest = min(drop_items, key=lambda k: drop_items[k]["created"])
-            del drop_items[oldest]
+        _drop_prune_expired()
+        _drop_make_room()
+        try:
+            with open(_drop_path(item_id), "wb") as fh:
+                fh.write(data)
+        except OSError as e:
+            return jsonify(error=f"Не удалось сохранить: {e}"), 500
         drop_items[item_id] = {"name": name, "content_type": "text/plain; charset=utf-8",
-                               "data": data, "created": time.time(), "is_text": True}
+                               "size": len(data), "created": time.time(), "is_text": True}
+        _drop_write_index()
     return jsonify(id=item_id, name=name)
 
 
@@ -791,17 +859,28 @@ def drop_upload_file():
     f = request.files.get("file")
     if not f:
         return jsonify(error="Файл не выбран."), 400
-    data = f.read(DROP_MAX_SIZE + 1)
-    if len(data) > DROP_MAX_SIZE:
+    if request.content_length and request.content_length > DROP_MAX_SIZE + 8192:
         return jsonify(error="Файл слишком большой (макс 10 МБ)."), 413
     item_id = str(uuid.uuid4())
     name = f.filename or "файл"
+    path = _drop_path(item_id)
+    try:
+        f.save(path)
+        size = os.path.getsize(path)
+    except OSError as e:
+        return jsonify(error=f"Не удалось сохранить: {e}"), 500
+    if size > DROP_MAX_SIZE:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+        return jsonify(error="Файл слишком большой (макс 10 МБ)."), 413
     with drop_lock:
-        if len(drop_items) >= DROP_MAX_ITEMS:
-            oldest = min(drop_items, key=lambda k: drop_items[k]["created"])
-            del drop_items[oldest]
+        _drop_prune_expired()
+        _drop_make_room()
         drop_items[item_id] = {"name": name, "content_type": f.content_type or "application/octet-stream",
-                               "data": data, "created": time.time(), "is_text": False}
+                               "size": size, "created": time.time(), "is_text": False}
+        _drop_write_index()
     return jsonify(id=item_id, name=name)
 
 
@@ -809,8 +888,10 @@ def drop_upload_file():
 @login_required
 def drop_list_api():
     with drop_lock:
+        if _drop_prune_expired():
+            _drop_write_index()
         items = [
-            {"id": k, "name": v["name"], "size": len(v["data"]),
+            {"id": k, "name": v["name"], "size": v["size"],
              "created": v["created"], "is_text": v["is_text"]}
             for k, v in sorted(drop_items.items(), key=lambda x: -x[1]["created"])
         ]
@@ -824,10 +905,11 @@ def drop_download(item_id):
         item = drop_items.get(item_id)
     if not item:
         return "Не найдено", 404
-    return Response(
-        item["data"],
+    return send_file(
+        _drop_path(item_id),
         mimetype=item["content_type"],
-        headers={"Content-Disposition": f'attachment; filename="{item["name"]}"'},
+        as_attachment=True,
+        download_name=item["name"],
     )
 
 
@@ -835,7 +917,9 @@ def drop_download(item_id):
 @login_required
 def drop_delete(item_id):
     with drop_lock:
-        drop_items.pop(item_id, None)
+        if item_id in drop_items:
+            _drop_discard(item_id)
+            _drop_write_index()
     return jsonify(ok=True)
 
 

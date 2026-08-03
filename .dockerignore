@@ -1,6 +1,7 @@
 .git
 .github
 actions-runner
+drop_data
 __pycache__
 *.pyc
 *.pyo
