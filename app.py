@@ -1001,12 +1001,12 @@ def cabinet():
         .netbird-count { display: block; margin-top: 5px; color: #8f99ab; font-size: .74rem; letter-spacing: .08em; text-transform: uppercase; }
         .netbird-arrow { margin-left: auto; color: #ff782f; font-size: 1.3rem; transition: transform .25s ease; }
         .netbird-toggle[aria-expanded="true"] .netbird-arrow { transform: rotate(180deg); }
-        .device-list { margin: 0; padding: 8px 18px 18px; list-style: none; border-top: 1px solid rgba(255,255,255,.07); }
+        .device-list { container-type: inline-size; margin: 0; padding: 8px 18px 18px; list-style: none; border-top: 1px solid rgba(255,255,255,.07); }
         .device { min-height: 48px; display: grid; grid-template-columns: 150px 1fr 70px 36px 116px 82px; align-items: center; gap: 12px; border-bottom: 1px solid rgba(255,255,255,.06); }
         .device:last-child { border-bottom: 0; }
         .copy-ip { padding: 7px 8px; color: #69e8ff; text-align: left; border: 0; background: transparent; }
         .copy-ip:hover, .copy-ip:focus-visible { color: #fff; border: 0; outline: 1px solid rgba(45,226,255,.28); background: rgba(45,226,255,.08); }
-        .device-name { color: #c4cad5; font-size: .84rem; overflow-wrap: anywhere; }
+        .device-name { min-width: 0; color: #c4cad5; font-size: .84rem; overflow-wrap: break-word; }
         .device-status { color: #6b7385; font-size: .76rem; text-align: right; white-space: nowrap; }
         .device-status::before { content: "● "; }
         .device-status.online { color: #63f5ad; }
@@ -1029,6 +1029,11 @@ def cabinet():
         @media (max-width: 560px) {
           .cabinet { padding-inline: 20px; }
           .cabinet-header { align-items: flex-start; justify-content: space-between; gap: 12px; }
+        }
+        /* Считаем ширину самого списка, а не окна: в две колонки кабинет
+           бывает узким и при широком экране — тогда имя устройства сжималось
+           в ноль и рассыпалось по одной букве в строку. */
+        @container (max-width: 640px) {
           .device { grid-template-columns: 1fr auto; gap: 4px 10px; padding: 8px 0; }
           .device-name { grid-column: 1; grid-row: 2; padding-left: 8px; }
           .device-status { grid-column: 2; grid-row: 1; }
