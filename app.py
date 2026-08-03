@@ -77,8 +77,10 @@ CONSOLE_LOGIN_MAX_ATTEMPTS = 5
 console_login_attempts = defaultdict(deque)
 console_login_attempts_lock = threading.Lock()
 
-login_log: deque = deque(maxlen=100)
+login_log: list = []
 login_log_lock = threading.Lock()
+LOGIN_LOG_DAYS = 14          # с запасом: просили хранить не меньше недели
+LOGIN_LOG_MAX = 500          # потолок, чтобы файл не рос бесконечно
 
 # Машины для сбора метрик через SSH
 METRICS_TARGETS = [
@@ -421,13 +423,6 @@ def _device_forget(selector):
 
 _devices_load()
 
-clipboard_store: dict = {"text": "", "version": 0}
-clipboard_lock = threading.Lock()
-
-_deploy_cache: dict = {"data": None, "ts": 0.0}
-_deploy_cache_lock = threading.Lock()
-DEPLOY_CACHE_TTL = 60
-GITHUB_REPO = "VITAZGIO/vitazgio.ru"
 
 
 def console_password_today():
@@ -464,14 +459,49 @@ def netbird_ping_loop():
 threading.Thread(target=netbird_ping_loop, daemon=True).start()
 
 
+LOGIN_LOG_PATH = os.path.join(DATA_DIR, "login_log.json")
+
+
+def _login_log_trim():
+    """Вызывать под login_log_lock: режет старьё по возрасту и по количеству."""
+    edge = time.time() - LOGIN_LOG_DAYS * 86400
+    login_log[:] = [row for row in login_log if row.get("at", 0) >= edge][-LOGIN_LOG_MAX:]
+
+
+def _login_log_save():
+    """Вызывать под login_log_lock."""
+    try:
+        tmp = LOGIN_LOG_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(login_log, fh, ensure_ascii=False)
+        os.replace(tmp, LOGIN_LOG_PATH)
+    except OSError:
+        pass
+
+
+def _login_log_load():
+    try:
+        with open(LOGIN_LOG_PATH, encoding="utf-8") as fh:
+            login_log.extend(json.load(fh))
+    except (OSError, ValueError):
+        return
+    _login_log_trim()
+
+
 def _log_login(note=""):
     with login_log_lock:
         ua = request.headers.get("User-Agent", "")[:100]
         login_log.append({
+            "at": time.time(),
             "ip": _client_ip(),
             "ts": datetime.now(ZoneInfo("Europe/Moscow")).strftime("%d.%m.%Y %H:%M:%S"),
             "ua": f"{ua} · {note}" if note else ua,
         })
+        _login_log_trim()
+        _login_log_save()
+
+
+_login_log_load()
 
 
 def login_required(view):
@@ -1036,7 +1066,8 @@ def uptime_api():
 @login_required
 def login_log_api():
     with login_log_lock:
-        return jsonify(list(reversed(list(login_log))))
+        _login_log_trim()
+        return jsonify(list(reversed(login_log)))
 
 
 @app.post("/api/devices/trust")
@@ -1114,114 +1145,6 @@ def device_forget_api(selector):
     if removed and (request.cookies.get(DEVICE_COOKIE) or "").split(".", 1)[0] == selector:
         g.clear_device_cookie = True
     return jsonify(ok=True)
-
-
-@app.get("/api/deploy-logs")
-@login_required
-def deploy_logs_api():
-    now = time.monotonic()
-    with _deploy_cache_lock:
-        if _deploy_cache["data"] is not None and now - _deploy_cache["ts"] < DEPLOY_CACHE_TTL:
-            return jsonify(_deploy_cache["data"])
-    try:
-        headers = {"User-Agent": "vitazgio-site/1.0", "Accept": "application/vnd.github.v3+json"}
-        req = urllib.request.Request(
-            f"https://api.github.com/repos/{GITHUB_REPO}/commits?per_page=8", headers=headers
-        )
-        with urllib.request.urlopen(req, timeout=8) as resp:
-            commits = json.loads(resp.read())
-        req2 = urllib.request.Request(
-            f"https://api.github.com/repos/{GITHUB_REPO}/actions/runs?per_page=10", headers=headers
-        )
-        with urllib.request.urlopen(req2, timeout=8) as resp:
-            runs_data = json.loads(resp.read())
-        run_by_sha = {}
-        for run in runs_data.get("workflow_runs", []):
-            sha = run.get("head_sha", "")
-            if sha and sha not in run_by_sha:
-                run_by_sha[sha] = {
-                    "status": run.get("status"),
-                    "conclusion": run.get("conclusion"),
-                    "url": run.get("html_url"),
-                }
-        result = []
-        for c in commits:
-            sha = c["sha"]
-            result.append({
-                "sha": sha[:7],
-                "message": c["commit"]["message"].split("\n")[0][:80],
-                "author": c["commit"]["author"]["name"],
-                "date": c["commit"]["author"]["date"],
-                "url": c["html_url"],
-                "run": run_by_sha.get(sha),
-            })
-        with _deploy_cache_lock:
-            _deploy_cache["data"] = result
-            _deploy_cache["ts"] = time.monotonic()
-        return jsonify(result)
-    except Exception as e:
-        return jsonify(error=str(e)), 502
-
-
-def _drop_thumb_path(item_id):
-    return os.path.join(DROP_DIR, f"{item_id}.thumb")
-
-
-def _drop_can_thumb(item):
-    """Миниатюры делаем только для растровых картинок. SVG сюда не пускаем:
-    это документ со скриптами, а не картинка."""
-    if item.get("kind") != "file":
-        return False
-    ext = item["name"].rsplit(".", 1)[-1].lower() if "." in item["name"] else ""
-    return ext in {"jpg", "jpeg", "png", "gif", "webp", "bmp", "tif", "tiff"}
-
-
-def _drop_make_thumb(item_id):
-    """Рисует миниатюру рядом с файлом. Возвращает путь или None."""
-    thumb_path = _drop_thumb_path(item_id)
-    if os.path.exists(thumb_path):
-        return thumb_path
-    try:
-        from PIL import Image
-
-        Image.MAX_IMAGE_PIXELS = 80_000_000  # защита от «бомб» с гигантским разрешением
-        with Image.open(_drop_path(item_id)) as image:
-            image.draft("RGB", (256, 256))  # для JPEG декодируем сразу уменьшенным
-            image = image.convert("RGB")
-            image.thumbnail((200, 200))
-            image.save(thumb_path, "JPEG", quality=62, optimize=True)
-        return thumb_path
-    except Exception:
-        return None
-
-
-@app.get("/api/drop/thumb/<item_id>")
-@login_required
-def drop_thumb(item_id):
-    with drop_lock:
-        item = drop_items.get(item_id)
-    if not item or not _drop_can_thumb(item):
-        return "", 404
-    thumb_path = _drop_make_thumb(item_id)
-    if not thumb_path:
-        return "", 404
-    response = send_file(thumb_path, mimetype="image/jpeg", conditional=True)
-    response.headers["Cache-Control"] = "private, max-age=86400"
-    return response
-
-
-def _drop_send(item_id, item):
-    """Отдаём всегда вложением: иначе загруженный .html или .svg со скриптом
-    выполнился бы на домене сайта и добрался до сессии и токена устройства."""
-    response = send_file(
-        _drop_path(item_id),
-        mimetype="application/octet-stream",
-        as_attachment=True,
-        download_name=item["name"],
-        conditional=True,
-    )
-    response.headers["Content-Security-Policy"] = "default-src 'none'; sandbox"
-    return response
 
 
 @app.post("/api/drop/text")
@@ -1516,27 +1439,6 @@ def drop_delete(item_id):
     return jsonify(ok=True)
 
 
-@app.get("/api/clipboard")
-@login_required
-def clipboard_get():
-    with clipboard_lock:
-        return jsonify(text=clipboard_store["text"], version=clipboard_store["version"])
-
-
-@app.post("/api/clipboard")
-@login_required
-def clipboard_set():
-    payload = request.get_json(silent=True) or {}
-    text = payload.get("text", "")
-    if len(text) > 100_000:
-        return jsonify(error="Текст слишком длинный."), 400
-    with clipboard_lock:
-        clipboard_store["text"] = text
-        clipboard_store["version"] += 1
-        ver = clipboard_store["version"]
-    return jsonify(ok=True, version=ver)
-
-
 @app.get("/cabinet")
 @login_required
 def cabinet():
@@ -1577,22 +1479,16 @@ def cabinet():
         body { margin: 0; min-height: 100svh; color: #e9fbff; font-family: "Cascadia Code", Consolas, monospace; background: radial-gradient(circle at top left, #192a44, #0d1321 55%); }
         .cabinet { min-height: 100svh; padding: clamp(24px, 4vw, 54px); background: linear-gradient(135deg, rgba(10,18,32,.25), transparent 60%); }
         .cabinet-header { display: flex; align-items: center; gap: 20px; }
-        h1 { margin: 0; font-size: clamp(2.1rem, 5vw, 4.2rem); letter-spacing: -.07em; text-shadow: 2px 0 #ff3fa4, -2px 0 #2de2ff; }
+        h1 { margin: 0; font-size: clamp(1.7rem, 3.6vw, 2.6rem); font-weight: 700; letter-spacing: -.02em;
+             background: linear-gradient(95deg, #eaf6ff, #7fd8ff 55%, #2de2ff);
+             -webkit-background-clip: text; background-clip: text; color: transparent; }
         .logout-form { margin: 0; }
         .logout-button { padding: 10px 16px; color: #dffaff; font: 700 .78rem "Cascadia Code", Consolas, monospace; border: 1px solid rgba(45,226,255,.28); background: rgba(45,226,255,.07); cursor: pointer; }
         .logout-button:hover { border-color: #2de2ff; background: rgba(45,226,255,.14); }
         .install-button { margin-left: auto; color: #1a0d04; border: 0; background: linear-gradient(90deg, #ff782f, #ffb35c); }
         .install-button:hover { border: 0; background: linear-gradient(90deg, #ff8f4f, #ffc379); }
         [hidden] { display: none !important; }
-        .workspace { width: 50%; min-width: 560px; margin-top: clamp(28px, 5vw, 56px); }
-        .netbird { border: 1px solid rgba(255,112,38,.24); background: rgba(10,17,30,.72); box-shadow: 0 24px 70px rgba(0,0,0,.24); }
-        .netbird-toggle { width: 100%; display: flex; align-items: center; gap: 16px; padding: 18px; text-align: left; border: 0; background: linear-gradient(100deg, rgba(255,105,22,.09), rgba(45,226,255,.035)); }
-        .netbird-toggle:hover { border: 0; background: linear-gradient(100deg, rgba(255,105,22,.16), rgba(45,226,255,.07)); }
-        .netbird-logo { width: 54px; height: 54px; padding: 6px; object-fit: contain; border-radius: 14px; background: #050608; }
-        .netbird-title { display: block; color: #f8fbff; font-size: 1.25rem; font-weight: 800; }
-        .netbird-count { display: block; margin-top: 5px; color: #8f99ab; font-size: .74rem; letter-spacing: .08em; text-transform: uppercase; }
-        .netbird-arrow { margin-left: auto; color: #ff782f; font-size: 1.3rem; transition: transform .25s ease; }
-        .netbird-toggle[aria-expanded="true"] .netbird-arrow { transform: rotate(180deg); }
+        .workspace { width: 100%; max-width: 1180px; margin-top: clamp(22px, 3.5vw, 40px); }
         .device-list { container-type: inline-size; margin: 0; padding: 8px 18px 18px; list-style: none; border-top: 1px solid rgba(255,255,255,.07); }
         .device { min-height: 48px; display: grid; grid-template-columns: 150px 1fr 70px 36px 116px 82px; align-items: center; gap: 12px; border-bottom: 1px solid rgba(255,255,255,.06); }
         .device:last-child { border-bottom: 0; }
@@ -1672,21 +1568,47 @@ def cabinet():
           .rdp-display > div { top: 0; left: 0; transform: none; }
         }
 
-        /* ── Новые виджеты ── */
-        .widget { margin-top: 14px; border: 1px solid rgba(45,226,255,.14); background: rgba(10,17,30,.72); }
-        .widget-toggle { width: 100%; display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; color: #e8fbff; font: 700 .88rem "Cascadia Code", Consolas, monospace; text-align: left; border: 0; background: transparent; cursor: pointer; }
-        .widget-toggle:hover { background: rgba(45,226,255,.05); }
-        .widget-arrow { color: #2de2ff; font-size: 1.1rem; transition: transform .25s; }
-        .widget-toggle[aria-expanded="true"] .widget-arrow { transform: rotate(180deg); }
-        .widget-body { padding: 0 18px 16px; }
-        .widget-link { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; color: #e8fbff; font: 700 .88rem "Cascadia Code", Consolas, monospace; text-decoration: none; }
-        .widget-link:hover { background: rgba(45,226,255,.05); }
-        .widget-link .widget-arrow { transition: transform .2s; }
-        .widget-link:hover .widget-arrow { transform: translateX(4px); }
+        /* ── Панели кабинета ── */
         .widget-empty { color: #4a5060; font-size: .8rem; margin: 0; padding: 4px 0; }
 
+        /* Верхний блок: метрики во всю ширину */
+        .dash { padding: 18px 20px 16px; border: 1px solid rgba(45,226,255,.16); background: rgba(10,17,30,.72); }
+        .dash-title { margin-bottom: 14px; color: #8f99ab; font: 700 .76rem "Cascadia Code", Consolas, monospace; letter-spacing: .1em; text-transform: uppercase; }
+        .uptime-strip { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin-top: 16px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,.07); }
+        .uptime-cap { color: #8f99ab; font-size: .72rem; letter-spacing: .08em; text-transform: uppercase; }
+        .uptime-clock { display: flex; align-items: baseline; gap: 3px; }
+        .uptime-clock b { color: #2de2ff; font: 800 1.5rem "Cascadia Code", Consolas, monospace; letter-spacing: -.03em; }
+        .uptime-clock i { margin-right: 9px; color: #55607a; font-style: normal; font-size: .7rem; }
+
+        /* Панель с логотипом. Модификатор --right зеркалит: логотип справа. */
+        .panel { display: block; margin-top: 14px; color: inherit; text-decoration: none;
+                 border: 1px solid color-mix(in srgb, var(--accent, #2de2ff) 26%, transparent);
+                 background: rgba(10,17,30,.72); transition: border-color .2s, background .2s; }
+        .panel:hover { border-color: color-mix(in srgb, var(--accent, #2de2ff) 55%, transparent); }
+        .panel-head { width: 100%; display: flex; align-items: center; gap: 16px; padding: 16px 18px;
+                      text-align: left; border: 0; background: linear-gradient(100deg,
+                        color-mix(in srgb, var(--accent, #2de2ff) 9%, transparent), transparent 65%);
+                      cursor: pointer; }
+        .panel-head:hover { background: linear-gradient(100deg,
+                        color-mix(in srgb, var(--accent, #2de2ff) 17%, transparent), transparent 70%); }
+        .panel--right .panel-head { flex-direction: row-reverse; text-align: right;
+                      background: linear-gradient(260deg,
+                        color-mix(in srgb, var(--accent, #2de2ff) 9%, transparent), transparent 65%); }
+        .panel--right .panel-head:hover { background: linear-gradient(260deg,
+                        color-mix(in srgb, var(--accent, #2de2ff) 17%, transparent), transparent 70%); }
+        .panel-logo { width: 54px; height: 54px; flex: none; display: grid; place-items: center;
+                      padding: 7px; border-radius: 14px; background: #050608; }
+        .panel-logo img, .panel-logo svg { width: 100%; height: 100%; object-fit: contain; display: block; }
+        .panel-text { flex: 1; min-width: 0; }
+        .panel-title { display: block; color: #f8fbff; font-size: 1.18rem; font-weight: 800; }
+        .panel-sub { display: block; margin-top: 5px; color: #8f99ab; font-size: .72rem; letter-spacing: .06em; text-transform: uppercase; }
+        .panel-arrow { flex: none; color: var(--accent, #2de2ff); font-size: 1.3rem; transition: transform .25s; }
+        .panel-head[aria-expanded="true"] .panel-arrow { transform: rotate(180deg); }
+        .panel:hover .panel-arrow--go { transform: translateX(5px); }
+        .panel-body { padding: 0 18px 16px; }
+
         /* Метрики */
-        .metrics-grid { display: flex; flex-direction: column; gap: 14px; }
+        .metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 12px; }
         .metrics-host { border: 1px solid rgba(255,255,255,.07); padding: 12px 14px; }
         .metrics-host-name { font: 700 .82rem "Cascadia Code", Consolas, monospace; color: #c4cad5; margin-bottom: 10px; }
         .metrics-bars { display: grid; grid-template-columns: 40px 1fr 36px; align-items: center; gap: 5px 8px; font-size: .74rem; }
@@ -1700,13 +1622,6 @@ def cabinet():
         .metrics-extra { display: flex; gap: 14px; margin-top: 8px; font-size: .72rem; color: #6b7385; }
         .metrics-offline { color: #4a5060; font-size: .78rem; font-style: italic; }
 
-        /* Аптайм */
-        .uptime-widget { padding: 14px 18px 18px; }
-        .uptime-title { font: 700 .88rem "Cascadia Code", Consolas, monospace; color: #8f99ab; margin-bottom: 12px; }
-        .uptime-value { display: flex; gap: 18px; flex-wrap: wrap; }
-        .uptime-unit { display: flex; flex-direction: column; align-items: center; min-width: 44px; }
-        .uptime-num { font: 800 2.2rem "Cascadia Code", Consolas, monospace; color: #2de2ff; letter-spacing: -.04em; line-height: 1; }
-        .uptime-lbl { font-size: .62rem; color: #6b7385; text-transform: uppercase; letter-spacing: .08em; margin-top: 4px; }
 
         /* Деплой */
         .deploy-item { display: grid; grid-template-columns: 64px 1fr auto; gap: 6px 10px; align-items: baseline; padding: 9px 0; border-bottom: 1px solid rgba(255,255,255,.06); font-size: .78rem; }
@@ -1716,17 +1631,6 @@ def cabinet():
         .deploy-meta { color: #6b7385; font-size: .7rem; white-space: nowrap; text-align: right; }
         .ds { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
         .ds-ok { background: #63f5ad; } .ds-fail { background: #ff6b81; } .ds-run { background: #fbbf24; } .ds-none { background: #4a5060; }
-
-        /* Буфер обмена */
-        .cb-area { width: 100%; height: 96px; padding: 10px; color: #e8fbff; font: .8rem "Cascadia Code", Consolas, monospace; border: 1px solid rgba(255,255,255,.12); background: rgba(4,10,20,.65); resize: vertical; outline: none; }
-        .cb-area:focus { border-color: #2de2ff; }
-        .cb-actions { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
-        .cb-btn { padding: 7px 14px; font: 700 .72rem "Cascadia Code", Consolas, monospace; border: 1px solid; cursor: pointer; background: transparent; }
-        .cb-push { color: #ff782f; border-color: rgba(255,120,47,.35); }
-        .cb-push:hover { background: rgba(255,120,47,.1); }
-        .cb-copy { color: #63f5ad; border-color: rgba(99,245,173,.3); }
-        .cb-copy:hover { background: rgba(99,245,173,.08); }
-        .cb-info { font-size: .7rem; color: #6b7385; margin: 6px 0 0; }
 
         /* Журнал входов */
         .log-row { display: grid; grid-template-columns: 150px 1fr; gap: 4px 10px; padding: 7px 0; border-bottom: 1px solid rgba(255,255,255,.06); font-size: .76rem; }
@@ -1763,86 +1667,103 @@ def cabinet():
           <form class="logout-form" action="/logout" method="post"><button class="logout-button" type="submit">Выйти</button></form>
         </header>
         <div class="workspace">
-          <section class="netbird">
-          <button id="netbird-toggle" class="netbird-toggle" type="button" aria-expanded="false" aria-controls="netbird-devices">
-            <img class="netbird-logo" src="/static/netbird-official.png" alt="">
-            <span><span class="netbird-title">NetBird</span><span class="netbird-count">8 устройств</span></span>
-            <span class="netbird-arrow" aria-hidden="true">⌄</span>
-          </button>
-          <div id="netbird-devices" hidden>
-            <ul class="device-list">{{DEVICE_ITEMS}}</ul>
-          </div>
+
+          <!-- Метрики: наверху, во всю ширину -->
+          <section class="dash">
+            <div class="dash-title">Метрики машин</div>
+            <div class="metrics-grid" id="metrics-grid"><p class="widget-empty">Загрузка…</p></div>
+            <div class="uptime-strip">
+              <span class="uptime-cap">Сервер жив уже</span>
+              <span class="uptime-clock">
+                <b id="up-d">…</b><i>д</i>
+                <b id="up-h">…</b><i>ч</i>
+                <b id="up-m">…</b><i>м</i>
+                <b id="up-s">…</b><i>с</i>
+              </span>
+            </div>
           </section>
 
-          <!-- Метрики Linux-машин -->
-          <section class="widget">
-            <button class="widget-toggle" id="metrics-toggle" type="button" aria-expanded="false" aria-controls="metrics-body">
-              Метрики машин <span class="widget-arrow">⌄</span>
+          <!-- NetBird — логотип слева -->
+          <section class="panel" style="--accent:#ff7026">
+            <button id="netbird-toggle" class="panel-head" type="button" aria-expanded="false" aria-controls="netbird-devices">
+              <span class="panel-logo"><img src="/static/netbird-official.png" alt=""></span>
+              <span class="panel-text">
+                <span class="panel-title">NetBird</span>
+                <span class="panel-sub">8 устройств</span>
+              </span>
+              <span class="panel-arrow" aria-hidden="true">⌄</span>
             </button>
-            <div id="metrics-body" hidden class="widget-body">
-              <div class="metrics-grid" id="metrics-grid"><p class="widget-empty">Загрузка…</p></div>
+            <div id="netbird-devices" hidden>
+              <ul class="device-list">{{DEVICE_ITEMS}}</ul>
             </div>
           </section>
 
-          <!-- Сервер жив уже -->
-          <section class="widget">
-            <div class="uptime-widget">
-              <div class="uptime-title">Сервер жив уже</div>
-              <div class="uptime-value">
-                <div class="uptime-unit"><span class="uptime-num" id="up-d">…</span><span class="uptime-lbl">дней</span></div>
-                <div class="uptime-unit"><span class="uptime-num" id="up-h">…</span><span class="uptime-lbl">часов</span></div>
-                <div class="uptime-unit"><span class="uptime-num" id="up-m">…</span><span class="uptime-lbl">минут</span></div>
-                <div class="uptime-unit"><span class="uptime-num" id="up-s">…</span><span class="uptime-lbl">секунд</span></div>
-              </div>
-            </div>
-          </section>
-
-          <!-- Логи деплоя -->
-          <section class="widget">
-            <button class="widget-toggle" id="deploy-toggle" type="button" aria-expanded="false" aria-controls="deploy-body">
-              Логи деплоя <span class="widget-arrow">⌄</span>
-            </button>
-            <div id="deploy-body" hidden class="widget-body">
-              <div id="deploy-list"><p class="widget-empty">Загрузка…</p></div>
-            </div>
-          </section>
-
-          <!-- Личный дроп: отдельная страница -->
-          <a class="widget widget-link" href="/drop">
-            Личный дроп <span class="widget-arrow">⟶</span>
+          <!-- Личный дроп — логотип справа -->
+          <a class="panel panel--right" href="/drop" style="--accent:#f5c344">
+            <span class="panel-head">
+              <span class="panel-logo">
+                <svg viewBox="0 0 48 40" aria-hidden="true">
+                  <defs>
+                    <linearGradient id="fold-back" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0" stop-color="#ffd772"/><stop offset="1" stop-color="#e8a521"/>
+                    </linearGradient>
+                    <linearGradient id="fold-front" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0" stop-color="#ffe9a8"/><stop offset="1" stop-color="#f5bb3c"/>
+                    </linearGradient>
+                  </defs>
+                  <path d="M2 8a4 4 0 0 1 4-4h11.2a3 3 0 0 1 2.3 1.1L23 9h19a4 4 0 0 1 4 4v19a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8Z" fill="url(#fold-back)"/>
+                  <path d="M2 15h44v17a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V15Z" fill="url(#fold-front)"/>
+                  <path d="M2 15h44" stroke="#fff" stroke-opacity=".45" stroke-width="1.4"/>
+                </svg>
+              </span>
+              <span class="panel-text">
+                <span class="panel-title">Личный дроп</span>
+                <span class="panel-sub">файлы и текст между устройствами</span>
+              </span>
+              <span class="panel-arrow panel-arrow--go" aria-hidden="true">⟶</span>
+            </span>
           </a>
 
-          <!-- Буфер обмена -->
-          <section class="widget">
-            <button class="widget-toggle" id="cb-toggle" type="button" aria-expanded="false" aria-controls="cb-body">
-              Буфер обмена <span class="widget-arrow">⌄</span>
+          <!-- Журнал входов — логотип слева -->
+          <section class="panel" style="--accent:#2de2ff">
+            <button class="panel-head" id="loginlog-toggle" type="button" aria-expanded="false" aria-controls="loginlog-body">
+              <span class="panel-logo">
+                <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
+                  <circle cx="24" cy="24" r="17" stroke="#2de2ff" stroke-width="2.6" stroke-opacity=".55"/>
+                  <path d="M24 13v11l7.5 4.5" stroke="#7fe9ff" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M7 24a17 17 0 0 1 5-12" stroke="#2de2ff" stroke-width="2.6" stroke-linecap="round"/>
+                  <circle cx="24" cy="24" r="2.6" fill="#7fe9ff"/>
+                </svg>
+              </span>
+              <span class="panel-text">
+                <span class="panel-title">Журнал входов</span>
+                <span class="panel-sub">история за две недели</span>
+              </span>
+              <span class="panel-arrow" aria-hidden="true">⌄</span>
             </button>
-            <div id="cb-body" hidden class="widget-body">
-              <textarea class="cb-area" id="cb-area" placeholder="Скопированный текст появится здесь…"></textarea>
-              <div class="cb-actions">
-                <button class="cb-btn cb-push" id="cb-push" type="button">Отправить на сервер</button>
-                <button class="cb-btn cb-copy" id="cb-copy" type="button">Копировать</button>
-              </div>
-              <p class="cb-info" id="cb-info">Синхронизация каждые 3 сек</p>
-            </div>
-          </section>
-
-          <!-- Журнал входов -->
-          <section class="widget">
-            <button class="widget-toggle" id="loginlog-toggle" type="button" aria-expanded="false" aria-controls="loginlog-body">
-              Журнал входов <span class="widget-arrow">⌄</span>
-            </button>
-            <div id="loginlog-body" hidden class="widget-body">
+            <div id="loginlog-body" hidden class="panel-body">
               <div id="loginlog-list"><p class="widget-empty">Загрузка…</p></div>
             </div>
           </section>
 
-          <!-- Запомненные устройства -->
-          <section class="widget" style="margin-bottom:32px">
-            <button class="widget-toggle" id="devices-toggle" type="button" aria-expanded="false" aria-controls="devices-body">
-              Запомнить устройства <span class="widget-arrow">⌄</span>
+          <!-- Запомненные устройства — логотип справа -->
+          <section class="panel panel--right" style="--accent:#63f5ad; margin-bottom:32px">
+            <button class="panel-head" id="devices-toggle" type="button" aria-expanded="false" aria-controls="devices-body">
+              <span class="panel-logo">
+                <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
+                  <rect x="4" y="10" width="28" height="19" rx="2.5" stroke="#63f5ad" stroke-width="2.6"/>
+                  <path d="M2 33h32" stroke="#63f5ad" stroke-width="2.6" stroke-linecap="round"/>
+                  <rect x="30" y="20" width="14" height="22" rx="2.5" fill="#0d1321" stroke="#a8ffd6" stroke-width="2.6"/>
+                  <path d="M35 38h4" stroke="#a8ffd6" stroke-width="2.2" stroke-linecap="round"/>
+                </svg>
+              </span>
+              <span class="panel-text">
+                <span class="panel-title">Запомнить устройства</span>
+                <span class="panel-sub">вход без пароля на своих</span>
+              </span>
+              <span class="panel-arrow" aria-hidden="true">⌄</span>
             </button>
-            <div id="devices-body" hidden class="widget-body">
+            <div id="devices-body" hidden class="panel-body">
               <label class="dev-remember">
                 <input type="checkbox" id="dev-remember-cb">
                 <span>Запомнить это устройство</span>
@@ -1960,15 +1881,10 @@ def cabinet():
       <script defer src="https://cdn.jsdelivr.net/npm/guacamole-common-js@1.5.0/dist/cjs/guacamole-common.min.js"></script>
       <script>
         (() => {
-          const toggle = document.getElementById("netbird-toggle");
+          // Раскрытием занимается общий обработчик .panel-head[aria-controls]
+          // ниже по странице — свой здесь дал бы двойное срабатывание.
           const devices = document.getElementById("netbird-devices");
           const timers = new WeakMap();
-
-          toggle.addEventListener("click", () => {
-            const expanded = toggle.getAttribute("aria-expanded") === "true";
-            toggle.setAttribute("aria-expanded", String(!expanded));
-            devices.hidden = expanded;
-          });
 
           const copyFallback = (text) => {
             const input = document.createElement("textarea");
@@ -2682,7 +2598,7 @@ def cabinet():
         }
 
         // ── Раскрытие виджетов ──
-        document.querySelectorAll(".widget-toggle").forEach(btn => {
+        document.querySelectorAll(".panel-head[aria-controls]").forEach(btn => {
           const target = document.getElementById(btn.getAttribute("aria-controls"));
           if (!target) return;
           btn.addEventListener("click", () => {
@@ -2729,10 +2645,8 @@ def cabinet():
               }).join("");
             } catch {}
           };
-          if (toggle) toggle.addEventListener("widget-open", e => {
-            if (e.detail) { render(); timer = setInterval(render, 32000); }
-            else { clearInterval(timer); }
-          });
+          // Метрики теперь всегда наверху и всегда открыты — грузим сразу.
+          if (grid) { render(); timer = setInterval(render, 32000); }
         }
 
         // ── Аптайм ──
@@ -2753,69 +2667,10 @@ def cabinet():
           };
           fetch("/api/uptime", { credentials: "same-origin" })
             .then(r => r.json()).then(d => {
-              if (d.seconds == null) { dEl.closest(".uptime-value").textContent = "нет данных"; return; }
+              if (d.seconds == null) { dEl.closest(".uptime-clock").textContent = "нет данных"; return; }
               base = d.seconds; startTs = Date.now();
               tick(); setInterval(tick, 1000);
-            }).catch(() => { if (dEl) dEl.closest(".uptime-value").textContent = "нет данных"; });
-        }
-
-        // ── Логи деплоя ──
-        {
-          const toggle = document.getElementById("deploy-toggle");
-          const list = document.getElementById("deploy-list");
-          const si = run => {
-            if (!run) return '<span class="ds ds-none"></span>';
-            const c = run.conclusion, s = run.status;
-            if (c === "success") return '<span class="ds ds-ok"></span>';
-            if (c === "failure") return '<span class="ds ds-fail"></span>';
-            if (s === "in_progress") return '<span class="ds ds-run"></span>';
-            return '<span class="ds ds-none"></span>';
-          };
-          let loaded = false;
-          const load = async () => {
-            list.innerHTML = '<p class="widget-empty">Загрузка…</p>';
-            try {
-              const r = await fetch("/api/deploy-logs", { credentials: "same-origin" });
-              const data = await r.json();
-              if (!Array.isArray(data)) throw new Error(data.error || "ошибка");
-              list.innerHTML = data.map(c => {
-                const dt = new Date(c.date).toLocaleString("ru-RU",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"});
-                return `<div class="deploy-item"><a class="deploy-sha" href="${c.url}" target="_blank" rel="noopener">${esc(c.sha)}</a><span class="deploy-msg">${si(c.run)}${esc(c.message)}</span><span class="deploy-meta">${esc(c.author)}<br>${dt}</span></div>`;
-              }).join("");
-            } catch(e) { list.innerHTML = `<p class="widget-empty">Ошибка: ${esc(e.message)}</p>`; }
-          };
-          if (toggle) toggle.addEventListener("widget-open", e => { if (e.detail && !loaded) { loaded = true; load(); } });
-        }
-
-        // ── Буфер обмена ──
-        {
-          const toggle = document.getElementById("cb-toggle");
-          const area = document.getElementById("cb-area");
-          const pushBtn = document.getElementById("cb-push");
-          const copyBtn = document.getElementById("cb-copy");
-          const info = document.getElementById("cb-info");
-          let lastVer = -1, timer = null;
-          const poll = async () => {
-            try {
-              const r = await fetch("/api/clipboard", { credentials: "same-origin" });
-              const d = await r.json();
-              if (d.version !== lastVer) { lastVer = d.version; area.value = d.text; if (info) info.textContent = "Обновлено: " + new Date().toLocaleTimeString("ru-RU"); }
-            } catch {}
-          };
-          if (toggle) toggle.addEventListener("widget-open", e => {
-            if (e.detail) { poll(); timer = setInterval(poll, 3000); }
-            else { clearInterval(timer); }
-          });
-          if (pushBtn) pushBtn.addEventListener("click", async () => {
-            try {
-              await fetch("/api/clipboard", { method:"POST", credentials:"same-origin", headers:{"Content-Type":"application/json"}, body:JSON.stringify({text:area.value}) });
-              lastVer = -1;
-              if (info) info.textContent = "Отправлено: " + new Date().toLocaleTimeString("ru-RU");
-            } catch {}
-          });
-          if (copyBtn) copyBtn.addEventListener("click", async () => {
-            try { await navigator.clipboard.writeText(area.value); const o=copyBtn.textContent; copyBtn.textContent="Скопировано ✓"; setTimeout(()=>{copyBtn.textContent=o;},1500); } catch {}
-          });
+            }).catch(() => { if (dEl) dEl.closest(".uptime-clock").textContent = "нет данных"; });
         }
 
         // ── Журнал входов ──
@@ -3145,9 +3000,12 @@ def drop_page():
         .wrap { max-width: 1100px; margin: 0 auto; padding: clamp(18px, 3vw, 40px); }
 
         .top { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
-        .back { width: 44px; height: 44px; flex: none; display: grid; place-items: center; color: #2de2ff; font-size: 1.4rem; text-decoration: none; border: 1px solid rgba(45,226,255,.3); border-radius: 50%; background: rgba(45,226,255,.07); transition: all .18s; }
+        .back { width: 44px; height: 44px; flex: none; display: grid; place-items: center; color: #2de2ff; text-decoration: none; border: 1px solid rgba(45,226,255,.3); border-radius: 50%; background: rgba(45,226,255,.07); transition: all .18s; }
+        .back svg { width: 20px; height: 20px; display: block; }
         .back:hover { color: #fff; border-color: #2de2ff; background: rgba(45,226,255,.18); }
-        h1 { margin: 0; font-size: clamp(1.5rem, 3.5vw, 2.4rem); letter-spacing: -.05em; text-shadow: 2px 0 #ff3fa4, -2px 0 #2de2ff; }
+        h1 { margin: 0; font-size: clamp(1.5rem, 3.5vw, 2.3rem); font-weight: 700; letter-spacing: -.02em;
+             background: linear-gradient(95deg, #eaf6ff, #7fd8ff 55%, #2de2ff);
+             -webkit-background-clip: text; background-clip: text; color: transparent; }
         .quota { margin-left: auto; min-width: 190px; }
         .quota-text { color: #8f99ab; font-size: .7rem; }
         .quota-bar { height: 5px; margin-top: 5px; background: rgba(255,255,255,.08); }
@@ -3228,7 +3086,11 @@ def drop_page():
     <body>
       <div class="wrap">
         <div class="top">
-          <a class="back" href="/cabinet" title="Назад в кабинет" aria-label="Назад в кабинет">⟵</a>
+          <a class="back" href="/cabinet" title="Назад в кабинет" aria-label="Назад в кабинет">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M19 12H5m0 0 6-6m-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </a>
           <h1>Личный дроп</h1>
           <div class="quota">
             <div class="quota-text" id="quota-text">—</div>
