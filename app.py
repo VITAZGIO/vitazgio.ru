@@ -1527,7 +1527,7 @@ def cabinet():
               </label>
               <p class="dev-hint" id="dev-hint">Вход в кабинет без пароля на 90 дней. Снять галку — устройство забудется.</p>
               <div class="dev-confirm" id="dev-confirm" hidden>
-                <input type="password" id="dev-daily" inputmode="numeric" placeholder="Суточный пароль" autocomplete="off">
+                <input type="password" id="dev-daily" placeholder="Суточный пароль" autocomplete="off">
                 <button class="dev-confirm-btn" id="dev-confirm-btn" type="button">Подтвердить</button>
               </div>
               <p class="dev-error" id="dev-error"></p>
