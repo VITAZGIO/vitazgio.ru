@@ -60,6 +60,11 @@ netbird_status_lock = threading.Lock()
 ssh_enabled_ips = {device["ip"] for device in NETBIRD_DEVICES if device.get("ssh_enabled")}
 
 SSH_GATE_PASSWORD_PREFIX = os.environ.get("SSH_GATE_PASSWORD_PREFIX")
+
+# Дома guacd рядом (127.0.0.1). Если сайт крутится на VPS — сюда
+# подставляется Netbird-адрес домашнего сервера.
+GUACD_HOST = os.environ.get("GUACD_HOST", "127.0.0.1")
+GUACD_PORT = int(os.environ.get("GUACD_PORT", "4822"))
 CONSOLE_LOGIN_WINDOW_SECONDS = 300
 CONSOLE_LOGIN_MAX_ATTEMPTS = 5
 console_login_attempts = defaultdict(deque)
@@ -537,7 +542,7 @@ def rdp_ws(ws, ip):
         return
 
     try:
-        guac_sock = socket.create_connection(("127.0.0.1", 4822), timeout=5)
+        guac_sock = socket.create_connection((GUACD_HOST, GUACD_PORT), timeout=5)
     except OSError as e:
         print(f"[rdp] guacd connect error ({ip}): {e}", flush=True)
         ws.close()
@@ -649,7 +654,7 @@ def vnc_ws(ws, ip):
     height = int(auth.get("height", 720))
 
     try:
-        guac_sock = socket.create_connection(("127.0.0.1", 4822), timeout=5)
+        guac_sock = socket.create_connection((GUACD_HOST, GUACD_PORT), timeout=5)
     except OSError as e:
         print(f"[vnc] guacd connect error ({ip}): {e}", flush=True)
         ws.close()
