@@ -153,19 +153,31 @@ def _metrics_loop():
 
 threading.Thread(target=_metrics_loop, daemon=True).start()
 
+# ---- Личный дроп ------------------------------------------------------------
+# Содержимое лежит на диске под именами-uuid, настоящие имена только в индексе.
+# Пользовательский текст никогда не попадает в путь, поэтому выйти за пределы
+# каталога принципиально нечем. Удаления по времени нет — только вручную,
+# ограничителем служит квота.
 DROP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "drop_data")
+DROP_TMP_DIR = os.path.join(DROP_DIR, "tmp")
 DROP_INDEX_PATH = os.path.join(DROP_DIR, "index.json")
-DROP_MAX_ITEMS = 20
-DROP_MAX_SIZE = 10 * 1024 * 1024
-DROP_TTL_SECONDS = 7 * 24 * 3600
+DROP_QUOTA = 20 * 1024 * 1024 * 1024      # 20 ГБ на весь дроп
+DROP_MAX_SIZE = 2 * 1024 * 1024 * 1024    # 2 ГБ на один файл
+DROP_CHUNK_TTL = 6 * 3600                 # брошенные недокачки убираем через 6 ч
+DROP_TEXT_PREVIEW = 400
 
 drop_items: dict = {}
+drop_uploads: dict = {}
 drop_lock = threading.Lock()
-os.makedirs(DROP_DIR, exist_ok=True)
+os.makedirs(DROP_TMP_DIR, exist_ok=True)
 
 
 def _drop_path(item_id):
     return os.path.join(DROP_DIR, f"{item_id}.bin")
+
+
+def _drop_tmp_path(upload_id):
+    return os.path.join(DROP_TMP_DIR, f"{upload_id}.part")
 
 
 def _drop_write_index():
@@ -176,8 +188,24 @@ def _drop_write_index():
     os.replace(tmp, DROP_INDEX_PATH)
 
 
+def _drop_used():
+    """Занято байт. Вызывать под drop_lock."""
+    return sum(item.get("size", 0) for item in drop_items.values())
+
+
+def _drop_children(parent):
+    """Прямые потомки папки. Вызывать под drop_lock."""
+    return [k for k, v in drop_items.items() if v.get("parent") == parent]
+
+
 def _drop_discard(item_id):
-    """Вызывать под drop_lock."""
+    """Удаляет элемент, для папки — вместе со всем содержимым. Под drop_lock."""
+    item = drop_items.get(item_id)
+    if not item:
+        return
+    if item["kind"] == "folder":
+        for child in _drop_children(item_id):
+            _drop_discard(child)
     drop_items.pop(item_id, None)
     try:
         os.remove(_drop_path(item_id))
@@ -185,19 +213,50 @@ def _drop_discard(item_id):
         pass
 
 
-def _drop_prune_expired():
-    """Вызывать под drop_lock. Возвращает число удалённых."""
+def _drop_path_to_root(item_id):
+    """Цепочка папок от корня до item_id включительно. Под drop_lock."""
+    chain, seen = [], set()
+    while item_id and item_id in drop_items and item_id not in seen:
+        seen.add(item_id)
+        chain.append({"id": item_id, "name": drop_items[item_id]["name"]})
+        item_id = drop_items[item_id].get("parent")
+    return list(reversed(chain))
+
+
+def _drop_is_descendant(item_id, maybe_parent):
+    """Не пытаются ли переместить папку внутрь самой себя. Под drop_lock."""
+    seen = set()
+    while maybe_parent and maybe_parent not in seen:
+        if maybe_parent == item_id:
+            return True
+        seen.add(maybe_parent)
+        maybe_parent = drop_items.get(maybe_parent, {}).get("parent")
+    return False
+
+
+def _drop_share_lookup(token):
+    """Ищет элемент по токену ссылки. Под drop_lock."""
     now = time.time()
-    stale = [k for k, v in drop_items.items() if now - v["created"] > DROP_TTL_SECONDS]
-    for item_id in stale:
-        _drop_discard(item_id)
-    return len(stale)
+    for item_id, item in drop_items.items():
+        share = item.get("share")
+        # Сравниваем байты: compare_digest падает на строках с не-ASCII,
+        # а токен приходит из адресной строки и может быть каким угодно.
+        if share and hmac.compare_digest(share["token"].encode(), token.encode()):
+            if share["expires"] and share["expires"] < now:
+                return None
+            return item_id
+    return None
 
 
-def _drop_make_room():
-    """Вызывать под drop_lock: освобождает место под новый элемент."""
-    while len(drop_items) >= DROP_MAX_ITEMS:
-        _drop_discard(min(drop_items, key=lambda k: drop_items[k]["created"]))
+def _drop_sweep_uploads():
+    """Подчищает брошенные недокачки. Под drop_lock."""
+    now = time.time()
+    for upload_id in [k for k, v in drop_uploads.items() if now - v["started"] > DROP_CHUNK_TTL]:
+        drop_uploads.pop(upload_id, None)
+        try:
+            os.remove(_drop_tmp_path(upload_id))
+        except OSError:
+            pass
 
 
 def _drop_load_index():
@@ -206,16 +265,33 @@ def _drop_load_index():
             saved = json.load(fh)
     except (OSError, ValueError):
         saved = {}
+
     for item_id, meta in saved.items():
-        if os.path.exists(_drop_path(item_id)):
+        # Записи старого формата: плоский список файлов без папок и ссылок.
+        meta.setdefault("kind", "text" if meta.pop("is_text", False) else "file")
+        meta.setdefault("parent", None)
+        meta.setdefault("share", None)
+        meta.setdefault("size", 0)
+        if meta["kind"] == "folder" or os.path.exists(_drop_path(item_id)):
             drop_items[item_id] = meta
+
+    known = set(drop_items)
     for fname in os.listdir(DROP_DIR):
-        if fname.endswith(".bin") and fname[:-4] not in drop_items:
+        if fname.endswith(".bin") and fname[:-4] not in known:
             try:
                 os.remove(os.path.join(DROP_DIR, fname))
             except OSError:
                 pass
-    _drop_prune_expired()
+    for fname in os.listdir(DROP_TMP_DIR):
+        try:
+            os.remove(os.path.join(DROP_TMP_DIR, fname))
+        except OSError:
+            pass
+
+    # Потерянные родители: папку могли удалить в обход рекурсии.
+    for item in drop_items.values():
+        if item["parent"] and item["parent"] not in drop_items:
+            item["parent"] = None
     _drop_write_index()
 
 
@@ -520,7 +596,9 @@ def console_login():
 
     payload = request.get_json(silent=True) or {}
     password = payload.get("password", "")
-    if not isinstance(password, str) or not hmac.compare_digest(password, console_password_today()):
+    if not isinstance(password, str) or not hmac.compare_digest(
+        password.encode(), console_password_today().encode()
+    ):
         with console_login_attempts_lock:
             console_login_attempts[client].append(now)
         return jsonify(error="Неверный пароль."), 401
@@ -975,7 +1053,9 @@ def device_trust():
             return jsonify(error="Слишком много попыток. Попробуйте через 5 минут."), 429
 
     password = (request.get_json(silent=True) or {}).get("password", "")
-    if not isinstance(password, str) or not hmac.compare_digest(password, console_password_today()):
+    if not isinstance(password, str) or not hmac.compare_digest(
+        password.encode(), console_password_today().encode()
+    ):
         with console_login_attempts_lock:
             console_login_attempts[client].append(now)
         return jsonify(error="Неверный суточный пароль."), 401
@@ -1081,75 +1161,224 @@ def deploy_logs_api():
         return jsonify(error=str(e)), 502
 
 
+def _drop_send(item_id, item):
+    """Отдаём всегда вложением: иначе загруженный .html или .svg со скриптом
+    выполнился бы на домене сайта и добрался до сессии и токена устройства."""
+    response = send_file(
+        _drop_path(item_id),
+        mimetype="application/octet-stream",
+        as_attachment=True,
+        download_name=item["name"],
+        conditional=True,
+    )
+    response.headers["Content-Security-Policy"] = "default-src 'none'; sandbox"
+    return response
+
+
 @app.post("/api/drop/text")
 @login_required
 def drop_upload_text():
     payload = request.get_json(silent=True) or {}
     text = payload.get("text", "")
-    if not text:
+    parent = payload.get("parent") or None
+    if not isinstance(text, str) or not text.strip():
         return jsonify(error="Текст пустой."), 400
     data = text.encode("utf-8")
-    if len(data) > DROP_MAX_SIZE:
-        return jsonify(error="Слишком большой."), 413
     item_id = str(uuid.uuid4())
-    name = f"Текст {datetime.now().strftime('%d.%m %H:%M')}"
     with drop_lock:
-        _drop_prune_expired()
-        _drop_make_room()
+        if parent and drop_items.get(parent, {}).get("kind") != "folder":
+            parent = None
+        if _drop_used() + len(data) > DROP_QUOTA:
+            return jsonify(error="Нет места: квота исчерпана."), 507
         try:
             with open(_drop_path(item_id), "wb") as fh:
                 fh.write(data)
         except OSError as e:
             return jsonify(error=f"Не удалось сохранить: {e}"), 500
-        drop_items[item_id] = {"name": name, "content_type": "text/plain; charset=utf-8",
-                               "size": len(data), "created": time.time(), "is_text": True}
+        first = text.strip().splitlines()[0][:60] if text.strip() else "Текст"
+        drop_items[item_id] = {
+            "kind": "text", "name": first, "parent": parent,
+            "content_type": "text/plain; charset=utf-8", "size": len(data),
+            "created": time.time(), "preview": text[:DROP_TEXT_PREVIEW],
+            "truncated": len(text) > DROP_TEXT_PREVIEW, "share": None,
+        }
+        _drop_write_index()
+    return jsonify(id=item_id)
+
+
+@app.get("/api/drop/text/<item_id>")
+@login_required
+def drop_text_full(item_id):
+    with drop_lock:
+        item = drop_items.get(item_id)
+    if not item or item["kind"] != "text":
+        return jsonify(error="Не найдено."), 404
+    try:
+        with open(_drop_path(item_id), encoding="utf-8") as fh:
+            return jsonify(text=fh.read())
+    except OSError:
+        return jsonify(error="Файл потерян."), 404
+
+
+@app.post("/api/drop/folder")
+@login_required
+def drop_folder_create():
+    payload = request.get_json(silent=True) or {}
+    name = (payload.get("name") or "").strip()[:60]
+    parent = payload.get("parent") or None
+    if not name:
+        return jsonify(error="Имя пустое."), 400
+    item_id = str(uuid.uuid4())
+    with drop_lock:
+        if parent and drop_items.get(parent, {}).get("kind") != "folder":
+            parent = None
+        drop_items[item_id] = {
+            "kind": "folder", "name": name, "parent": parent,
+            "size": 0, "created": time.time(), "share": None,
+        }
         _drop_write_index()
     return jsonify(id=item_id, name=name)
 
 
-@app.post("/api/drop/upload")
+@app.post("/api/drop/upload/init")
 @login_required
-def drop_upload_file():
-    f = request.files.get("file")
-    if not f:
-        return jsonify(error="Файл не выбран."), 400
-    if request.content_length and request.content_length > DROP_MAX_SIZE + 8192:
-        return jsonify(error="Файл слишком большой (макс 10 МБ)."), 413
-    item_id = str(uuid.uuid4())
-    name = f.filename or "файл"
-    path = _drop_path(item_id)
+def drop_upload_init():
+    payload = request.get_json(silent=True) or {}
+    name = (payload.get("name") or "файл")[:120]
+    parent = payload.get("parent") or None
     try:
-        f.save(path)
-        size = os.path.getsize(path)
-    except OSError as e:
-        return jsonify(error=f"Не удалось сохранить: {e}"), 500
+        size = int(payload.get("size", 0))
+    except (TypeError, ValueError):
+        return jsonify(error="Некорректный размер."), 400
+    if size <= 0:
+        return jsonify(error="Пустой файл."), 400
     if size > DROP_MAX_SIZE:
+        return jsonify(error="Файл больше 2 ГБ."), 413
+
+    upload_id = str(uuid.uuid4())
+    with drop_lock:
+        _drop_sweep_uploads()
+        if parent and drop_items.get(parent, {}).get("kind") != "folder":
+            parent = None
+        reserved = sum(u["size"] for u in drop_uploads.values())
+        if _drop_used() + reserved + size > DROP_QUOTA:
+            return jsonify(error="Нет места: квота исчерпана."), 507
+        drop_uploads[upload_id] = {
+            "name": name, "size": size, "parent": parent,
+            "received": 0, "started": time.time(),
+            "content_type": payload.get("content_type") or "application/octet-stream",
+        }
+    try:
+        open(_drop_tmp_path(upload_id), "wb").close()
+    except OSError as e:
+        return jsonify(error=f"Не удалось начать загрузку: {e}"), 500
+    return jsonify(upload_id=upload_id)
+
+
+@app.post("/api/drop/upload/chunk/<upload_id>")
+@login_required
+def drop_upload_chunk(upload_id):
+    with drop_lock:
+        upload = drop_uploads.get(upload_id)
+    if not upload:
+        return jsonify(error="Загрузка не найдена."), 404
+
+    try:
+        offset = int(request.args.get("offset", "-1"))
+    except ValueError:
+        offset = -1
+    if offset != upload["received"]:
+        # Кусок пришёл не тот, что ждали (повтор после обрыва) — говорим,
+        # с какого места продолжать, вместо того чтобы портить файл.
+        return jsonify(error="Рассинхронизация.", expected=upload["received"]), 409
+
+    data = request.get_data(cache=False)
+    if not data:
+        return jsonify(error="Пустой кусок."), 400
+    if upload["received"] + len(data) > upload["size"]:
+        return jsonify(error="Больше заявленного размера."), 413
+
+    try:
+        with open(_drop_tmp_path(upload_id), "ab") as fh:
+            fh.write(data)
+    except OSError as e:
+        return jsonify(error=f"Ошибка записи: {e}"), 500
+
+    with drop_lock:
+        if upload_id in drop_uploads:
+            drop_uploads[upload_id]["received"] += len(data)
+            received = drop_uploads[upload_id]["received"]
+        else:
+            return jsonify(error="Загрузка не найдена."), 404
+    return jsonify(received=received)
+
+
+@app.post("/api/drop/upload/finish/<upload_id>")
+@login_required
+def drop_upload_finish(upload_id):
+    with drop_lock:
+        upload = drop_uploads.pop(upload_id, None)
+    if not upload:
+        return jsonify(error="Загрузка не найдена."), 404
+
+    tmp_path = _drop_tmp_path(upload_id)
+    try:
+        actual = os.path.getsize(tmp_path)
+    except OSError:
+        return jsonify(error="Временный файл потерян."), 500
+    if actual != upload["size"]:
         try:
-            os.remove(path)
+            os.remove(tmp_path)
         except OSError:
             pass
-        return jsonify(error="Файл слишком большой (макс 10 МБ)."), 413
+        return jsonify(error="Размер не сошёлся, загрузка прервана."), 400
+
+    item_id = str(uuid.uuid4())
     with drop_lock:
-        _drop_prune_expired()
-        _drop_make_room()
-        drop_items[item_id] = {"name": name, "content_type": f.content_type or "application/octet-stream",
-                               "size": size, "created": time.time(), "is_text": False}
+        if _drop_used() + actual > DROP_QUOTA:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+            return jsonify(error="Нет места: квота исчерпана."), 507
+        try:
+            os.replace(tmp_path, _drop_path(item_id))
+        except OSError as e:
+            return jsonify(error=f"Не удалось сохранить: {e}"), 500
+        parent = upload["parent"]
+        if parent and parent not in drop_items:
+            parent = None
+        drop_items[item_id] = {
+            "kind": "file", "name": upload["name"], "parent": parent,
+            "content_type": upload["content_type"], "size": actual,
+            "created": time.time(), "share": None,
+        }
         _drop_write_index()
-    return jsonify(id=item_id, name=name)
+    return jsonify(id=item_id)
 
 
 @app.get("/api/drop/list")
 @login_required
 def drop_list_api():
+    parent = request.args.get("parent") or None
     with drop_lock:
-        if _drop_prune_expired():
-            _drop_write_index()
+        if parent and parent not in drop_items:
+            parent = None
         items = [
-            {"id": k, "name": v["name"], "size": v["size"],
-             "created": v["created"], "is_text": v["is_text"]}
-            for k, v in sorted(drop_items.items(), key=lambda x: -x[1]["created"])
+            {"id": k, "kind": v["kind"], "name": v["name"], "size": v.get("size", 0),
+             "created": v["created"], "preview": v.get("preview"),
+             "truncated": v.get("truncated", False),
+             "share": bool(v.get("share")),
+             "share_expires": (v.get("share") or {}).get("expires")}
+            for k, v in drop_items.items() if v.get("parent") == parent
         ]
-    return jsonify(items)
+        items.sort(key=lambda x: (x["kind"] != "folder", -x["created"]))
+        return jsonify(
+            items=items,
+            breadcrumbs=_drop_path_to_root(parent),
+            used=_drop_used(),
+            quota=DROP_QUOTA,
+        )
 
 
 @app.get("/api/drop/download/<item_id>")
@@ -1157,14 +1386,74 @@ def drop_list_api():
 def drop_download(item_id):
     with drop_lock:
         item = drop_items.get(item_id)
-    if not item:
+    if not item or item["kind"] == "folder":
         return "Не найдено", 404
-    return send_file(
-        _drop_path(item_id),
-        mimetype=item["content_type"],
-        as_attachment=True,
-        download_name=item["name"],
-    )
+    return _drop_send(item_id, item)
+
+
+@app.patch("/api/drop/<item_id>")
+@login_required
+def drop_update(item_id):
+    payload = request.get_json(silent=True) or {}
+    with drop_lock:
+        item = drop_items.get(item_id)
+        if not item:
+            return jsonify(error="Не найдено."), 404
+        if "name" in payload:
+            name = (payload.get("name") or "").strip()[:120]
+            if not name:
+                return jsonify(error="Имя пустое."), 400
+            item["name"] = name
+        if "parent" in payload:
+            target = payload.get("parent") or None
+            if target and drop_items.get(target, {}).get("kind") != "folder":
+                return jsonify(error="Такой папки нет."), 400
+            if target and _drop_is_descendant(item_id, target):
+                return jsonify(error="Нельзя переместить папку внутрь себя."), 400
+            item["parent"] = target
+        _drop_write_index()
+    return jsonify(ok=True)
+
+
+@app.post("/api/drop/share/<item_id>")
+@login_required
+def drop_share_create(item_id):
+    try:
+        hours = int((request.get_json(silent=True) or {}).get("hours", 24))
+    except (TypeError, ValueError):
+        hours = 24
+    hours = max(1, min(hours, 24 * 30))
+    with drop_lock:
+        item = drop_items.get(item_id)
+        if not item or item["kind"] == "folder":
+            return jsonify(error="Папки ссылкой не отдаются."), 400
+        item["share"] = {"token": secrets.token_urlsafe(24), "expires": time.time() + hours * 3600}
+        token = item["share"]["token"]
+        _drop_write_index()
+    return jsonify(url=url_for("drop_public", token=token, _external=True), hours=hours)
+
+
+@app.delete("/api/drop/share/<item_id>")
+@login_required
+def drop_share_revoke(item_id):
+    with drop_lock:
+        item = drop_items.get(item_id)
+        if item:
+            item["share"] = None
+            _drop_write_index()
+    return jsonify(ok=True)
+
+
+@app.get("/d/<token>")
+def drop_public(token):
+    """Публичная ссылка. Единственный эндпоинт дропа без авторизации —
+    поэтому отдаёт строго один файл по неугадываемому токену и только вложением."""
+    with drop_lock:
+        item_id = _drop_share_lookup(token)
+        item = drop_items.get(item_id) if item_id else None
+    if not item:
+        return "Ссылка недействительна или истекла", 404
+    return _drop_send(item_id, item)
 
 
 @app.delete("/api/drop/<item_id>")
@@ -1336,6 +1625,10 @@ def cabinet():
         .widget-arrow { color: #2de2ff; font-size: 1.1rem; transition: transform .25s; }
         .widget-toggle[aria-expanded="true"] .widget-arrow { transform: rotate(180deg); }
         .widget-body { padding: 0 18px 16px; }
+        .widget-link { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; color: #e8fbff; font: 700 .88rem "Cascadia Code", Consolas, monospace; text-decoration: none; }
+        .widget-link:hover { background: rgba(45,226,255,.05); }
+        .widget-link .widget-arrow { transition: transform .2s; }
+        .widget-link:hover .widget-arrow { transform: translateX(4px); }
         .widget-empty { color: #4a5060; font-size: .8rem; margin: 0; padding: 4px 0; }
 
         /* Метрики */
@@ -1369,23 +1662,6 @@ def cabinet():
         .deploy-meta { color: #6b7385; font-size: .7rem; white-space: nowrap; text-align: right; }
         .ds { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
         .ds-ok { background: #63f5ad; } .ds-fail { background: #ff6b81; } .ds-run { background: #fbbf24; } .ds-none { background: #4a5060; }
-
-        /* Дроп */
-        .drop-zone { border: 2px dashed rgba(45,226,255,.22); padding: 16px; text-align: center; color: #6b7385; font-size: .8rem; cursor: pointer; transition: all .2s; }
-        .drop-zone:hover, .drop-zone.drag-over { border-color: #2de2ff; color: #2de2ff; background: rgba(45,226,255,.04); }
-        .drop-textarea { width: 100%; height: 74px; margin-top: 10px; padding: 9px; color: #e8fbff; font: .8rem "Cascadia Code", Consolas, monospace; border: 1px solid rgba(255,255,255,.12); background: rgba(4,10,20,.65); resize: vertical; outline: none; }
-        .drop-textarea:focus { border-color: #2de2ff; }
-        .drop-send-btn { margin-top: 8px; padding: 8px 16px; color: #0d1321; font: 700 .74rem "Cascadia Code", Consolas, monospace; letter-spacing: .04em; background: linear-gradient(90deg,#2de2ff,#69e8ff); border: 0; cursor: pointer; }
-        .drop-list { margin-top: 12px; }
-        .drop-file { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,.06); }
-        .drop-file:last-child { border-bottom: 0; }
-        .drop-fname { flex: 1; color: #c4cad5; font-size: .78rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .drop-fsize { color: #6b7385; font-size: .7rem; white-space: nowrap; }
-        .drop-btn { padding: 4px 9px; font: 600 .7rem "Cascadia Code", Consolas, monospace; border: 1px solid; cursor: pointer; background: transparent; }
-        .drop-btn-dl { color: #2de2ff; border-color: rgba(45,226,255,.3); }
-        .drop-btn-dl:hover { background: rgba(45,226,255,.1); }
-        .drop-btn-rm { color: #ff6b81; border-color: rgba(255,107,129,.3); }
-        .drop-btn-rm:hover { background: rgba(255,107,129,.1); }
 
         /* Буфер обмена */
         .cb-area { width: 100%; height: 96px; padding: 10px; color: #e8fbff; font: .8rem "Cascadia Code", Consolas, monospace; border: 1px solid rgba(255,255,255,.12); background: rgba(4,10,20,.65); resize: vertical; outline: none; }
@@ -1476,19 +1752,10 @@ def cabinet():
             </div>
           </section>
 
-          <!-- Личный дроп -->
-          <section class="widget">
-            <button class="widget-toggle" id="drop-toggle" type="button" aria-expanded="false" aria-controls="drop-body">
-              Личный дроп <span class="widget-arrow">⌄</span>
-            </button>
-            <div id="drop-body" hidden class="widget-body">
-              <div class="drop-zone" id="drop-zone">Перетащи файл сюда или <u>нажми для выбора</u></div>
-              <input type="file" id="drop-file-input" style="display:none" multiple>
-              <textarea class="drop-textarea" id="drop-text" placeholder="Или вставь текст сюда…"></textarea>
-              <button class="drop-send-btn" id="drop-send-text" type="button">Отправить текст</button>
-              <div class="drop-list" id="drop-list"></div>
-            </div>
-          </section>
+          <!-- Личный дроп: отдельная страница -->
+          <a class="widget widget-link" href="/drop">
+            Личный дроп <span class="widget-arrow">⟶</span>
+          </a>
 
           <!-- Буфер обмена -->
           <section class="widget">
@@ -2443,61 +2710,6 @@ def cabinet():
           if (toggle) toggle.addEventListener("widget-open", e => { if (e.detail && !loaded) { loaded = true; load(); } });
         }
 
-        // ── Личный дроп ──
-        {
-          const toggle = document.getElementById("drop-toggle");
-          const zone = document.getElementById("drop-zone");
-          const fi = document.getElementById("drop-file-input");
-          const ta = document.getElementById("drop-text");
-          const sendBtn = document.getElementById("drop-send-text");
-          const listEl = document.getElementById("drop-list");
-          const fmt = b => b < 1024 ? b+"Б" : b < 1048576 ? (b/1024).toFixed(1)+"КБ" : (b/1048576).toFixed(1)+"МБ";
-          const renderList = async () => {
-            try {
-              const r = await fetch("/api/drop/list", { credentials: "same-origin" });
-              const items = await r.json();
-              if (!items.length) { listEl.innerHTML = '<p class="widget-empty">Пусто</p>'; return; }
-              listEl.innerHTML = items.map(it =>
-                `<div class="drop-file"><span class="drop-fname" title="${esc(it.name)}">${esc(it.name)}</span><span class="drop-fsize">${fmt(it.size)}</span><a class="drop-btn drop-btn-dl" href="/api/drop/download/${it.id}" download="${esc(it.name)}">↓</a><button class="drop-btn drop-btn-rm" data-id="${it.id}">✕</button></div>`
-              ).join("");
-              listEl.querySelectorAll("[data-id]").forEach(btn => btn.addEventListener("click", async () => {
-                await fetch(`/api/drop/${btn.dataset.id}`, { method:"DELETE", credentials:"same-origin" });
-                renderList();
-              }));
-            } catch {}
-          };
-          const uploadFile = async file => {
-            zone.textContent = `Загрузка ${file.name}…`;
-            const fd = new FormData(); fd.append("file", file);
-            try {
-              const r = await fetch("/api/drop/upload", { method:"POST", credentials:"same-origin", body:fd });
-              if (!r.ok) throw new Error((await r.json()).error);
-              zone.innerHTML = 'Перетащи файл сюда или <u>нажми для выбора</u>';
-              renderList();
-            } catch(e) {
-              zone.textContent = "Ошибка: " + e.message;
-              setTimeout(() => { zone.innerHTML = 'Перетащи файл сюда или <u>нажми для выбора</u>'; }, 2500);
-            }
-          };
-          let listLoaded = false;
-          if (toggle) toggle.addEventListener("widget-open", e => { if (e.detail && !listLoaded) { listLoaded = true; renderList(); } });
-          if (zone) {
-            zone.addEventListener("click", () => fi.click());
-            zone.addEventListener("dragover", e => { e.preventDefault(); zone.classList.add("drag-over"); });
-            zone.addEventListener("dragleave", () => zone.classList.remove("drag-over"));
-            zone.addEventListener("drop", e => { e.preventDefault(); zone.classList.remove("drag-over"); if (e.dataTransfer.files[0]) uploadFile(e.dataTransfer.files[0]); });
-          }
-          if (fi) fi.addEventListener("change", () => { if (fi.files[0]) { uploadFile(fi.files[0]); fi.value=""; } });
-          if (sendBtn) sendBtn.addEventListener("click", async () => {
-            const text = ta.value.trim(); if (!text) return;
-            try {
-              const r = await fetch("/api/drop/text", { method:"POST", credentials:"same-origin", headers:{"Content-Type":"application/json"}, body:JSON.stringify({text}) });
-              if (!r.ok) throw new Error((await r.json()).error);
-              ta.value = ""; renderList();
-            } catch(e) { alert("Ошибка: " + e.message); }
-          });
-        }
-
         // ── Буфер обмена ──
         {
           const toggle = document.getElementById("cb-toggle");
@@ -2686,6 +2898,512 @@ def cabinet():
     </html>
     """
     return html.replace("{{DEVICE_ITEMS}}", device_items)
+
+
+@app.get("/drop")
+@login_required
+def drop_page():
+    return """
+    <!DOCTYPE html>
+    <html lang="ru">
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <meta name="robots" content="noindex, nofollow">
+      <title>Личный дроп · vitazgio.ru</title>
+      <style>
+        * { box-sizing: border-box; }
+        body { margin: 0; min-height: 100svh; color: #e9fbff; font-family: "Cascadia Code", Consolas, monospace; background: radial-gradient(circle at top left, #192a44, #0d1321 55%); }
+        [hidden] { display: none !important; }
+        .wrap { max-width: 1100px; margin: 0 auto; padding: clamp(18px, 3vw, 40px); }
+
+        .top { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+        .back { width: 44px; height: 44px; flex: none; display: grid; place-items: center; color: #2de2ff; font-size: 1.4rem; text-decoration: none; border: 1px solid rgba(45,226,255,.3); border-radius: 50%; background: rgba(45,226,255,.07); transition: all .18s; }
+        .back:hover { color: #fff; border-color: #2de2ff; background: rgba(45,226,255,.18); }
+        h1 { margin: 0; font-size: clamp(1.5rem, 3.5vw, 2.4rem); letter-spacing: -.05em; text-shadow: 2px 0 #ff3fa4, -2px 0 #2de2ff; }
+        .quota { margin-left: auto; min-width: 190px; }
+        .quota-text { color: #8f99ab; font-size: .7rem; }
+        .quota-bar { height: 5px; margin-top: 5px; background: rgba(255,255,255,.08); }
+        .quota-fill { height: 100%; width: 0; background: linear-gradient(90deg, #2de2ff, #63f5ad); transition: width .4s; }
+        .quota-fill.hot { background: linear-gradient(90deg, #ffb35c, #ff6b81); }
+
+        .bar { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 22px; }
+        .btn { padding: 9px 14px; color: #dffaff; font: 700 .74rem "Cascadia Code", Consolas, monospace; border: 1px solid rgba(45,226,255,.28); background: rgba(45,226,255,.07); cursor: pointer; transition: all .18s; }
+        .btn:hover { border-color: #2de2ff; background: rgba(45,226,255,.16); }
+        .btn.primary { color: #1a0d04; border: 0; background: linear-gradient(90deg, #ff782f, #ffb35c); }
+        .search { flex: 1; min-width: 140px; height: 36px; padding: 0 12px; color: #e9fbff; font: 400 .78rem "Cascadia Code", Consolas, monospace; border: 1px solid rgba(255,255,255,.12); outline: none; background: rgba(4,10,20,.6); }
+        .search:focus { border-color: #2de2ff; }
+
+        .crumbs { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 18px; color: #6b7385; font-size: .76rem; }
+        .crumb { color: #69e8ff; background: none; border: 0; padding: 2px 4px; font: inherit; cursor: pointer; }
+        .crumb:hover { color: #fff; text-decoration: underline; }
+        .crumb.here { color: #8f99ab; cursor: default; text-decoration: none; }
+
+        .composer { margin-top: 16px; }
+        .composer textarea { width: 100%; min-height: 76px; padding: 11px 13px; color: #e9fbff; font: 400 .8rem "Cascadia Code", Consolas, monospace; border: 1px solid rgba(255,255,255,.12); outline: none; background: rgba(4,10,20,.6); resize: vertical; }
+        .composer textarea:focus { border-color: #ff782f; }
+
+        .uploads { margin-top: 14px; }
+        .up { padding: 9px 12px; margin-bottom: 6px; border: 1px solid rgba(45,226,255,.16); background: rgba(10,17,30,.8); }
+        .up-head { display: flex; justify-content: space-between; gap: 10px; font-size: .74rem; }
+        .up-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .up-pct { color: #63f5ad; flex: none; }
+        .up-bar { height: 4px; margin-top: 6px; background: rgba(255,255,255,.08); }
+        .up-fill { height: 100%; width: 0; background: linear-gradient(90deg, #ff782f, #ffb35c); transition: width .2s; }
+        .up.failed { border-color: rgba(255,107,129,.45); }
+        .up.failed .up-pct { color: #ff6b81; }
+
+        .items { margin-top: 18px; display: grid; gap: 8px; }
+        .item { display: grid; grid-template-columns: 34px 1fr auto; align-items: center; gap: 4px 12px; padding: 11px 13px; border: 1px solid rgba(255,255,255,.08); background: rgba(10,17,30,.7); transition: border-color .18s, background .18s; }
+        .item:hover { border-color: rgba(45,226,255,.3); background: rgba(14,24,42,.85); }
+        .item.folder { cursor: pointer; }
+        .item.drag-over { border-color: #63f5ad; background: rgba(99,245,173,.1); }
+        .item.dragging { opacity: .4; }
+        .ico { font-size: 1.3rem; text-align: center; }
+        .nm { min-width: 0; color: #dfe7f3; font-size: .84rem; overflow-wrap: anywhere; }
+        .meta { grid-column: 2; color: #6b7385; font-size: .68rem; }
+        .acts { display: flex; gap: 5px; grid-row: 1 / 3; }
+        .act { padding: 5px 7px; color: #6b7385; font-size: .82rem; line-height: 1; border: 1px solid rgba(255,255,255,.1); background: transparent; cursor: pointer; transition: all .16s; }
+        .act:hover { color: #fff; border-color: rgba(45,226,255,.4); background: rgba(45,226,255,.1); }
+        .act.del:hover { color: #ff6b81; border-color: rgba(255,107,129,.45); background: rgba(255,107,129,.1); }
+        .act.on { color: #63f5ad; border-color: rgba(99,245,173,.4); }
+
+        .txt { grid-column: 1 / -1; margin-top: 8px; padding: 10px 12px; color: #b8c2d4; font-size: .76rem; white-space: pre-wrap; overflow-wrap: anywhere; border-left: 2px solid rgba(255,120,47,.5); background: rgba(4,10,20,.5); }
+        .txt-more { margin-top: 6px; color: #69e8ff; font-size: .72rem; background: none; border: 0; padding: 0; cursor: pointer; }
+
+        .empty { padding: 40px 0; color: #4a5060; font-size: .82rem; text-align: center; }
+        .rename { min-width: 0; width: 100%; height: 28px; padding: 0 8px; color: #f4fbff; font: 600 .8rem "Cascadia Code", Consolas, monospace; border: 1px solid rgba(45,226,255,.4); outline: none; background: rgba(4,10,20,.65); }
+
+        .veil { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; background: rgba(3,6,13,.85); backdrop-filter: blur(6px); color: #2de2ff; font-size: 1.3rem; letter-spacing: .04em; border: 3px dashed rgba(45,226,255,.5); }
+        .toast { position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%); z-index: 60; max-width: 90vw; padding: 11px 18px; color: #06131c; font-size: .78rem; background: #63f5ad; box-shadow: 0 10px 40px rgba(0,0,0,.5); }
+        .toast.bad { background: #ff6b81; color: #fff; }
+
+        @media (max-width: 560px) {
+          .quota { margin-left: 0; width: 100%; }
+          .acts { grid-row: auto; grid-column: 1 / -1; justify-content: flex-end; }
+        }
+      </style>
+    </head>
+    <body>
+      <div class="wrap">
+        <div class="top">
+          <a class="back" href="/cabinet" title="Назад в кабинет" aria-label="Назад в кабинет">⟵</a>
+          <h1>Личный дроп</h1>
+          <div class="quota">
+            <div class="quota-text" id="quota-text">—</div>
+            <div class="quota-bar"><div class="quota-fill" id="quota-fill"></div></div>
+          </div>
+        </div>
+
+        <div class="bar">
+          <button class="btn primary" id="pick" type="button">Выбрать файлы</button>
+          <button class="btn" id="mkdir" type="button">Новая папка</button>
+          <input class="search" id="search" type="search" placeholder="Поиск в этой папке…">
+          <button class="btn" id="sort" type="button">Сначала новые</button>
+          <input type="file" id="file-input" multiple hidden>
+        </div>
+
+        <div class="crumbs" id="crumbs"></div>
+
+        <div class="composer">
+          <textarea id="text-area" placeholder="Текст — отправится отдельной панелью. Ctrl+Enter"></textarea>
+          <button class="btn" id="send-text" type="button" style="margin-top:8px">Отправить текст</button>
+        </div>
+
+        <div class="uploads" id="uploads"></div>
+        <div class="items" id="items"><p class="empty">Загрузка…</p></div>
+      </div>
+
+      <div class="veil" id="veil" hidden>Отпусти — загрузим</div>
+
+      <script>
+      (() => {
+        const CHUNK = 4 * 1024 * 1024;
+        const esc = s => String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+        const $ = id => document.getElementById(id);
+
+        let parent = null;
+        let items = [];
+        let newestFirst = true;
+        const expanded = new Set();
+
+        const fmtSize = b => {
+          if (b < 1024) return b + " Б";
+          if (b < 1048576) return (b / 1024).toFixed(1) + " КБ";
+          if (b < 1073741824) return (b / 1048576).toFixed(1) + " МБ";
+          return (b / 1073741824).toFixed(2) + " ГБ";
+        };
+        const fmtDate = ts => new Date(ts * 1000).toLocaleString("ru-RU",
+          { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" });
+
+        const iconFor = it => {
+          if (it.kind === "folder") return "📁";
+          if (it.kind === "text") return "📝";
+          const ext = (it.name.split(".").pop() || "").toLowerCase();
+          if (["jpg","jpeg","png","gif","webp","bmp","svg","heic"].includes(ext)) return "🖼";
+          if (["zip","7z","rar","tar","gz","xz"].includes(ext)) return "🗜";
+          if (["pdf"].includes(ext)) return "📕";
+          if (["doc","docx","odt","rtf"].includes(ext)) return "📘";
+          if (["xls","xlsx","ods","csv"].includes(ext)) return "📗";
+          if (["ppt","pptx","odp"].includes(ext)) return "📙";
+          if (["mp4","mkv","avi","mov","webm"].includes(ext)) return "🎬";
+          if (["mp3","wav","flac","ogg","m4a"].includes(ext)) return "🎵";
+          if (["exe","msi","apk","deb","appimage"].includes(ext)) return "⚙";
+          return "📄";
+        };
+
+        let toastTimer = null;
+        const toast = (text, bad) => {
+          document.querySelectorAll(".toast").forEach(t => t.remove());
+          const el = document.createElement("div");
+          el.className = "toast" + (bad ? " bad" : "");
+          el.textContent = text;
+          document.body.appendChild(el);
+          clearTimeout(toastTimer);
+          toastTimer = setTimeout(() => el.remove(), 3600);
+        };
+
+        const api = async (url, options) => {
+          const response = await fetch(url, Object.assign({ credentials: "same-origin" }, options || {}));
+          let data = {};
+          try { data = await response.json(); } catch {}
+          if (!response.ok) throw new Error(data.error || "Ошибка " + response.status);
+          return data;
+        };
+
+        // ── Отрисовка ──
+        const renderCrumbs = crumbs => {
+          const parts = ['<button class="crumb" data-go="">Дроп</button>'];
+          crumbs.forEach((c, i) => {
+            parts.push("<span>/</span>");
+            const last = i === crumbs.length - 1;
+            parts.push(`<button class="crumb${last ? " here" : ""}" data-go="${esc(c.id)}">${esc(c.name)}</button>`);
+          });
+          $("crumbs").innerHTML = parts.join("");
+        };
+
+        const render = () => {
+          const needle = $("search").value.trim().toLowerCase();
+          let list = items.filter(it => !needle || it.name.toLowerCase().includes(needle));
+          list.sort((a, b) => (a.kind !== "folder") - (b.kind !== "folder")
+            || (newestFirst ? b.created - a.created : a.created - b.created));
+
+          if (!list.length) {
+            $("items").innerHTML = '<p class="empty">' + (needle ? "Ничего не нашлось" : "Пусто. Перетащи файлы сюда или вставь через Ctrl+V") + "</p>";
+            return;
+          }
+          $("items").innerHTML = list.map(it => {
+            const isText = it.kind === "text";
+            const isFolder = it.kind === "folder";
+            const open = expanded.has(it.id);
+            const body = isText && it.preview != null
+              ? `<div class="txt">${esc(open && it.full ? it.full : it.preview)}${
+                   it.truncated && !open ? "…" : ""}${
+                   it.truncated ? `<br><button class="txt-more" data-act="more">${open ? "свернуть" : "показать целиком"}</button>` : ""}</div>`
+              : "";
+            const meta = isFolder ? "папка · " + fmtDate(it.created)
+                                  : fmtSize(it.size) + " · " + fmtDate(it.created);
+            return `<div class="item ${it.kind}" data-id="${esc(it.id)}" draggable="true">
+              <span class="ico">${iconFor(it)}</span>
+              <span class="nm">${esc(it.name)}</span>
+              <span class="acts">
+                ${isFolder ? "" : `<button class="act" data-act="dl" title="Скачать">⤓</button>`}
+                ${isText ? `<button class="act" data-act="copy" title="Копировать">⧉</button>` : ""}
+                ${isFolder ? "" : `<button class="act${it.share ? " on" : ""}" data-act="share" title="Ссылка для скачивания">🔗</button>`}
+                <button class="act" data-act="ren" title="Переименовать">✎</button>
+                <button class="act del" data-act="del" title="Удалить">🗑</button>
+              </span>
+              <span class="meta">${esc(meta)}${it.share ? " · ссылка активна" : ""}</span>
+              ${body}
+            </div>`;
+          }).join("");
+        };
+
+        const load = async () => {
+          try {
+            const data = await api("/api/drop/list?parent=" + encodeURIComponent(parent || ""));
+            items = data.items;
+            renderCrumbs(data.breadcrumbs);
+            const pct = data.quota ? (data.used / data.quota) * 100 : 0;
+            $("quota-text").textContent = fmtSize(data.used) + " из " + fmtSize(data.quota);
+            $("quota-fill").style.width = Math.min(pct, 100) + "%";
+            $("quota-fill").classList.toggle("hot", pct > 80);
+            render();
+          } catch (e) { toast(e.message, true); }
+        };
+
+        // ── Загрузка кусками ──
+        const queue = [];
+        let busy = false;
+
+        const upRow = file => {
+          const row = document.createElement("div");
+          row.className = "up";
+          row.innerHTML = `<div class="up-head"><span class="up-name">${esc(file.name)}</span><span class="up-pct">0%</span></div>
+                           <div class="up-bar"><div class="up-fill"></div></div>`;
+          $("uploads").appendChild(row);
+          return row;
+        };
+
+        const sendOne = async (file, row) => {
+          const pctEl = row.querySelector(".up-pct");
+          const fillEl = row.querySelector(".up-fill");
+          const init = await api("/api/drop/upload/init", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name: file.name, size: file.size, parent,
+                                   content_type: file.type || "application/octet-stream" }),
+          });
+          let offset = 0;
+          while (offset < file.size) {
+            const piece = file.slice(offset, offset + CHUNK);
+            let done = false;
+            for (let attempt = 0; attempt < 4 && !done; attempt++) {
+              try {
+                const response = await fetch(
+                  "/api/drop/upload/chunk/" + init.upload_id + "?offset=" + offset,
+                  { method: "POST", credentials: "same-origin", body: piece });
+                const data = await response.json();
+                if (response.status === 409) { offset = data.expected; done = true; break; }
+                if (!response.ok) throw new Error(data.error || "сбой куска");
+                offset = data.received;
+                done = true;
+              } catch (err) {
+                if (attempt === 3) throw err;
+                await new Promise(r => setTimeout(r, 600 * (attempt + 1)));
+              }
+            }
+            const pct = Math.round((offset / file.size) * 100);
+            pctEl.textContent = pct + "%";
+            fillEl.style.width = pct + "%";
+          }
+          await api("/api/drop/upload/finish/" + init.upload_id, { method: "POST" });
+        };
+
+        const pump = async () => {
+          if (busy) return;
+          busy = true;
+          while (queue.length) {
+            const file = queue.shift();
+            const row = upRow(file);
+            try {
+              await sendOne(file, row);
+              row.remove();
+            } catch (e) {
+              row.classList.add("failed");
+              row.querySelector(".up-pct").textContent = e.message;
+              setTimeout(() => row.remove(), 6000);
+            }
+          }
+          busy = false;
+          load();
+        };
+
+        const enqueue = files => {
+          const list = Array.from(files || []).filter(f => f.size > 0);
+          if (!list.length) return;
+          list.forEach(f => queue.push(f));
+          pump();
+        };
+
+        // ── Ввод ──
+        $("pick").addEventListener("click", () => $("file-input").click());
+        $("file-input").addEventListener("change", e => { enqueue(e.target.files); e.target.value = ""; });
+
+        let dragDepth = 0;
+        document.addEventListener("dragenter", e => {
+          if (!e.dataTransfer.types.includes("Files")) return;
+          dragDepth++; $("veil").hidden = false;
+        });
+        document.addEventListener("dragleave", () => { if (--dragDepth <= 0) { dragDepth = 0; $("veil").hidden = true; } });
+        document.addEventListener("dragover", e => { if (e.dataTransfer.types.includes("Files")) e.preventDefault(); });
+        document.addEventListener("drop", e => {
+          if (!e.dataTransfer.files.length) return;
+          e.preventDefault(); dragDepth = 0; $("veil").hidden = true;
+          enqueue(e.dataTransfer.files);
+        });
+
+        document.addEventListener("paste", e => {
+          if (document.activeElement === $("text-area")) return;
+          const files = Array.from(e.clipboardData.files || []);
+          if (files.length) { e.preventDefault(); enqueue(files); toast("Вставлено из буфера"); }
+        });
+
+        $("mkdir").addEventListener("click", async () => {
+          const name = prompt("Название папки");
+          if (!name || !name.trim()) return;
+          try { await api("/api/drop/folder", { method: "POST", headers: { "Content-Type": "application/json" },
+                                                body: JSON.stringify({ name, parent }) }); load(); }
+          catch (e) { toast(e.message, true); }
+        });
+
+        const sendText = async () => {
+          const text = $("text-area").value;
+          if (!text.trim()) return;
+          try {
+            await api("/api/drop/text", { method: "POST", headers: { "Content-Type": "application/json" },
+                                          body: JSON.stringify({ text, parent }) });
+            $("text-area").value = "";
+            load();
+          } catch (e) { toast(e.message, true); }
+        };
+        $("send-text").addEventListener("click", sendText);
+        $("text-area").addEventListener("keydown", e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) sendText(); });
+
+        $("search").addEventListener("input", render);
+        $("sort").addEventListener("click", () => {
+          newestFirst = !newestFirst;
+          $("sort").textContent = newestFirst ? "Сначала новые" : "Сначала старые";
+          render();
+        });
+
+        $("crumbs").addEventListener("click", e => {
+          const btn = e.target.closest(".crumb");
+          if (!btn || btn.classList.contains("here")) return;
+          parent = btn.dataset.go || null;
+          expanded.clear();
+          load();
+        });
+
+        // ── Перетаскивание элементов в папки ──
+        let dragId = null;
+        $("items").addEventListener("dragstart", e => {
+          const row = e.target.closest(".item");
+          if (!row) return;
+          dragId = row.dataset.id;
+          row.classList.add("dragging");
+          e.dataTransfer.effectAllowed = "move";
+          e.dataTransfer.setData("text/plain", dragId);
+        });
+        $("items").addEventListener("dragend", e => {
+          dragId = null;
+          document.querySelectorAll(".item").forEach(r => r.classList.remove("dragging", "drag-over"));
+        });
+        $("items").addEventListener("dragover", e => {
+          const row = e.target.closest(".item.folder");
+          if (!row || !dragId || row.dataset.id === dragId) return;
+          e.preventDefault();
+          row.classList.add("drag-over");
+        });
+        $("items").addEventListener("dragleave", e => {
+          const row = e.target.closest(".item");
+          if (row) row.classList.remove("drag-over");
+        });
+        $("items").addEventListener("drop", async e => {
+          const row = e.target.closest(".item.folder");
+          if (!row || !dragId || row.dataset.id === dragId) return;
+          e.preventDefault();
+          e.stopPropagation();
+          const target = row.dataset.id;
+          const moved = dragId;
+          dragId = null;
+          try {
+            await api("/api/drop/" + moved, { method: "PATCH", headers: { "Content-Type": "application/json" },
+                                              body: JSON.stringify({ parent: target }) });
+            load();
+          } catch (err) { toast(err.message, true); }
+        });
+
+        // ── Действия над элементами ──
+        $("items").addEventListener("click", async e => {
+          const row = e.target.closest(".item");
+          if (!row) return;
+          const id = row.dataset.id;
+          const item = items.find(i => i.id === id);
+          const act = e.target.dataset.act;
+
+          if (!act) {
+            if (item && item.kind === "folder") { parent = id; expanded.clear(); load(); }
+            return;
+          }
+
+          if (act === "dl") { window.location.assign("/api/drop/download/" + id); return; }
+
+          if (act === "more") {
+            if (expanded.has(id)) { expanded.delete(id); render(); return; }
+            try {
+              const data = await api("/api/drop/text/" + id);
+              item.full = data.text;
+              expanded.add(id);
+              render();
+            } catch (err) { toast(err.message, true); }
+            return;
+          }
+
+          if (act === "copy") {
+            try {
+              const data = await api("/api/drop/text/" + id);
+              await navigator.clipboard.writeText(data.text);
+              toast("Текст скопирован");
+            } catch { toast("Не удалось скопировать", true); }
+            return;
+          }
+
+          if (act === "share") {
+            if (item.share) {
+              if (!confirm("Отозвать ссылку?")) return;
+              try { await api("/api/drop/share/" + id, { method: "DELETE" }); toast("Ссылка отозвана"); load(); }
+              catch (err) { toast(err.message, true); }
+              return;
+            }
+            const raw = prompt("На сколько часов дать ссылку?", "24");
+            if (raw === null) return;
+            try {
+              const data = await api("/api/drop/share/" + id, {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ hours: parseInt(raw, 10) || 24 }) });
+              try { await navigator.clipboard.writeText(data.url); toast("Ссылка скопирована, живёт " + data.hours + " ч"); }
+              catch { prompt("Ссылка (живёт " + data.hours + " ч):", data.url); }
+              load();
+            } catch (err) { toast(err.message, true); }
+            return;
+          }
+
+          if (act === "del") {
+            const what = item.kind === "folder"
+              ? "Удалить папку «" + item.name + "» со всем содержимым?"
+              : "Удалить «" + item.name + "»?";
+            if (!confirm(what)) return;
+            try { await api("/api/drop/" + id, { method: "DELETE" }); load(); }
+            catch (err) { toast(err.message, true); }
+            return;
+          }
+
+          if (act === "ren") {
+            const nameEl = row.querySelector(".nm");
+            const input = document.createElement("input");
+            input.className = "rename";
+            input.value = item.name;
+            input.maxLength = 120;
+            nameEl.replaceWith(input);
+            input.focus();
+            input.select();
+            let saving = false;
+            const save = async () => {
+              if (saving) return;
+              saving = true;
+              const name = input.value.trim();
+              if (name && name !== item.name) {
+                try { await api("/api/drop/" + id, { method: "PATCH", headers: { "Content-Type": "application/json" },
+                                                     body: JSON.stringify({ name }) }); }
+                catch (err) { toast(err.message, true); }
+              }
+              load();
+            };
+            input.addEventListener("blur", save);
+            input.addEventListener("keydown", ev => {
+              if (ev.key === "Enter") input.blur();
+              if (ev.key === "Escape") { saving = true; render(); }
+            });
+            input.addEventListener("click", ev => ev.stopPropagation());
+          }
+        });
+
+        load();
+      })();
+      </script>
+    </body>
+    </html>
+    """
 
 
 @app.route("/")
