@@ -25,3 +25,20 @@ jobs:
         run: |
           docker builder prune -f
           docker image prune -f
+
+      # Идёт последним: даже если Амстердам недоступен, дом уже обновлён.
+      # Падение шага видно красным крестиком в Actions — молча не проглатываем.
+      - name: Deploy to Amsterdam VPS
+        run: |
+          ssh -i /home/vitaz/.ssh/id_ed25519_amsterdam \
+              -o StrictHostKeyChecking=accept-new \
+              -o ConnectTimeout=10 \
+              root@100.104.94.83 '
+            set -e
+            cd /opt/sites/vitazgio.ru
+            git fetch origin
+            git reset --hard origin/main
+            docker compose up -d --build web
+            docker builder prune -f
+            docker image prune -f
+          '
