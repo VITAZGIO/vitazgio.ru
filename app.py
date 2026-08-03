@@ -1684,7 +1684,7 @@ def cabinet():
         .install-button { margin-left: auto; color: #1a0d04; border: 0; background: linear-gradient(90deg, #ff782f, #ffb35c); }
         .install-button:hover { border: 0; background: linear-gradient(90deg, #ff8f4f, #ffc379); }
         [hidden] { display: none !important; }
-        .workspace { width: 100%; max-width: 1180px; margin-top: clamp(22px, 3.5vw, 40px); }
+        .workspace { flex: 1 1 auto; min-width: 0; margin-top: clamp(22px, 3.5vw, 40px); }
         .device-list { container-type: inline-size; margin: 0; padding: 8px 18px 18px; list-style: none; border-top: 1px solid rgba(255,255,255,.07); }
         .device { min-height: 48px; display: grid; grid-template-columns: 150px 1fr 70px 36px 116px 82px; align-items: center; gap: 12px; border-bottom: 1px solid rgba(255,255,255,.06); }
         .device:last-child { border-bottom: 0; }
@@ -1767,12 +1767,13 @@ def cabinet():
         /* ── Панели кабинета ── */
         .widget-empty { color: #4a5060; font-size: .8rem; margin: 0; padding: 4px 0; }
 
-        .cabinet-cols { display: flex; align-items: flex-start; gap: 22px; }
-        .rail { width: 320px; flex: none; position: sticky; top: 22px; display: flex; flex-direction: column; gap: 14px; }
+        /* stretch, чтобы правая колонка кончалась ровно там же, где левая */
+        .cabinet-cols { display: flex; align-items: stretch; gap: 20px; max-width: 1760px; }
+        .rail { width: 268px; flex: none; display: flex; flex-direction: column; gap: 12px; min-height: 0; }
         /* Узкий экран или половина окна — правой колонки просто нет. */
         @media (max-width: 1220px) { .rail { display: none; } }
 
-        .rail-card { position: relative; padding: 16px 18px; border: 1px solid rgba(45,226,255,.18);
+        .rail-card { position: relative; padding: 13px 15px; border: 1px solid rgba(45,226,255,.18);
                      background: linear-gradient(160deg, rgba(12,20,36,.95), rgba(10,14,26,.95)); overflow: hidden; }
         .rail-corner { position: absolute; width: 12px; height: 12px; pointer-events: none; }
         .rail-corner--tl { top: -1px; left: -1px; border-top: 2px solid #2de2ff; border-left: 2px solid #2de2ff; }
@@ -1783,12 +1784,12 @@ def cabinet():
         /* Часы */
         .clock { text-align: center; }
         .clock-time { display: flex; align-items: baseline; justify-content: center; gap: 2px;
-                      font: 800 3.1rem "Cascadia Code", Consolas, monospace; letter-spacing: -.04em; color: #2de2ff;
+                      font: 800 2.25rem "Cascadia Code", Consolas, monospace; letter-spacing: -.04em; color: #2de2ff;
                       text-shadow: 0 0 14px rgba(45,226,255,.55), 0 0 42px rgba(45,226,255,.22); }
         .clock-time em { font-style: normal; color: #ff3fa4; text-shadow: 0 0 14px rgba(255,63,164,.6); animation: blink 2s steps(1) infinite; }
-        .clock-time small { margin-left: 6px; font-size: 1.15rem; color: #ff3fa4; text-shadow: 0 0 12px rgba(255,63,164,.5); }
+        .clock-time small { margin-left: 5px; font-size: .88rem; color: #ff3fa4; text-shadow: 0 0 12px rgba(255,63,164,.5); }
         @keyframes blink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: .25; } }
-        .clock-date { margin-top: 6px; color: #6b7385; font-size: .7rem; letter-spacing: .22em; text-transform: uppercase; }
+        .clock-date { margin-top: 5px; color: #6b7385; font-size: .62rem; letter-spacing: .18em; text-transform: uppercase; }
         .clock-scan { position: absolute; inset: 0; pointer-events: none;
                       background: repeating-linear-gradient(180deg, rgba(45,226,255,.05) 0 1px, transparent 1px 4px); }
 
@@ -1796,31 +1797,39 @@ def cabinet():
         .pl-head { display: flex; align-items: center; justify-content: space-between; }
         .pl-label { color: #8f99ab; font-size: .66rem; letter-spacing: .22em; text-transform: uppercase; }
         .pl-actions { display: flex; gap: 6px; }
-        .pl-icon { width: 26px; height: 26px; display: grid; place-items: center; color: #2de2ff; font-size: .9rem; line-height: 1;
+        .pl-icon { width: 24px; height: 24px; display: grid; place-items: center; color: #2de2ff; font-size: .9rem; line-height: 1;
                    border: 1px solid rgba(45,226,255,.3); background: rgba(45,226,255,.06); cursor: pointer; transition: all .16s; }
         .pl-icon:hover { color: #061018; border-color: #2de2ff; background: #2de2ff; }
-        .pl-eq { display: flex; align-items: flex-end; justify-content: center; gap: 3px; height: 34px; margin: 14px 0 10px; }
-        .pl-eq span { width: 3px; height: 4px; background: linear-gradient(180deg, #ff3fa4, #2de2ff); opacity: .35; transition: height .12s, opacity .12s; }
+        .pl-eq { display: flex; align-items: flex-end; justify-content: center; gap: 2px; height: 26px; margin: 11px 0 8px; }
+        .pl-eq span { width: 2px; height: 3px; background: linear-gradient(180deg, #ff3fa4, #2de2ff); opacity: .35; transition: height .12s, opacity .12s; }
         .player.on .pl-eq span { opacity: 1; }
         .pl-now { text-align: center; }
-        .pl-title { color: #eaf6ff; font-size: .86rem; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .pl-artist { margin-top: 3px; color: #6b7385; font-size: .7rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .pl-seek { position: relative; height: 4px; margin: 12px 0 5px; background: rgba(255,255,255,.09); }
+        .pl-title { color: #eaf6ff; font-size: .79rem; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .pl-artist { margin-top: 2px; color: #6b7385; font-size: .66rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .pl-seek { position: relative; height: 3px; margin: 10px 0 4px; background: rgba(255,255,255,.09); }
         .pl-seek-fill { height: 100%; width: 0; background: linear-gradient(90deg, #ff3fa4, #2de2ff); }
         .pl-seek-input { position: absolute; inset: -7px 0; width: 100%; height: 18px; margin: 0; opacity: 0; cursor: pointer; }
         .pl-times { display: flex; justify-content: space-between; color: #55607a; font-size: .64rem; }
-        .pl-controls { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
-        .pl-btn { padding: 6px 9px; color: #9fb0c6; font: 700 .72rem "Cascadia Code", Consolas, monospace;
+        .pl-controls { display: flex; align-items: center; gap: 6px; margin-top: 9px; }
+        .pl-btn { padding: 5px 7px; color: #9fb0c6; font: 700 .66rem "Cascadia Code", Consolas, monospace;
                   border: 1px solid rgba(255,255,255,.12); background: transparent; cursor: pointer; transition: all .16s; }
         .pl-btn:hover { color: #fff; border-color: rgba(45,226,255,.5); background: rgba(45,226,255,.1); }
-        .pl-play { flex: none; min-width: 42px; color: #061018; border-color: transparent; background: linear-gradient(90deg, #2de2ff, #7fe9ff); }
+        .pl-play { flex: none; min-width: 36px; color: #061018; border-color: transparent; background: linear-gradient(90deg, #2de2ff, #7fe9ff); }
         .pl-play:hover { color: #061018; background: linear-gradient(90deg, #7fe9ff, #2de2ff); }
         .pl-vol { flex: 1; min-width: 0; height: 3px; accent-color: #ff3fa4; cursor: pointer; }
-        .pl-list { margin-top: 14px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,.08); }
-        .pl-list-head { display: flex; justify-content: space-between; color: #55607a; font-size: .64rem; letter-spacing: .1em; text-transform: uppercase; }
+        /* Плеер тянется до низа колонки, список внутри него прокручивается. */
+        .player { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+        .pl-list { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0;
+                   margin-top: 11px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,.08); }
+        .pl-list-head { flex: none; display: flex; justify-content: space-between; color: #55607a; font-size: .64rem; letter-spacing: .1em; text-transform: uppercase; }
+        #pl-tracks { flex: 1 1 auto; min-height: 64px; margin-top: 4px; overflow-y: auto; scrollbar-width: thin;
+                     scrollbar-color: rgba(45,226,255,.35) transparent; overscroll-behavior: contain; }
+        #pl-tracks::-webkit-scrollbar { width: 6px; }
+        #pl-tracks::-webkit-scrollbar-thumb { background: rgba(45,226,255,.3); }
+        #pl-tracks::-webkit-scrollbar-track { background: transparent; }
         .pl-track { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 2px 6px; padding: 7px 0; border-bottom: 1px solid rgba(255,255,255,.05); }
         .pl-track:last-of-type { border-bottom: 0; }
-        .pl-track-name { min-width: 0; color: #c4cad5; font-size: .74rem; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .pl-track-name { min-width: 0; color: #c4cad5; font-size: .71rem; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .pl-track-name:hover { color: #2de2ff; }
         .pl-track.current .pl-track-name { color: #2de2ff; }
         .pl-track-sub { grid-column: 1 / -1; color: #55607a; font-size: .64rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1829,7 +1838,7 @@ def cabinet():
         .pl-mini.rm:hover { color: #ff6b81; border-color: rgba(255,107,129,.45); }
         .pl-edit { width: 100%; height: 24px; padding: 0 6px; color: #f4fbff; font: 600 .72rem "Cascadia Code", Consolas, monospace;
                    border: 1px solid rgba(45,226,255,.4); outline: none; background: rgba(4,10,20,.7); }
-        .pl-drop { margin-top: 10px; padding: 12px; color: #55607a; font-size: .68rem; text-align: center;
+        .pl-drop { flex: none; margin-top: 9px; padding: 10px; color: #55607a; font-size: .64rem; text-align: center;
                    border: 1px dashed rgba(45,226,255,.22); cursor: pointer; transition: all .18s; }
         .pl-drop:hover, .pl-drop.over { color: #2de2ff; border-color: #2de2ff; background: rgba(45,226,255,.06); }
 
@@ -2085,7 +2094,7 @@ def cabinet():
               <input class="pl-vol" id="pl-vol" type="range" min="0" max="100" value="70" aria-label="Громкость">
             </div>
 
-            <div class="pl-list" id="pl-list" hidden>
+            <div class="pl-list" id="pl-list">
               <div class="pl-list-head">
                 <span id="pl-count">0 треков</span>
                 <span id="pl-used"></span>
@@ -2944,7 +2953,7 @@ def cabinet():
             const el = id => document.getElementById(id);
             const eq = el("pl-eq");
             const bars = [];
-            for (let i = 0; i < 18; i++) { const b = document.createElement("span"); eq.appendChild(b); bars.push(b); }
+            for (let i = 0; i < 20; i++) { const b = document.createElement("span"); eq.appendChild(b); bars.push(b); }
 
             let tracks = [];      // в порядке воспроизведения (перемешанном)
             let index = -1;
@@ -2969,12 +2978,12 @@ def cabinet():
                 const step = Math.floor(freq.length / bars.length / 2) || 1;
                 bars.forEach((b, i) => {
                   const v = freq[i * step] / 255;
-                  b.style.height = Math.max(3, v * 34) + "px";
+                  b.style.height = Math.max(2, v * 26) + "px";
                 });
               } else if (!audio.paused) {
-                bars.forEach(b => { b.style.height = (4 + Math.random() * 26) + "px"; });
+                bars.forEach(b => { b.style.height = (3 + Math.random() * 20) + "px"; });
               } else {
-                bars.forEach(b => { b.style.height = "4px"; });
+                bars.forEach(b => { b.style.height = "3px"; });
               }
               raf = requestAnimationFrame(drawBars);
             };
