@@ -1343,6 +1343,68 @@ def device_forget_api(selector):
     return jsonify(ok=True)
 
 
+def _drop_thumb_path(item_id):
+    return os.path.join(DROP_DIR, f"{item_id}.thumb")
+
+
+def _drop_can_thumb(item):
+    """Миниатюры делаем только для растровых картинок. SVG сюда не пускаем:
+    это документ со скриптами, а не картинка."""
+    if item.get("kind") != "file":
+        return False
+    name = item.get("name", "")
+    ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+    return ext in {"jpg", "jpeg", "png", "gif", "webp", "bmp", "tif", "tiff"}
+
+
+def _drop_make_thumb(item_id):
+    """Рисует миниатюру рядом с файлом. Возвращает путь или None."""
+    thumb_path = _drop_thumb_path(item_id)
+    if os.path.exists(thumb_path):
+        return thumb_path
+    try:
+        from PIL import Image
+
+        Image.MAX_IMAGE_PIXELS = 80_000_000  # защита от «бомб» с гигантским разрешением
+        with Image.open(_drop_path(item_id)) as image:
+            image.draft("RGB", (256, 256))  # для JPEG декодируем сразу уменьшенным
+            image = image.convert("RGB")
+            image.thumbnail((200, 200))
+            image.save(thumb_path, "JPEG", quality=62, optimize=True)
+        return thumb_path
+    except Exception:
+        return None
+
+
+@app.get("/api/drop/thumb/<item_id>")
+@login_required
+def drop_thumb(item_id):
+    with drop_lock:
+        item = drop_items.get(item_id)
+    if not item or not _drop_can_thumb(item):
+        return "", 404
+    thumb_path = _drop_make_thumb(item_id)
+    if not thumb_path:
+        return "", 404
+    response = send_file(thumb_path, mimetype="image/jpeg", conditional=True)
+    response.headers["Cache-Control"] = "private, max-age=86400"
+    return response
+
+
+def _drop_send(item_id, item):
+    """Отдаём всегда вложением: иначе загруженный .html или .svg со скриптом
+    выполнился бы на домене сайта и добрался до сессии и токена устройства."""
+    response = send_file(
+        _drop_path(item_id),
+        mimetype="application/octet-stream",
+        as_attachment=True,
+        download_name=item["name"],
+        conditional=True,
+    )
+    response.headers["Content-Security-Policy"] = "default-src 'none'; sandbox"
+    return response
+
+
 @app.post("/api/drop/text")
 @login_required
 def drop_upload_text():
@@ -1767,9 +1829,11 @@ def cabinet():
         /* ── Панели кабинета ── */
         .widget-empty { color: #4a5060; font-size: .8rem; margin: 0; padding: 4px 0; }
 
-        /* stretch, чтобы правая колонка кончалась ровно там же, где левая */
-        .cabinet-cols { display: flex; align-items: stretch; gap: 20px; max-width: 1760px; }
-        .rail { width: 268px; flex: none; display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+        /* Колонка фиксированного размера: не тянется за левой стороной,
+           сколько бы панелей там ни развернули. */
+        .cabinet-cols { display: flex; align-items: flex-start; gap: 20px; max-width: 1900px; }
+        .rail { width: 268px; flex: none; display: flex; flex-direction: column; gap: 12px;
+                margin-top: clamp(22px, 3.5vw, 40px); }
         /* Узкий экран или половина окна — правой колонки просто нет. */
         @media (max-width: 1220px) { .rail { display: none; } }
 
@@ -1817,12 +1881,11 @@ def cabinet():
         .pl-play { flex: none; min-width: 36px; color: #061018; border-color: transparent; background: linear-gradient(90deg, #2de2ff, #7fe9ff); }
         .pl-play:hover { color: #061018; background: linear-gradient(90deg, #7fe9ff, #2de2ff); }
         .pl-vol { flex: 1; min-width: 0; height: 3px; accent-color: #ff3fa4; cursor: pointer; }
-        /* Плеер тянется до низа колонки, список внутри него прокручивается. */
-        .player { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
-        .pl-list { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0;
-                   margin-top: 11px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,.08); }
-        .pl-list-head { flex: none; display: flex; justify-content: space-between; color: #55607a; font-size: .64rem; letter-spacing: .1em; text-transform: uppercase; }
-        #pl-tracks { flex: 1 1 auto; min-height: 64px; margin-top: 4px; overflow-y: auto; scrollbar-width: thin;
+        .player.over { border-color: #2de2ff; }
+        .pl-list { margin-top: 11px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,.08); }
+        .pl-list-head { display: flex; justify-content: space-between; color: #55607a; font-size: .64rem; letter-spacing: .1em; text-transform: uppercase; }
+        /* Высота списка постоянная — колонка не «дышит» вслед за левой стороной. */
+        #pl-tracks { height: 232px; margin-top: 4px; overflow-y: auto; scrollbar-width: thin;
                      scrollbar-color: rgba(45,226,255,.35) transparent; overscroll-behavior: contain; }
         #pl-tracks::-webkit-scrollbar { width: 6px; }
         #pl-tracks::-webkit-scrollbar-thumb { background: rgba(45,226,255,.3); }
@@ -1838,9 +1901,6 @@ def cabinet():
         .pl-mini.rm:hover { color: #ff6b81; border-color: rgba(255,107,129,.45); }
         .pl-edit { width: 100%; height: 24px; padding: 0 6px; color: #f4fbff; font: 600 .72rem "Cascadia Code", Consolas, monospace;
                    border: 1px solid rgba(45,226,255,.4); outline: none; background: rgba(4,10,20,.7); }
-        .pl-drop { flex: none; margin-top: 9px; padding: 10px; color: #55607a; font-size: .64rem; text-align: center;
-                   border: 1px dashed rgba(45,226,255,.22); cursor: pointer; transition: all .18s; }
-        .pl-drop:hover, .pl-drop.over { color: #2de2ff; border-color: #2de2ff; background: rgba(45,226,255,.06); }
 
         /* Верхний блок: метрики во всю ширину */
         .dash { padding: 18px 20px 16px; border: 1px solid rgba(45,226,255,.16); background: rgba(10,17,30,.72); }
@@ -2101,7 +2161,6 @@ def cabinet():
               </div>
               <div id="pl-tracks"></div>
               <input type="file" id="pl-file" accept="audio/*,.mp3,.m4a,.flac,.ogg,.opus,.wav,.aac" multiple hidden>
-              <div class="pl-drop" id="pl-drop">Перетащи треки сюда или нажми «+»</div>
             </div>
 
             <audio id="pl-audio" preload="none"></audio>
@@ -3083,31 +3142,31 @@ def cabinet():
               if (!list.hidden) load(false);
             });
             el("pl-add").addEventListener("click", () => { el("pl-list").hidden = false; el("pl-file").click(); });
-            el("pl-drop").addEventListener("click", () => el("pl-file").click());
             el("pl-file").addEventListener("change", e => { upload(e.target.files); e.target.value = ""; });
 
-            const zone = el("pl-drop");
-            ["dragenter", "dragover"].forEach(ev => zone.addEventListener(ev, e => {
-              e.preventDefault(); e.stopPropagation(); zone.classList.add("over");
+            // Приёмником служит вся карточка — отдельной надписи больше нет.
+            ["dragenter", "dragover"].forEach(ev => box.addEventListener(ev, e => {
+              if (!e.dataTransfer.types.includes("Files")) return;
+              e.preventDefault(); e.stopPropagation(); box.classList.add("over");
             }));
-            ["dragleave", "drop"].forEach(ev => zone.addEventListener(ev, e => {
-              e.preventDefault(); e.stopPropagation(); zone.classList.remove("over");
+            ["dragleave", "drop"].forEach(ev => box.addEventListener(ev, e => {
+              e.preventDefault(); e.stopPropagation(); box.classList.remove("over");
             }));
-            zone.addEventListener("drop", e => upload(e.dataTransfer.files));
+            box.addEventListener("drop", e => upload(e.dataTransfer.files));
 
             const upload = async files => {
               const list = Array.from(files || []);
               if (!list.length) return;
-              zone.textContent = "Загрузка…";
+              const status = el("pl-count");
+              status.textContent = "загрузка…";
               for (const file of list) {
                 const body = new FormData();
                 body.append("file", file);
                 try {
                   const r = await fetch("/api/music", { method: "POST", credentials: "same-origin", body });
-                  if (!r.ok) zone.textContent = ((await r.json()).error || "Ошибка");
-                } catch { zone.textContent = "Сеть недоступна"; }
+                  if (!r.ok) status.textContent = ((await r.json()).error || "ошибка");
+                } catch { status.textContent = "нет сети"; }
               }
-              setTimeout(() => { zone.textContent = "Перетащи треки сюда или нажми «+»"; }, 2200);
               load(false);
             };
 
@@ -3628,8 +3687,9 @@ def drop_page():
                border: 2px solid var(--tint, #7d8798); border-radius: 5px;
                background: color-mix(in srgb, var(--tint, #7d8798) 12%, transparent); }
         .ico.img { border-style: solid; background-size: cover; background-position: center; font-size: 0; }
-        .ico.dir { width: 38px; height: 30px; border: 0; border-radius: 0; background: none; }
-        .ico.dir svg { width: 38px; height: 30px; }
+        /* Та же ширина, что у бейджей, иначе значок папки съезжает на пару пикселей. */
+        .ico.dir { width: 34px; height: 28px; border: 0; border-radius: 0; background: none; }
+        .ico.dir svg { width: 34px; height: 28px; }
 
         .nm { grid-area: name; min-width: 0; color: #dfe7f3; font-size: .84rem; overflow-wrap: anywhere; }
         .meta { grid-area: meta; color: #6b7385; font-size: .68rem; }
