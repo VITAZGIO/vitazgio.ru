@@ -2903,4 +2903,7 @@ def home():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, threaded=True)
+    # На домашнем сервере (за NAT) слушаем все интерфейсы. На VPS с публичным
+    # адресом ставим BIND_HOST=127.0.0.1, чтобы снаружи можно было попасть
+    # только через реверс-прокси, а не напрямую по IP без TLS.
+    app.run(host=os.environ.get("BIND_HOST", "0.0.0.0"), port=5000, threaded=True)
