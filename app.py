@@ -2950,6 +2950,143 @@ def cabinet():
     return html.replace("{{DEVICE_ITEMS}}", device_items)
 
 
+@app.get("/manifest.webmanifest")
+def manifest():
+    """Делает сайт устанавливаемым и, главное, объявляет приём «Поделиться»:
+    после установки дроп появляется в системном меню отправки любого файла."""
+    return Response(
+        json.dumps({
+            "name": "Личный дроп · vitazgio.ru",
+            "short_name": "Дроп",
+            "start_url": "/drop",
+            "scope": "/",
+            "display": "standalone",
+            "background_color": "#0d1321",
+            "theme_color": "#0d1321",
+            "icons": [
+                {"src": "/icon-192.png", "sizes": "192x192", "type": "image/png"},
+                {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png"},
+                {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"},
+            ],
+            "share_target": {
+                "action": "/share-target",
+                "method": "POST",
+                "enctype": "multipart/form-data",
+                "params": {
+                    "title": "title",
+                    "text": "text",
+                    "url": "url",
+                    "files": [{"name": "files", "accept": ["*/*"]}],
+                },
+            },
+        }, ensure_ascii=False),
+        mimetype="application/manifest+json",
+    )
+
+
+@app.get("/sw.js")
+def service_worker():
+    """Перехватывает отправку «Поделиться» и складывает файлы в кэш браузера,
+    откуда страница дропа их забирает и грузит обычным путём — с прогрессом
+    и куками. Отправлять сразу отсюда нельзя: POST из системного меню
+    приходит без сессионной куки."""
+    return Response(
+        """
+        self.addEventListener("install", () => self.skipWaiting());
+        self.addEventListener("activate", event => event.waitUntil(self.clients.claim()));
+
+        self.addEventListener("fetch", event => {
+          const url = new URL(event.request.url);
+          if (event.request.method !== "POST" || url.pathname !== "/share-target") return;
+
+          event.respondWith((async () => {
+            try {
+              const form = await event.request.formData();
+              const cache = await caches.open("share-inbox");
+              const files = form.getAll("files").filter(f => f && f.size);
+              let index = 0;
+              for (const file of files) {
+                await cache.put(
+                  new Request("/__shared/" + (index++) + "?t=" + Date.now()),
+                  new Response(file, { headers: {
+                    "X-Name": encodeURIComponent(file.name || "файл"),
+                    "X-Type": file.type || "application/octet-stream",
+                  }})
+                );
+              }
+              const text = [form.get("title"), form.get("text"), form.get("url")]
+                .filter(Boolean).join("\\n").trim();
+              if (text) {
+                await cache.put(new Request("/__shared-text?t=" + Date.now()),
+                                new Response(text));
+              }
+            } catch (e) {}
+            return Response.redirect("/drop?shared=1", 303);
+          })());
+        });
+        """,
+        mimetype="application/javascript",
+    )
+
+
+@app.get("/icon-<int:size>.png")
+def app_icon(size):
+    if size not in (192, 512):
+        return "", 404
+    path = os.path.join(DATA_DIR, f"icon-{size}.png")
+    if not os.path.exists(path):
+        try:
+            from PIL import Image, ImageDraw
+
+            image = Image.new("RGB", (size, size), "#0d1321")
+            draw = ImageDraw.Draw(image)
+            unit = size / 16
+            draw.rounded_rectangle([unit, unit, size - unit, size - unit],
+                                   radius=unit * 2, fill="#101d33", outline="#2de2ff",
+                                   width=max(2, int(unit / 3)))
+            # стрелка вниз в лоток — «положить файл»
+            draw.polygon([(size / 2, unit * 10.5), (unit * 4.6, unit * 6.8), (unit * 11.4, unit * 6.8)],
+                         fill="#ff782f")
+            draw.rectangle([unit * 6.9, unit * 3.6, unit * 9.1, unit * 7.2], fill="#ff782f")
+            draw.rectangle([unit * 4.2, unit * 11.6, unit * 11.8, unit * 12.6], fill="#2de2ff")
+            image.save(path, "PNG", optimize=True)
+        except Exception:
+            return "", 404
+    return send_file(path, mimetype="image/png", conditional=True)
+
+
+@app.post("/share-target")
+@login_required
+def share_target_fallback():
+    """Сюда попадаем, только если обработчик в браузере ещё не встал."""
+    saved = 0
+    for storage in request.files.getlist("files"):
+        if not storage or not storage.filename:
+            continue
+        item_id = str(uuid.uuid4())
+        path = _drop_path(item_id)
+        try:
+            storage.save(path)
+            size = os.path.getsize(path)
+        except OSError:
+            continue
+        with drop_lock:
+            if size > DROP_MAX_SIZE or _drop_used() + size > DROP_QUOTA:
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+                continue
+            drop_items[item_id] = {
+                "kind": "file", "name": storage.filename[:120], "parent": None,
+                "content_type": storage.content_type or "application/octet-stream",
+                "size": size, "created": time.time(), "share": None,
+            }
+            _drop_write_index()
+        saved += 1
+    return redirect(url_for("drop_page") + ("?saved=%d" % saved if saved else ""))
+
+
 @app.get("/drop")
 @login_required
 def drop_page():
@@ -2960,6 +3097,8 @@ def drop_page():
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width, initial-scale=1">
       <meta name="robots" content="noindex, nofollow">
+      <meta name="theme-color" content="#0d1321">
+      <link rel="manifest" href="/manifest.webmanifest">
       <title>Личный дроп · vitazgio.ru</title>
       <style>
         * { box-sizing: border-box; }
@@ -3061,7 +3200,9 @@ def drop_page():
 
         <div class="bar">
           <button class="btn primary" id="pick" type="button">Выбрать файлы</button>
+          <button class="btn" id="from-clip" type="button">Из буфера</button>
           <button class="btn" id="mkdir" type="button">Новая папка</button>
+          <button class="btn" id="install" type="button" hidden>Установить на телефон</button>
           <input class="search" id="search" type="search" placeholder="Поиск в этой папке…">
           <button class="btn" id="sort" type="button">Сначала новые</button>
           <!-- accept обязателен: без него Android показывает только камеру и галерею -->
@@ -3310,6 +3451,80 @@ def drop_page():
           if (files.length) { e.preventDefault(); enqueue(files); toast("Вставлено из буфера"); }
         });
 
+        // Кнопка «Из буфера»: на телефоне это обход кривого выбора файлов —
+        // скопировал картинку в любом приложении и нажал сюда.
+        $("from-clip").addEventListener("click", async () => {
+          if (!navigator.clipboard || !navigator.clipboard.read) {
+            toast("Браузер не отдаёт буфер. Нажми Ctrl+V прямо на странице", true);
+            return;
+          }
+          try {
+            const entries = await navigator.clipboard.read();
+            const files = [];
+            let plain = "";
+            for (const entry of entries) {
+              const imageType = entry.types.find(t => t.startsWith("image/"));
+              if (imageType) {
+                const blob = await entry.getType(imageType);
+                const ext = imageType.split("/")[1].split("+")[0];
+                const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+                files.push(new File([blob], `буфер-${stamp}.${ext}`, { type: imageType }));
+              } else if (entry.types.includes("text/plain")) {
+                plain = await (await entry.getType("text/plain")).text();
+              }
+            }
+            if (files.length) { enqueue(files); toast("Загружаю из буфера"); return; }
+            if (plain.trim()) { $("text-area").value = plain; toast("Текст вставлен — проверь и отправь"); return; }
+            toast("В буфере ничего подходящего", true);
+          } catch (err) {
+            toast("Не дали доступ к буферу", true);
+          }
+        });
+
+        // Приём «Поделиться»: обработчик в браузере складывает файлы в кэш,
+        // забираем их отсюда и грузим обычным путём — с прогрессом и куками.
+        const collectShared = async () => {
+          if (!("caches" in window) || !location.search.includes("shared=1")) return;
+          try {
+            const cache = await caches.open("share-inbox");
+            const keys = await cache.keys();
+            const files = [];
+            for (const key of keys) {
+              const response = await cache.match(key);
+              await cache.delete(key);
+              if (!response) continue;
+              if (new URL(key.url).pathname === "/__shared-text") {
+                const text = await response.text();
+                if (text.trim()) $("text-area").value = text;
+                continue;
+              }
+              const name = decodeURIComponent(response.headers.get("X-Name") || "файл");
+              const type = response.headers.get("X-Type") || "application/octet-stream";
+              files.push(new File([await response.blob()], name, { type }));
+            }
+            history.replaceState({}, "", "/drop");
+            if (files.length) { enqueue(files); toast("Принято из «Поделиться»"); }
+          } catch (e) {}
+        };
+
+        if ("serviceWorker" in navigator) {
+          navigator.serviceWorker.register("/sw.js").catch(() => {});
+        }
+
+        let installPrompt = null;
+        window.addEventListener("beforeinstallprompt", e => {
+          e.preventDefault();
+          installPrompt = e;
+          $("install").hidden = false;
+        });
+        $("install").addEventListener("click", async () => {
+          if (!installPrompt) return;
+          installPrompt.prompt();
+          await installPrompt.userChoice;
+          installPrompt = null;
+          $("install").hidden = true;
+        });
+
         $("mkdir").addEventListener("click", async () => {
           const name = prompt("Название папки");
           if (!name || !name.trim()) return;
@@ -3481,6 +3696,7 @@ def drop_page():
         });
 
         load();
+        collectShared();
       })();
       </script>
     </body>
