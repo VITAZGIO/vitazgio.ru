@@ -468,14 +468,31 @@ def login():
 
 @app.post("/logout")
 def logout():
-    # Выход должен и правда выходить: если оставить токен, следующий же заход
-    # молча пустит обратно и кнопка станет бессмысленной.
-    raw = request.cookies.get(DEVICE_COOKIE) or ""
-    if "." in raw:
-        _device_forget(raw.split(".", 1)[0])
+    # Доверие устройству намеренно переживает выход: «Выйти» закрывает кабинет,
+    # а не отзывает устройство. Отзыв — снять галку или нажать корзину в списке.
     session.clear()
-    g.clear_device_cookie = True
     return redirect(url_for("home"))
+
+
+@app.get("/api/session/probe")
+def session_probe():
+    """Помнит ли сервер это устройство. Токен не расходуется и не ротируется.
+    Несовпадение валидатора здесь намеренно НЕ удаляет запись: эндпоинт открыт
+    без авторизации, иначе его можно было бы использовать для сноса токенов."""
+    if session.get("authenticated"):
+        return jsonify(trusted=True)
+    raw = request.cookies.get(DEVICE_COOKIE) or ""
+    if "." not in raw:
+        return jsonify(trusted=False)
+    selector, validator = raw.split(".", 1)
+    with devices_lock:
+        record = trusted_devices.get(selector)
+        trusted = bool(
+            record
+            and record.get("expires", 0) > time.time()
+            and hmac.compare_digest(record["hash"], hashlib.sha256(validator.encode()).hexdigest())
+        )
+    return jsonify(trusted=trusted)
 
 
 @app.get("/api/netbird/status")
@@ -3183,7 +3200,18 @@ def home():
             trigger.focus();
           };
 
-          trigger.addEventListener("click", openModal);
+          // Помнит — сразу в кабинет, не помнит — просим пароль.
+          trigger.addEventListener("click", async () => {
+            try {
+              const response = await fetch("/api/session/probe", { credentials: "same-origin" });
+              const result = await response.json();
+              if (result.trusted) {
+                window.location.assign("/cabinet");
+                return;
+              }
+            } catch {}
+            openModal();
+          });
           modal.querySelectorAll("[data-auth-close]").forEach((element) => element.addEventListener("click", closeModal));
           document.addEventListener("keydown", (event) => {
             if (event.key === "Escape" && !modal.hidden) closeModal();
