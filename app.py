@@ -315,6 +315,91 @@ trusted_devices: dict = {}
 devices_lock = threading.Lock()
 os.makedirs(DATA_DIR, exist_ok=True)
 
+# ---- Музыка для плеера в кабинете ------------------------------------------
+# Файлы лежат под своими именами в data/music — так их можно просто закинуть
+# в папку по SSH, и плеер подхватит сам, разобрав «Исполнитель - Название».
+MUSIC_DIR = os.path.join(DATA_DIR, "music")
+MUSIC_INDEX_PATH = os.path.join(DATA_DIR, "music.json")
+MUSIC_MAX_SIZE = 40 * 1024 * 1024
+MUSIC_QUOTA = 2 * 1024 * 1024 * 1024
+MUSIC_EXTS = {".mp3", ".m4a", ".aac", ".ogg", ".opus", ".flac", ".wav", ".webm"}
+MUSIC_MIMES = {
+    ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".aac": "audio/aac",
+    ".ogg": "audio/ogg", ".opus": "audio/ogg", ".flac": "audio/flac",
+    ".wav": "audio/wav", ".webm": "audio/webm",
+}
+
+music_items: dict = {}
+music_lock = threading.Lock()
+os.makedirs(MUSIC_DIR, exist_ok=True)
+
+
+def _music_safe_name(name):
+    """Имя файла без путей и запрещённых символов. secure_filename не годится —
+    он выбрасывает кириллицу, а треки как раз названы по-русски."""
+    name = os.path.basename(name or "")
+    name = re.sub(r'[\x00-\x1f<>:"/\\|?*]', "", name).strip(" .")
+    return name[:120] or "track"
+
+
+def _music_split(stem):
+    """«Исполнитель - Название» → пара. Разделителем может быть дефис или тире."""
+    for sep in (" — ", " – ", " - ", " -", "- "):
+        if sep in stem:
+            left, _, right = stem.partition(sep)
+            if left.strip() and right.strip():
+                return left.strip()[:80], right.strip()[:120]
+    return "", stem.strip()[:120]
+
+
+def _music_write_index():
+    """Вызывать под music_lock."""
+    try:
+        tmp = MUSIC_INDEX_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(music_items, fh, ensure_ascii=False)
+        os.replace(tmp, MUSIC_INDEX_PATH)
+    except OSError:
+        pass
+
+
+def _music_scan():
+    """Синхронизирует индекс с папкой: подхватывает закинутое руками,
+    выбрасывает записи об исчезнувших файлах. Вызывать под music_lock."""
+    try:
+        on_disk = {f for f in os.listdir(MUSIC_DIR)
+                   if os.path.splitext(f)[1].lower() in MUSIC_EXTS}
+    except OSError:
+        return
+
+    for track_id in [k for k, v in music_items.items() if v["file"] not in on_disk]:
+        music_items.pop(track_id, None)
+
+    known = {v["file"] for v in music_items.values()}
+    for fname in sorted(on_disk - known):
+        artist, title = _music_split(os.path.splitext(fname)[0])
+        try:
+            size = os.path.getsize(os.path.join(MUSIC_DIR, fname))
+        except OSError:
+            continue
+        music_items[str(uuid.uuid4())] = {
+            "file": fname, "artist": artist, "title": title,
+            "size": size, "added": time.time(),
+        }
+
+
+def _music_load():
+    try:
+        with open(MUSIC_INDEX_PATH, encoding="utf-8") as fh:
+            music_items.update(json.load(fh))
+    except (OSError, ValueError):
+        pass
+    _music_scan()
+    _music_write_index()
+
+
+_music_load()
+
 
 def _client_ip():
     """Реальный адрес клиента: до приложения трафик идёт через NPM."""
@@ -1070,6 +1155,117 @@ def login_log_api():
         return jsonify(list(reversed(login_log)))
 
 
+@app.get("/api/music")
+@login_required
+def music_list_api():
+    with music_lock:
+        _music_scan()
+        _music_write_index()
+        used = sum(t["size"] for t in music_items.values())
+        tracks = [
+            {"id": k, "artist": v["artist"], "title": v["title"],
+             "size": v["size"], "added": v["added"]}
+            for k, v in sorted(music_items.items(),
+                               key=lambda x: (x[1]["artist"].lower(), x[1]["title"].lower()))
+        ]
+    return jsonify(tracks=tracks, used=used, quota=MUSIC_QUOTA)
+
+
+@app.post("/api/music")
+@login_required
+def music_upload_api():
+    f = request.files.get("file")
+    if not f:
+        return jsonify(error="Файл не выбран."), 400
+    name = _music_safe_name(f.filename)
+    ext = os.path.splitext(name)[1].lower()
+    if ext not in MUSIC_EXTS:
+        return jsonify(error="Это не музыка."), 415
+    if request.content_length and request.content_length > MUSIC_MAX_SIZE + 8192:
+        return jsonify(error="Трек больше 40 МБ."), 413
+
+    with music_lock:
+        _music_scan()
+        if sum(t["size"] for t in music_items.values()) > MUSIC_QUOTA:
+            return jsonify(error="Места под музыку больше нет."), 507
+        taken = {t["file"] for t in music_items.values()}
+
+    stem, suffix = os.path.splitext(name)
+    candidate, counter = name, 2
+    while candidate in taken or os.path.exists(os.path.join(MUSIC_DIR, candidate)):
+        candidate = f"{stem} ({counter}){suffix}"
+        counter += 1
+
+    path = os.path.join(MUSIC_DIR, candidate)
+    try:
+        f.save(path)
+        size = os.path.getsize(path)
+    except OSError as e:
+        return jsonify(error=f"Не удалось сохранить: {e}"), 500
+    if size > MUSIC_MAX_SIZE:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+        return jsonify(error="Трек больше 40 МБ."), 413
+
+    artist, title = _music_split(os.path.splitext(candidate)[0])
+    track_id = str(uuid.uuid4())
+    with music_lock:
+        music_items[track_id] = {"file": candidate, "artist": artist, "title": title,
+                                 "size": size, "added": time.time()}
+        _music_write_index()
+    return jsonify(id=track_id, artist=artist, title=title)
+
+
+@app.patch("/api/music/<track_id>")
+@login_required
+def music_rename_api(track_id):
+    payload = request.get_json(silent=True) or {}
+    with music_lock:
+        track = music_items.get(track_id)
+        if not track:
+            return jsonify(error="Трек не найден."), 404
+        if "artist" in payload:
+            track["artist"] = (payload.get("artist") or "").strip()[:80]
+        if "title" in payload:
+            title = (payload.get("title") or "").strip()[:120]
+            if not title:
+                return jsonify(error="Название пустое."), 400
+            track["title"] = title
+        _music_write_index()
+        return jsonify(ok=True, artist=track["artist"], title=track["title"])
+
+
+@app.delete("/api/music/<track_id>")
+@login_required
+def music_delete_api(track_id):
+    with music_lock:
+        track = music_items.pop(track_id, None)
+        if track:
+            try:
+                os.remove(os.path.join(MUSIC_DIR, track["file"]))
+            except OSError:
+                pass
+            _music_write_index()
+    return jsonify(ok=True)
+
+
+@app.get("/api/music/file/<track_id>")
+@login_required
+def music_file_api(track_id):
+    with music_lock:
+        track = music_items.get(track_id)
+    if not track:
+        return "", 404
+    # Имя берём только из индекса — из адреса в путь не попадает ничего.
+    path = os.path.join(MUSIC_DIR, track["file"])
+    if not os.path.exists(path):
+        return "", 404
+    ext = os.path.splitext(track["file"])[1].lower()
+    return send_file(path, mimetype=MUSIC_MIMES.get(ext, "audio/mpeg"), conditional=True)
+
+
 @app.post("/api/devices/trust")
 @login_required
 def device_trust():
@@ -1480,8 +1676,8 @@ def cabinet():
         .cabinet { min-height: 100svh; padding: clamp(24px, 4vw, 54px); background: linear-gradient(135deg, rgba(10,18,32,.25), transparent 60%); }
         .cabinet-header { display: flex; align-items: center; gap: 20px; }
         h1 { margin: 0; font-size: clamp(1.7rem, 3.6vw, 2.6rem); font-weight: 700; letter-spacing: -.02em;
-             background: linear-gradient(95deg, #eaf6ff, #7fd8ff 55%, #2de2ff);
-             -webkit-background-clip: text; background-clip: text; color: transparent; }
+             color: #eaf6ff; text-shadow: 0 0 22px rgba(45,226,255,.35); }
+        h1 span { color: #2de2ff; text-shadow: 0 0 22px rgba(45,226,255,.5); }
         .logout-form { margin: 0; }
         .logout-button { padding: 10px 16px; color: #dffaff; font: 700 .78rem "Cascadia Code", Consolas, monospace; border: 1px solid rgba(45,226,255,.28); background: rgba(45,226,255,.07); cursor: pointer; }
         .logout-button:hover { border-color: #2de2ff; background: rgba(45,226,255,.14); }
@@ -1570,6 +1766,72 @@ def cabinet():
 
         /* ── Панели кабинета ── */
         .widget-empty { color: #4a5060; font-size: .8rem; margin: 0; padding: 4px 0; }
+
+        .cabinet-cols { display: flex; align-items: flex-start; gap: 22px; }
+        .rail { width: 320px; flex: none; position: sticky; top: 22px; display: flex; flex-direction: column; gap: 14px; }
+        /* Узкий экран или половина окна — правой колонки просто нет. */
+        @media (max-width: 1220px) { .rail { display: none; } }
+
+        .rail-card { position: relative; padding: 16px 18px; border: 1px solid rgba(45,226,255,.18);
+                     background: linear-gradient(160deg, rgba(12,20,36,.95), rgba(10,14,26,.95)); overflow: hidden; }
+        .rail-corner { position: absolute; width: 12px; height: 12px; pointer-events: none; }
+        .rail-corner--tl { top: -1px; left: -1px; border-top: 2px solid #2de2ff; border-left: 2px solid #2de2ff; }
+        .rail-corner--tr { top: -1px; right: -1px; border-top: 2px solid #ff3fa4; border-right: 2px solid #ff3fa4; }
+        .rail-corner--bl { bottom: -1px; left: -1px; border-bottom: 2px solid #ff3fa4; border-left: 2px solid #ff3fa4; }
+        .rail-corner--br { bottom: -1px; right: -1px; border-bottom: 2px solid #2de2ff; border-right: 2px solid #2de2ff; }
+
+        /* Часы */
+        .clock { text-align: center; }
+        .clock-time { display: flex; align-items: baseline; justify-content: center; gap: 2px;
+                      font: 800 3.1rem "Cascadia Code", Consolas, monospace; letter-spacing: -.04em; color: #2de2ff;
+                      text-shadow: 0 0 14px rgba(45,226,255,.55), 0 0 42px rgba(45,226,255,.22); }
+        .clock-time em { font-style: normal; color: #ff3fa4; text-shadow: 0 0 14px rgba(255,63,164,.6); animation: blink 2s steps(1) infinite; }
+        .clock-time small { margin-left: 6px; font-size: 1.15rem; color: #ff3fa4; text-shadow: 0 0 12px rgba(255,63,164,.5); }
+        @keyframes blink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: .25; } }
+        .clock-date { margin-top: 6px; color: #6b7385; font-size: .7rem; letter-spacing: .22em; text-transform: uppercase; }
+        .clock-scan { position: absolute; inset: 0; pointer-events: none;
+                      background: repeating-linear-gradient(180deg, rgba(45,226,255,.05) 0 1px, transparent 1px 4px); }
+
+        /* Плеер */
+        .pl-head { display: flex; align-items: center; justify-content: space-between; }
+        .pl-label { color: #8f99ab; font-size: .66rem; letter-spacing: .22em; text-transform: uppercase; }
+        .pl-actions { display: flex; gap: 6px; }
+        .pl-icon { width: 26px; height: 26px; display: grid; place-items: center; color: #2de2ff; font-size: .9rem; line-height: 1;
+                   border: 1px solid rgba(45,226,255,.3); background: rgba(45,226,255,.06); cursor: pointer; transition: all .16s; }
+        .pl-icon:hover { color: #061018; border-color: #2de2ff; background: #2de2ff; }
+        .pl-eq { display: flex; align-items: flex-end; justify-content: center; gap: 3px; height: 34px; margin: 14px 0 10px; }
+        .pl-eq span { width: 3px; height: 4px; background: linear-gradient(180deg, #ff3fa4, #2de2ff); opacity: .35; transition: height .12s, opacity .12s; }
+        .player.on .pl-eq span { opacity: 1; }
+        .pl-now { text-align: center; }
+        .pl-title { color: #eaf6ff; font-size: .86rem; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .pl-artist { margin-top: 3px; color: #6b7385; font-size: .7rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .pl-seek { position: relative; height: 4px; margin: 12px 0 5px; background: rgba(255,255,255,.09); }
+        .pl-seek-fill { height: 100%; width: 0; background: linear-gradient(90deg, #ff3fa4, #2de2ff); }
+        .pl-seek-input { position: absolute; inset: -7px 0; width: 100%; height: 18px; margin: 0; opacity: 0; cursor: pointer; }
+        .pl-times { display: flex; justify-content: space-between; color: #55607a; font-size: .64rem; }
+        .pl-controls { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+        .pl-btn { padding: 6px 9px; color: #9fb0c6; font: 700 .72rem "Cascadia Code", Consolas, monospace;
+                  border: 1px solid rgba(255,255,255,.12); background: transparent; cursor: pointer; transition: all .16s; }
+        .pl-btn:hover { color: #fff; border-color: rgba(45,226,255,.5); background: rgba(45,226,255,.1); }
+        .pl-play { flex: none; min-width: 42px; color: #061018; border-color: transparent; background: linear-gradient(90deg, #2de2ff, #7fe9ff); }
+        .pl-play:hover { color: #061018; background: linear-gradient(90deg, #7fe9ff, #2de2ff); }
+        .pl-vol { flex: 1; min-width: 0; height: 3px; accent-color: #ff3fa4; cursor: pointer; }
+        .pl-list { margin-top: 14px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,.08); }
+        .pl-list-head { display: flex; justify-content: space-between; color: #55607a; font-size: .64rem; letter-spacing: .1em; text-transform: uppercase; }
+        .pl-track { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 2px 6px; padding: 7px 0; border-bottom: 1px solid rgba(255,255,255,.05); }
+        .pl-track:last-of-type { border-bottom: 0; }
+        .pl-track-name { min-width: 0; color: #c4cad5; font-size: .74rem; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .pl-track-name:hover { color: #2de2ff; }
+        .pl-track.current .pl-track-name { color: #2de2ff; }
+        .pl-track-sub { grid-column: 1 / -1; color: #55607a; font-size: .64rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .pl-mini { padding: 3px 5px; color: #55607a; font-size: .7rem; line-height: 1; border: 1px solid rgba(255,255,255,.1); background: transparent; cursor: pointer; }
+        .pl-mini:hover { color: #fff; border-color: rgba(45,226,255,.4); }
+        .pl-mini.rm:hover { color: #ff6b81; border-color: rgba(255,107,129,.45); }
+        .pl-edit { width: 100%; height: 24px; padding: 0 6px; color: #f4fbff; font: 600 .72rem "Cascadia Code", Consolas, monospace;
+                   border: 1px solid rgba(45,226,255,.4); outline: none; background: rgba(4,10,20,.7); }
+        .pl-drop { margin-top: 10px; padding: 12px; color: #55607a; font-size: .68rem; text-align: center;
+                   border: 1px dashed rgba(45,226,255,.22); cursor: pointer; transition: all .18s; }
+        .pl-drop:hover, .pl-drop.over { color: #2de2ff; border-color: #2de2ff; background: rgba(45,226,255,.06); }
 
         /* Верхний блок: метрики во всю ширину */
         .dash { padding: 18px 20px 16px; border: 1px solid rgba(45,226,255,.16); background: rgba(10,17,30,.72); }
@@ -1662,10 +1924,11 @@ def cabinet():
     <body>
       <main class="cabinet">
         <header class="cabinet-header">
-          <h1>Личный кабинет</h1>
+          <h1>Личный <span>кабинет</span></h1>
           <button class="logout-button install-button" id="install" type="button" hidden>Установить приложение</button>
           <form class="logout-form" action="/logout" method="post"><button class="logout-button" type="submit">Выйти</button></form>
         </header>
+        <div class="cabinet-cols">
         <div class="workspace">
 
           <!-- Метрики: наверху, во всю ширину -->
@@ -1778,6 +2041,64 @@ def cabinet():
             </div>
           </section>
 
+        </div>
+
+        <!-- Правая колонка: прячется, когда места мало -->
+        <aside class="rail">
+
+          <div class="rail-card clock">
+            <span class="rail-corner rail-corner--tl"></span><span class="rail-corner rail-corner--tr"></span>
+            <span class="rail-corner rail-corner--bl"></span><span class="rail-corner rail-corner--br"></span>
+            <div class="clock-time"><span id="clk-h">--</span><em id="clk-sep">:</em><span id="clk-m">--</span><small id="clk-s">--</small></div>
+            <div class="clock-date" id="clk-date">—</div>
+            <div class="clock-scan"></div>
+          </div>
+
+          <div class="rail-card player" id="player">
+            <span class="rail-corner rail-corner--tl"></span><span class="rail-corner rail-corner--tr"></span>
+            <span class="rail-corner rail-corner--bl"></span><span class="rail-corner rail-corner--br"></span>
+
+            <div class="pl-head">
+              <span class="pl-label">Аудио</span>
+              <span class="pl-actions">
+                <button class="pl-icon" id="pl-add" type="button" title="Добавить треки">+</button>
+                <button class="pl-icon" id="pl-toggle-list" type="button" title="Список треков">☰</button>
+              </span>
+            </div>
+
+            <div class="pl-eq" id="pl-eq" aria-hidden="true"></div>
+
+            <div class="pl-now">
+              <div class="pl-title" id="pl-title">ничего не играет</div>
+              <div class="pl-artist" id="pl-artist">плеер выключен</div>
+            </div>
+
+            <div class="pl-seek"><div class="pl-seek-fill" id="pl-seek-fill"></div>
+              <input class="pl-seek-input" id="pl-seek" type="range" min="0" max="1000" value="0" aria-label="Перемотка">
+            </div>
+            <div class="pl-times"><span id="pl-cur">0:00</span><span id="pl-dur">0:00</span></div>
+
+            <div class="pl-controls">
+              <button class="pl-btn" id="pl-prev" type="button" title="Предыдущий">◀◀</button>
+              <button class="pl-btn pl-play" id="pl-play" type="button" title="Играть">▶</button>
+              <button class="pl-btn" id="pl-next" type="button" title="Следующий">▶▶</button>
+              <input class="pl-vol" id="pl-vol" type="range" min="0" max="100" value="70" aria-label="Громкость">
+            </div>
+
+            <div class="pl-list" id="pl-list" hidden>
+              <div class="pl-list-head">
+                <span id="pl-count">0 треков</span>
+                <span id="pl-used"></span>
+              </div>
+              <div id="pl-tracks"></div>
+              <input type="file" id="pl-file" accept="audio/*,.mp3,.m4a,.flac,.ogg,.opus,.wav,.aac" multiple hidden>
+              <div class="pl-drop" id="pl-drop">Перетащи треки сюда или нажми «+»</div>
+            </div>
+
+            <audio id="pl-audio" preload="none"></audio>
+          </div>
+
+        </aside>
         </div>
       </main>
 
@@ -2597,6 +2918,249 @@ def cabinet():
           });
         }
 
+        // ── Часы ──
+        {
+          const pad = n => String(n).padStart(2, "0");
+          const days = ["воскресенье","понедельник","вторник","среда","четверг","пятница","суббота"];
+          const months = ["января","февраля","марта","апреля","мая","июня",
+                          "июля","августа","сентября","октября","ноября","декабря"];
+          const h = document.getElementById("clk-h");
+          const tick = () => {
+            const now = new Date();
+            h.textContent = pad(now.getHours());
+            document.getElementById("clk-m").textContent = pad(now.getMinutes());
+            document.getElementById("clk-s").textContent = pad(now.getSeconds());
+            document.getElementById("clk-date").textContent =
+              days[now.getDay()] + ", " + now.getDate() + " " + months[now.getMonth()];
+          };
+          if (h) { tick(); setInterval(tick, 1000); }
+        }
+
+        // ── Плеер ──
+        {
+          const box = document.getElementById("player");
+          const audio = document.getElementById("pl-audio");
+          if (box && audio) {
+            const el = id => document.getElementById(id);
+            const eq = el("pl-eq");
+            const bars = [];
+            for (let i = 0; i < 18; i++) { const b = document.createElement("span"); eq.appendChild(b); bars.push(b); }
+
+            let tracks = [];      // в порядке воспроизведения (перемешанном)
+            let index = -1;
+            let analyser = null, freq = null, raf = null;
+
+            const fmt = s => {
+              if (!isFinite(s)) return "0:00";
+              return Math.floor(s / 60) + ":" + String(Math.floor(s % 60)).padStart(2, "0");
+            };
+            const shuffle = list => {
+              const copy = list.slice();
+              for (let i = copy.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [copy[i], copy[j]] = [copy[j], copy[i]];
+              }
+              return copy;
+            };
+
+            const drawBars = () => {
+              if (!audio.paused && analyser) {
+                analyser.getByteFrequencyData(freq);
+                const step = Math.floor(freq.length / bars.length / 2) || 1;
+                bars.forEach((b, i) => {
+                  const v = freq[i * step] / 255;
+                  b.style.height = Math.max(3, v * 34) + "px";
+                });
+              } else if (!audio.paused) {
+                bars.forEach(b => { b.style.height = (4 + Math.random() * 26) + "px"; });
+              } else {
+                bars.forEach(b => { b.style.height = "4px"; });
+              }
+              raf = requestAnimationFrame(drawBars);
+            };
+
+            const wireAnalyser = () => {
+              if (analyser) return;
+              try {
+                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                const src = ctx.createMediaElementSource(audio);
+                analyser = ctx.createAnalyser();
+                analyser.fftSize = 128;
+                freq = new Uint8Array(analyser.frequencyBinCount);
+                src.connect(analyser);
+                analyser.connect(ctx.destination);
+                if (ctx.state === "suspended") ctx.resume();
+              } catch { analyser = null; }   // не вышло — рисуем без спектра
+            };
+
+            const label = t => (t.artist ? t.artist + " — " : "") + t.title;
+
+            const renderList = () => {
+              el("pl-count").textContent = tracks.length + " треков";
+              el("pl-tracks").innerHTML = tracks.map((t, i) => `
+                <div class="pl-track${i === index ? " current" : ""}" data-id="${esc(t.id)}">
+                  <span class="pl-track-name">${esc(t.title)}</span>
+                  <button class="pl-mini" data-act="ed" title="Переименовать">✎</button>
+                  <button class="pl-mini rm" data-act="rm" title="Удалить">🗑</button>
+                  <span class="pl-track-sub">${esc(t.artist || "без исполнителя")}</span>
+                </div>`).join("");
+            };
+
+            const showNow = () => {
+              const t = tracks[index];
+              el("pl-title").textContent = t ? t.title : "ничего не играет";
+              el("pl-artist").textContent = t ? (t.artist || "без исполнителя") : "плеер выключен";
+              renderList();
+            };
+
+            const load = async (autoplay) => {
+              try {
+                const r = await fetch("/api/music", { credentials: "same-origin" });
+                const data = await r.json();
+                tracks = shuffle(data.tracks);
+                const mb = (data.used / 1048576).toFixed(0);
+                el("pl-used").textContent = data.tracks.length ? mb + " МБ" : "";
+                if (index >= tracks.length) index = -1;
+                showNow();
+                if (autoplay && tracks.length) play(0);
+              } catch {}
+            };
+
+            const play = i => {
+              if (!tracks.length) return;
+              index = (i + tracks.length) % tracks.length;
+              audio.src = "/api/music/file/" + encodeURIComponent(tracks[index].id);
+              wireAnalyser();
+              audio.play().catch(() => {});
+              showNow();
+            };
+
+            el("pl-play").addEventListener("click", () => {
+              if (!tracks.length) { el("pl-list").hidden = false; return; }
+              if (audio.paused) { index < 0 ? play(0) : (wireAnalyser(), audio.play().catch(() => {})); }
+              else audio.pause();
+            });
+            el("pl-next").addEventListener("click", () => play(index + 1));
+            el("pl-prev").addEventListener("click", () => {
+              if (audio.currentTime > 3) { audio.currentTime = 0; return; }
+              play(index - 1);
+            });
+            audio.addEventListener("ended", () => play(index + 1));
+            audio.addEventListener("play", () => { box.classList.add("on"); el("pl-play").textContent = "❚❚"; });
+            audio.addEventListener("pause", () => { box.classList.remove("on"); el("pl-play").textContent = "▶"; });
+            audio.addEventListener("timeupdate", () => {
+              const d = audio.duration || 0;
+              el("pl-cur").textContent = fmt(audio.currentTime);
+              el("pl-dur").textContent = fmt(d);
+              const pct = d ? (audio.currentTime / d) * 100 : 0;
+              el("pl-seek-fill").style.width = pct + "%";
+              el("pl-seek").value = Math.round(pct * 10);
+            });
+            el("pl-seek").addEventListener("input", e => {
+              if (audio.duration) audio.currentTime = (e.target.value / 1000) * audio.duration;
+            });
+
+            const savedVol = parseInt(localStorage.getItem("plVol") || "70", 10);
+            el("pl-vol").value = savedVol;
+            audio.volume = savedVol / 100;
+            el("pl-vol").addEventListener("input", e => {
+              audio.volume = e.target.value / 100;
+              localStorage.setItem("plVol", e.target.value);
+            });
+
+            el("pl-toggle-list").addEventListener("click", () => {
+              const list = el("pl-list");
+              list.hidden = !list.hidden;
+              if (!list.hidden) load(false);
+            });
+            el("pl-add").addEventListener("click", () => { el("pl-list").hidden = false; el("pl-file").click(); });
+            el("pl-drop").addEventListener("click", () => el("pl-file").click());
+            el("pl-file").addEventListener("change", e => { upload(e.target.files); e.target.value = ""; });
+
+            const zone = el("pl-drop");
+            ["dragenter", "dragover"].forEach(ev => zone.addEventListener(ev, e => {
+              e.preventDefault(); e.stopPropagation(); zone.classList.add("over");
+            }));
+            ["dragleave", "drop"].forEach(ev => zone.addEventListener(ev, e => {
+              e.preventDefault(); e.stopPropagation(); zone.classList.remove("over");
+            }));
+            zone.addEventListener("drop", e => upload(e.dataTransfer.files));
+
+            const upload = async files => {
+              const list = Array.from(files || []);
+              if (!list.length) return;
+              zone.textContent = "Загрузка…";
+              for (const file of list) {
+                const body = new FormData();
+                body.append("file", file);
+                try {
+                  const r = await fetch("/api/music", { method: "POST", credentials: "same-origin", body });
+                  if (!r.ok) zone.textContent = ((await r.json()).error || "Ошибка");
+                } catch { zone.textContent = "Сеть недоступна"; }
+              }
+              setTimeout(() => { zone.textContent = "Перетащи треки сюда или нажми «+»"; }, 2200);
+              load(false);
+            };
+
+            el("pl-tracks").addEventListener("click", async e => {
+              const row = e.target.closest(".pl-track");
+              if (!row) return;
+              const id = row.dataset.id;
+              const at = tracks.findIndex(t => t.id === id);
+              const act = e.target.dataset.act;
+
+              if (!act) { if (at >= 0) play(at); return; }
+
+              if (act === "rm") {
+                if (!confirm("Удалить трек?")) return;
+                if (at === index) audio.pause();
+                try { await fetch("/api/music/" + encodeURIComponent(id), { method: "DELETE", credentials: "same-origin" }); } catch {}
+                load(false);
+                return;
+              }
+
+              if (act === "ed") {
+                const track = tracks[at];
+                const nameEl = row.querySelector(".pl-track-name");
+                const subEl = row.querySelector(".pl-track-sub");
+                const titleInput = document.createElement("input");
+                const artistInput = document.createElement("input");
+                titleInput.className = artistInput.className = "pl-edit";
+                titleInput.value = track.title; artistInput.value = track.artist;
+                titleInput.placeholder = "Название"; artistInput.placeholder = "Исполнитель";
+                nameEl.replaceWith(titleInput); subEl.replaceWith(artistInput);
+                titleInput.focus(); titleInput.select();
+                let saved = false;
+                const save = async () => {
+                  if (saved) return;
+                  saved = true;
+                  try {
+                    await fetch("/api/music/" + encodeURIComponent(id), {
+                      method: "PATCH", credentials: "same-origin",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ title: titleInput.value, artist: artistInput.value }),
+                    });
+                  } catch {}
+                  const keep = index >= 0 ? tracks[index].id : null;
+                  await load(false);
+                  if (keep) index = tracks.findIndex(t => t.id === keep);
+                  showNow();
+                };
+                [titleInput, artistInput].forEach(inp => {
+                  inp.addEventListener("keydown", ev => {
+                    if (ev.key === "Enter") save();
+                    if (ev.key === "Escape") { saved = true; renderList(); }
+                  });
+                });
+                artistInput.addEventListener("blur", save);
+              }
+            });
+
+            drawBars();
+            load(false);   // плеер молчит, пока не нажмут play
+          }
+        }
+
         // ── Раскрытие виджетов ──
         document.querySelectorAll(".panel-head[aria-controls]").forEach(btn => {
           const target = document.getElementById(btn.getAttribute("aria-controls"));
@@ -3004,8 +3568,8 @@ def drop_page():
         .back svg { width: 20px; height: 20px; display: block; }
         .back:hover { color: #fff; border-color: #2de2ff; background: rgba(45,226,255,.18); }
         h1 { margin: 0; font-size: clamp(1.5rem, 3.5vw, 2.3rem); font-weight: 700; letter-spacing: -.02em;
-             background: linear-gradient(95deg, #eaf6ff, #7fd8ff 55%, #2de2ff);
-             -webkit-background-clip: text; background-clip: text; color: transparent; }
+             color: #eaf6ff; text-shadow: 0 0 22px rgba(45,226,255,.35); }
+        h1 span { color: #2de2ff; text-shadow: 0 0 22px rgba(45,226,255,.5); }
         .quota { margin-left: auto; min-width: 190px; }
         .quota-text { color: #8f99ab; font-size: .7rem; }
         .quota-bar { height: 5px; margin-top: 5px; background: rgba(255,255,255,.08); }
@@ -3091,7 +3655,7 @@ def drop_page():
               <path d="M19 12H5m0 0 6-6m-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
           </a>
-          <h1>Личный дроп</h1>
+          <h1>Личный <span>дроп</span></h1>
           <div class="quota">
             <div class="quota-text" id="quota-text">—</div>
             <div class="quota-bar"><div class="quota-fill" id="quota-fill"></div></div>
