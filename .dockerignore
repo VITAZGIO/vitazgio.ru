@@ -2,6 +2,7 @@
 .github
 actions-runner
 drop_data
+data
 __pycache__
 *.pyc
 *.pyo

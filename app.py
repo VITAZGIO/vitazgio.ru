@@ -21,7 +21,7 @@ from functools import wraps
 from zoneinfo import ZoneInfo
 
 import paramiko
-from flask import Flask, Response, jsonify, redirect, request, send_file, session, url_for
+from flask import Flask, Response, g, jsonify, redirect, request, send_file, session, url_for
 from flask_sock import Sock
 
 app = Flask(__name__)
@@ -33,8 +33,15 @@ app.config.update(
 )
 sock = Sock(app)
 
-PASSWORD_SALT = base64.b64decode("vLsGUQ/owFhcITf4A6CVjw==")
-PASSWORD_HASH = base64.b64decode("T+E27QxamfCbhsdxJ1JlEXo4yuBwfwQFtw9ODFkA+kg=")
+# Репозиторий публичный, поэтому соль и хэш берём из .env: иначе их можно
+# просто скачать и подбирать пароль офлайн. Значения ниже — запасные, на случай
+# если переменные не заданы.
+PASSWORD_SALT = base64.b64decode(
+    os.environ.get("CABINET_PASSWORD_SALT") or "vLsGUQ/owFhcITf4A6CVjw=="
+)
+PASSWORD_HASH = base64.b64decode(
+    os.environ.get("CABINET_PASSWORD_HASH") or "T+E27QxamfCbhsdxJ1JlEXo4yuBwfwQFtw9ODFkA+kg="
+)
 PASSWORD_ITERATIONS = 600_000
 LOGIN_WINDOW_SECONDS = 300
 LOGIN_MAX_ATTEMPTS = 5
@@ -214,6 +221,128 @@ def _drop_load_index():
 
 _drop_load_index()
 
+# ---- Доверенные устройства («запомнить это устройство») ---------------------
+# Кука содержит "селектор.валидатор". На сервере лежит только SHA-256 валидатора,
+# поэтому утечка файла войти не позволяет. При каждом входе валидатор
+# перевыпускается: если украденной кукой воспользуются, у настоящего устройства
+# токен перестанет подходить — по этому признаку запись сносится целиком.
+DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+DEVICES_PATH = os.path.join(DATA_DIR, "devices.json")
+DEVICE_COOKIE = "vitazgio_device"
+DEVICE_TTL_DAYS = 90
+
+trusted_devices: dict = {}
+devices_lock = threading.Lock()
+os.makedirs(DATA_DIR, exist_ok=True)
+
+
+def _client_ip():
+    """Реальный адрес клиента: до приложения трафик идёт через NPM."""
+    forwarded = request.headers.get("X-Forwarded-For", "")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.remote_addr or "unknown"
+
+
+def _devices_write():
+    """Вызывать под devices_lock."""
+    tmp = DEVICES_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(trusted_devices, fh, ensure_ascii=False)
+    os.replace(tmp, DEVICES_PATH)
+
+
+def _devices_prune_expired():
+    """Вызывать под devices_lock. Возвращает число удалённых."""
+    now = time.time()
+    dead = [s for s, d in trusted_devices.items() if d.get("expires", 0) < now]
+    for selector in dead:
+        trusted_devices.pop(selector, None)
+    return len(dead)
+
+
+def _devices_load():
+    try:
+        with open(DEVICES_PATH, encoding="utf-8") as fh:
+            trusted_devices.update(json.load(fh))
+    except (OSError, ValueError):
+        pass
+    _devices_prune_expired()
+
+
+def _device_label(ua):
+    """Имя по User-Agent: точнее браузер не скажет, зато потом можно переименовать."""
+    ua = ua or ""
+    system = next((name for key, name in (
+        ("Windows", "Windows"), ("Android", "Android"), ("iPhone", "iPhone"),
+        ("iPad", "iPad"), ("Macintosh", "Mac"), ("Linux", "Linux"),
+    ) if key in ua), "Устройство")
+    browser = next((name for key, name in (
+        ("YaBrowser", "Яндекс"), ("Edg/", "Edge"), ("OPR/", "Opera"),
+        ("Firefox", "Firefox"), ("Chrome", "Chrome"), ("Safari", "Safari"),
+    ) if key in ua), "браузер")
+    return f"{system} · {browser}"
+
+
+def _unique_label(base):
+    """Вызывать под devices_lock."""
+    taken = {d["label"] for d in trusted_devices.values()}
+    if base not in taken:
+        return base
+    number = 2
+    while f"{base} {number}" in taken:
+        number += 1
+    return f"{base} {number}"
+
+
+def _device_issue(label, ua, ip, selector=None):
+    """Выдаёт или продлевает токен. Вызывать под devices_lock."""
+    selector = selector or secrets.token_urlsafe(12)
+    validator = secrets.token_urlsafe(32)
+    now = time.time()
+    previous = trusted_devices.get(selector, {})
+    trusted_devices[selector] = {
+        "hash": hashlib.sha256(validator.encode()).hexdigest(),
+        "label": previous.get("label") or label,
+        "ua": (ua or "")[:160],
+        "created": previous.get("created", now),
+        "last_used": now,
+        "last_ip": ip,
+        "expires": now + DEVICE_TTL_DAYS * 86400,
+    }
+    _devices_write()
+    return f"{selector}.{validator}"
+
+
+def _device_check(raw):
+    """Проверяет куку. При успехе возвращает свежую куку, иначе None."""
+    if not raw or "." not in raw:
+        return None
+    selector, validator = raw.split(".", 1)
+    with devices_lock:
+        record = trusted_devices.get(selector)
+        if not record or record.get("expires", 0) < time.time():
+            return None
+        expected = hashlib.sha256(validator.encode()).hexdigest()
+        if not hmac.compare_digest(record["hash"], expected):
+            # Селектор есть, а валидатор чужой — похоже на кражу токена.
+            # Сносим запись: оба устройства пойдут вводить пароль заново.
+            trusted_devices.pop(selector, None)
+            _devices_write()
+            return None
+        return _device_issue(record["label"], record.get("ua", ""), _client_ip(), selector)
+
+
+def _device_forget(selector):
+    with devices_lock:
+        dropped = trusted_devices.pop(selector, None)
+        if dropped:
+            _devices_write()
+    return dropped is not None
+
+
+_devices_load()
+
 clipboard_store: dict = {"text": "", "version": 0}
 clipboard_lock = threading.Lock()
 
@@ -257,11 +386,27 @@ def netbird_ping_loop():
 threading.Thread(target=netbird_ping_loop, daemon=True).start()
 
 
+def _log_login(note=""):
+    with login_log_lock:
+        ua = request.headers.get("User-Agent", "")[:100]
+        login_log.append({
+            "ip": _client_ip(),
+            "ts": datetime.now(ZoneInfo("Europe/Moscow")).strftime("%d.%m.%Y %H:%M:%S"),
+            "ua": f"{ua} · {note}" if note else ua,
+        })
+
+
 def login_required(view):
     @wraps(view)
     def wrapped(*args, **kwargs):
         if not session.get("authenticated"):
-            return redirect(url_for("home"))
+            # Пароль не вводили — но устройство могло быть помечено доверенным.
+            fresh = _device_check(request.cookies.get(DEVICE_COOKIE))
+            if not fresh:
+                return redirect(url_for("home"))
+            session["authenticated"] = True
+            g.new_device_cookie = fresh
+            _log_login("доверенное устройство")
         return view(*args, **kwargs)
 
     return wrapped
@@ -279,6 +424,17 @@ def security_headers(response):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "no-referrer"
+    token = getattr(g, "new_device_cookie", None)
+    if token:
+        response.set_cookie(
+            DEVICE_COOKIE, token,
+            max_age=DEVICE_TTL_DAYS * 86400,
+            httponly=True,
+            samesite="Lax",  # Strict не отправился бы при переходе по ссылке извне
+            secure=app.config["SESSION_COOKIE_SECURE"],
+        )
+    if getattr(g, "clear_device_cookie", False):
+        response.delete_cookie(DEVICE_COOKIE, samesite="Lax")
     return response
 
 
@@ -306,18 +462,19 @@ def login():
     session.clear()
     session["authenticated"] = True
     session.permanent = False
-    with login_log_lock:
-        login_log.append({
-            "ip": client,
-            "ts": datetime.now(ZoneInfo("Europe/Moscow")).strftime("%d.%m.%Y %H:%M:%S"),
-            "ua": request.headers.get("User-Agent", "")[:120],
-        })
+    _log_login()
     return jsonify(redirect=url_for("cabinet"))
 
 
 @app.post("/logout")
 def logout():
+    # Выход должен и правда выходить: если оставить токен, следующий же заход
+    # молча пустит обратно и кнопка станет бессмысленной.
+    raw = request.cookies.get(DEVICE_COOKIE) or ""
+    if "." in raw:
+        _device_forget(raw.split(".", 1)[0])
     session.clear()
+    g.clear_device_cookie = True
     return redirect(url_for("home"))
 
 
@@ -785,6 +942,81 @@ def login_log_api():
         return jsonify(list(reversed(list(login_log))))
 
 
+@app.post("/api/devices/trust")
+@login_required
+def device_trust():
+    if not SSH_GATE_PASSWORD_PREFIX:
+        return jsonify(error="Суточный пароль не настроен на сервере."), 503
+
+    client = request.remote_addr or "unknown"
+    now = time.monotonic()
+    with console_login_attempts_lock:
+        attempts = console_login_attempts[client]
+        while attempts and now - attempts[0] > CONSOLE_LOGIN_WINDOW_SECONDS:
+            attempts.popleft()
+        if len(attempts) >= CONSOLE_LOGIN_MAX_ATTEMPTS:
+            return jsonify(error="Слишком много попыток. Попробуйте через 5 минут."), 429
+
+    password = (request.get_json(silent=True) or {}).get("password", "")
+    if not isinstance(password, str) or not hmac.compare_digest(password, console_password_today()):
+        with console_login_attempts_lock:
+            console_login_attempts[client].append(now)
+        return jsonify(error="Неверный суточный пароль."), 401
+
+    with console_login_attempts_lock:
+        console_login_attempts.pop(client, None)
+
+    ua = request.headers.get("User-Agent", "")
+    raw = request.cookies.get(DEVICE_COOKIE) or ""
+    selector = raw.split(".", 1)[0] if "." in raw else None
+    with devices_lock:
+        _devices_prune_expired()
+        if selector not in trusted_devices:
+            selector = None
+        label = trusted_devices[selector]["label"] if selector else _unique_label(_device_label(ua))
+        g.new_device_cookie = _device_issue(label, ua, _client_ip(), selector)
+    return jsonify(ok=True, label=label)
+
+
+@app.get("/api/devices")
+@login_required
+def devices_list_api():
+    current = (request.cookies.get(DEVICE_COOKIE) or "").split(".", 1)[0]
+    with devices_lock:
+        if _devices_prune_expired():
+            _devices_write()
+        items = [
+            {"id": selector, "label": d["label"], "last_used": d["last_used"],
+             "last_ip": d.get("last_ip", ""), "created": d["created"],
+             "current": selector == current}
+            for selector, d in sorted(trusted_devices.items(), key=lambda x: -x[1]["last_used"])
+        ]
+    return jsonify(items)
+
+
+@app.patch("/api/devices/<selector>")
+@login_required
+def device_rename_api(selector):
+    label = ((request.get_json(silent=True) or {}).get("label") or "").strip()[:40]
+    if not label:
+        return jsonify(error="Пустое имя."), 400
+    with devices_lock:
+        if selector not in trusted_devices:
+            return jsonify(error="Устройство не найдено."), 404
+        trusted_devices[selector]["label"] = label
+        _devices_write()
+    return jsonify(ok=True, label=label)
+
+
+@app.delete("/api/devices/<selector>")
+@login_required
+def device_forget_api(selector):
+    removed = _device_forget(selector)
+    if removed and (request.cookies.get(DEVICE_COOKIE) or "").split(".", 1)[0] == selector:
+        g.clear_device_cookie = True
+    return jsonify(ok=True)
+
+
 @app.get("/api/deploy-logs")
 @login_required
 def deploy_logs_api():
@@ -1155,6 +1387,25 @@ def cabinet():
         .log-ts { color: #6b7385; white-space: nowrap; }
         .log-ip { color: #69e8ff; }
         .log-ua { color: #4a5060; font-size: .68rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; grid-column: 1 / -1; }
+
+        /* Запомненные устройства */
+        .dev-remember { display: flex; align-items: center; gap: 9px; padding: 4px 0 2px; color: #c4cad5; font-size: .82rem; cursor: pointer; }
+        .dev-remember input { width: 15px; height: 15px; accent-color: #ff782f; cursor: pointer; }
+        .dev-hint { margin: 0 0 10px; color: #6b7385; font-size: .7rem; }
+        .dev-confirm { display: flex; gap: 8px; margin-bottom: 10px; }
+        .dev-confirm input { flex: 1; min-width: 0; height: 34px; padding: 0 10px; color: #f4fbff; font: 600 .8rem "Cascadia Code", Consolas, monospace; border: 1px solid rgba(255,120,47,.35); outline: none; background: rgba(4,10,20,.65); }
+        .dev-confirm input:focus { border-color: #ff782f; }
+        .dev-confirm-btn { padding: 0 14px; color: #1a0d04; font: 800 .7rem "Cascadia Code", Consolas, monospace; text-transform: uppercase; border: 0; background: linear-gradient(90deg, #ff782f, #ffb35c); cursor: pointer; }
+        .dev-error { min-height: 16px; margin: 0 0 8px; color: #ff6ba8; font-size: .72rem; }
+        .dev-row { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 4px 8px; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,.06); }
+        .dev-row:last-child { border-bottom: 0; }
+        .dev-name { min-width: 0; color: #c4cad5; font-size: .8rem; overflow-wrap: break-word; }
+        .dev-name.is-current::after { content: " · это устройство"; color: #63f5ad; font-size: .68rem; }
+        .dev-meta { grid-column: 1 / -1; color: #6b7385; font-size: .68rem; }
+        .dev-act { padding: 4px 7px; color: #6b7385; font-size: .85rem; line-height: 1; border: 1px solid rgba(255,255,255,.1); background: transparent; cursor: pointer; transition: all .18s; }
+        .dev-act:hover { color: #fff; border-color: rgba(45,226,255,.4); background: rgba(45,226,255,.08); }
+        .dev-act.dev-del:hover { color: #ff6b81; border-color: rgba(255,107,129,.45); background: rgba(255,107,129,.1); }
+        .dev-rename { min-width: 0; height: 28px; padding: 0 8px; color: #f4fbff; font: 600 .78rem "Cascadia Code", Consolas, monospace; border: 1px solid rgba(45,226,255,.4); outline: none; background: rgba(4,10,20,.65); }
       </style>
     </head>
     <body>
@@ -1238,12 +1489,32 @@ def cabinet():
           </section>
 
           <!-- Журнал входов -->
-          <section class="widget" style="margin-bottom:32px">
+          <section class="widget">
             <button class="widget-toggle" id="loginlog-toggle" type="button" aria-expanded="false" aria-controls="loginlog-body">
               Журнал входов <span class="widget-arrow">⌄</span>
             </button>
             <div id="loginlog-body" hidden class="widget-body">
               <div id="loginlog-list"><p class="widget-empty">Загрузка…</p></div>
+            </div>
+          </section>
+
+          <!-- Запомненные устройства -->
+          <section class="widget" style="margin-bottom:32px">
+            <button class="widget-toggle" id="devices-toggle" type="button" aria-expanded="false" aria-controls="devices-body">
+              Запомнить устройства <span class="widget-arrow">⌄</span>
+            </button>
+            <div id="devices-body" hidden class="widget-body">
+              <label class="dev-remember">
+                <input type="checkbox" id="dev-remember-cb">
+                <span>Запомнить это устройство</span>
+              </label>
+              <p class="dev-hint" id="dev-hint">Вход в кабинет без пароля на 90 дней. Снять галку — устройство забудется.</p>
+              <div class="dev-confirm" id="dev-confirm" hidden>
+                <input type="password" id="dev-daily" inputmode="numeric" placeholder="Суточный пароль" autocomplete="off">
+                <button class="dev-confirm-btn" id="dev-confirm-btn" type="button">Подтвердить</button>
+              </div>
+              <p class="dev-error" id="dev-error"></p>
+              <div id="devices-list"><p class="widget-empty">Загрузка…</p></div>
             </div>
           </section>
 
@@ -2257,6 +2528,140 @@ def cabinet():
             } catch {}
           };
           if (toggle) toggle.addEventListener("widget-open", e => { if (e.detail && !loaded) { loaded = true; load(); } });
+        }
+
+        // ── Запомненные устройства ──
+        {
+          const toggle = document.getElementById("devices-toggle");
+          const listEl = document.getElementById("devices-list");
+          const checkbox = document.getElementById("dev-remember-cb");
+          const confirmBox = document.getElementById("dev-confirm");
+          const dailyInput = document.getElementById("dev-daily");
+          const confirmBtn = document.getElementById("dev-confirm-btn");
+          const errorEl = document.getElementById("dev-error");
+          let devices = [];
+
+          const ago = ts => {
+            const mins = Math.floor((Date.now() / 1000 - ts) / 60);
+            if (mins < 1) return "только что";
+            if (mins < 60) return mins + " мин назад";
+            const hours = Math.floor(mins / 60);
+            if (hours < 24) return hours + " ч назад";
+            const days = Math.floor(hours / 24);
+            if (days < 30) return days + " дн назад";
+            return new Date(ts * 1000).toLocaleDateString("ru-RU");
+          };
+
+          const render = () => {
+            const current = devices.find(d => d.current);
+            if (checkbox) checkbox.checked = Boolean(current);
+            if (!devices.length) {
+              listEl.innerHTML = '<p class="widget-empty">Пока ни одного устройства не запомнено</p>';
+              return;
+            }
+            listEl.innerHTML = devices.map(d => `
+              <div class="dev-row" data-id="${esc(d.id)}">
+                <span class="dev-name${d.current ? " is-current" : ""}">${esc(d.label)}</span>
+                <button class="dev-act dev-edit" type="button" title="Переименовать">✎</button>
+                <button class="dev-act dev-del" type="button" title="Забыть устройство">🗑</button>
+                <span class="dev-meta">Последний вход: ${esc(ago(d.last_used))}${d.last_ip ? " · " + esc(d.last_ip) : ""}</span>
+              </div>`).join("");
+          };
+
+          const load = async () => {
+            try {
+              const r = await fetch("/api/devices", { credentials: "same-origin" });
+              devices = await r.json();
+              render();
+            } catch {}
+          };
+
+          const showError = text => { if (errorEl) errorEl.textContent = text || ""; };
+
+          const trust = async () => {
+            showError("");
+            try {
+              const r = await fetch("/api/devices/trust", {
+                method: "POST", credentials: "same-origin",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ password: dailyInput.value }),
+              });
+              const data = await r.json();
+              if (!r.ok) { showError(data.error || "Не получилось."); return; }
+              dailyInput.value = "";
+              confirmBox.hidden = true;
+              load();
+            } catch { showError("Сеть недоступна."); }
+          };
+
+          const forget = async id => {
+            try {
+              await fetch("/api/devices/" + encodeURIComponent(id), { method: "DELETE", credentials: "same-origin" });
+              load();
+            } catch {}
+          };
+
+          if (checkbox) checkbox.addEventListener("change", () => {
+            showError("");
+            if (checkbox.checked) {
+              confirmBox.hidden = false;
+              dailyInput.focus();
+            } else {
+              confirmBox.hidden = true;
+              const current = devices.find(d => d.current);
+              if (current) forget(current.id);
+            }
+          });
+
+          if (confirmBtn) confirmBtn.addEventListener("click", trust);
+          if (dailyInput) dailyInput.addEventListener("keydown", e => { if (e.key === "Enter") trust(); });
+
+          if (listEl) listEl.addEventListener("click", async e => {
+            const row = e.target.closest(".dev-row");
+            if (!row) return;
+            const id = row.dataset.id;
+
+            if (e.target.classList.contains("dev-del")) {
+              const item = devices.find(d => d.id === id);
+              const warn = item && item.current
+                ? "Забыть это устройство? Придётся вводить пароль заново."
+                : "Забыть устройство «" + (item ? item.label : "") + "»?";
+              if (confirm(warn)) forget(id);
+              return;
+            }
+
+            if (e.target.classList.contains("dev-edit")) {
+              const nameEl = row.querySelector(".dev-name");
+              const item = devices.find(d => d.id === id);
+              const input = document.createElement("input");
+              input.className = "dev-rename";
+              input.value = item ? item.label : "";
+              input.maxLength = 40;
+              nameEl.replaceWith(input);
+              input.focus();
+              input.select();
+              const save = async () => {
+                const label = input.value.trim();
+                if (label) {
+                  try {
+                    await fetch("/api/devices/" + encodeURIComponent(id), {
+                      method: "PATCH", credentials: "same-origin",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ label }),
+                    });
+                  } catch {}
+                }
+                load();
+              };
+              input.addEventListener("blur", save, { once: true });
+              input.addEventListener("keydown", ev => {
+                if (ev.key === "Enter") input.blur();
+                if (ev.key === "Escape") { input.removeEventListener("blur", save); load(); }
+              });
+            }
+          });
+
+          if (toggle) toggle.addEventListener("widget-open", e => { if (e.detail) load(); });
         }
       }
       </script>

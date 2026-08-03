@@ -4,5 +4,6 @@ __pycache__/
 *.pyc
 actions-runner/
 drop_data/
+data/
 pc_shutdown_key*
 ssh_host_key*
