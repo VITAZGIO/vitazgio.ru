@@ -1570,6 +1570,8 @@ def cabinet():
       <meta name="viewport" content="width=device-width, initial-scale=1">
       <meta name="robots" content="noindex, nofollow">
       <title>Личный кабинет · vitazgio.ru</title>
+      <link rel="manifest" href="/manifest.webmanifest">
+      <meta name="theme-color" content="#0d1321">
       <style>
         * { box-sizing: border-box; }
         body { margin: 0; min-height: 100svh; color: #e9fbff; font-family: "Cascadia Code", Consolas, monospace; background: radial-gradient(circle at top left, #192a44, #0d1321 55%); }
@@ -1579,6 +1581,8 @@ def cabinet():
         .logout-form { margin: 0; }
         .logout-button { padding: 10px 16px; color: #dffaff; font: 700 .78rem "Cascadia Code", Consolas, monospace; border: 1px solid rgba(45,226,255,.28); background: rgba(45,226,255,.07); cursor: pointer; }
         .logout-button:hover { border-color: #2de2ff; background: rgba(45,226,255,.14); }
+        .install-button { margin-left: auto; color: #1a0d04; border: 0; background: linear-gradient(90deg, #ff782f, #ffb35c); }
+        .install-button:hover { border: 0; background: linear-gradient(90deg, #ff8f4f, #ffc379); }
         [hidden] { display: none !important; }
         .workspace { width: 50%; min-width: 560px; margin-top: clamp(28px, 5vw, 56px); }
         .netbird { border: 1px solid rgba(255,112,38,.24); background: rgba(10,17,30,.72); box-shadow: 0 24px 70px rgba(0,0,0,.24); }
@@ -1755,6 +1759,7 @@ def cabinet():
       <main class="cabinet">
         <header class="cabinet-header">
           <h1>Личный кабинет</h1>
+          <button class="logout-button install-button" id="install" type="button" hidden>Установить приложение</button>
           <form class="logout-form" action="/logout" method="post"><button class="logout-button" type="submit">Выйти</button></form>
         </header>
         <div class="workspace">
@@ -2654,6 +2659,28 @@ def cabinet():
       {
         const esc = s => String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 
+        // ── Установка приложения ──
+        // Ставится весь сайт целиком: приложение открывается на главной,
+        // оттуда вход в кабинет и дальше в дроп.
+        {
+          const button = document.getElementById("install");
+          let prompt = null;
+          if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
+          window.addEventListener("beforeinstallprompt", e => {
+            e.preventDefault();
+            prompt = e;
+            if (button) button.hidden = false;
+          });
+          window.addEventListener("appinstalled", () => { if (button) button.hidden = true; });
+          if (button) button.addEventListener("click", async () => {
+            if (!prompt) return;
+            prompt.prompt();
+            await prompt.userChoice;
+            prompt = null;
+            button.hidden = true;
+          });
+        }
+
         // ── Раскрытие виджетов ──
         document.querySelectorAll(".widget-toggle").forEach(btn => {
           const target = document.getElementById(btn.getAttribute("aria-controls"));
@@ -2956,9 +2983,9 @@ def manifest():
     после установки дроп появляется в системном меню отправки любого файла."""
     return Response(
         json.dumps({
-            "name": "Личный дроп · vitazgio.ru",
-            "short_name": "Дроп",
-            "start_url": "/drop",
+            "name": "vitazgio.ru",
+            "short_name": "vitazgio",
+            "start_url": "/",
             "scope": "/",
             "display": "standalone",
             "background_color": "#0d1321",
@@ -2976,7 +3003,18 @@ def manifest():
                     "title": "title",
                     "text": "text",
                     "url": "url",
-                    "files": [{"name": "files", "accept": ["*/*"]}],
+                    # Только "*/*" мало: на такой шаблон Android часто не
+                    # показывает приложение при отправке документов и архивов.
+                    "files": [{"name": "files", "accept": [
+                        "*/*", "image/*", "video/*", "audio/*", "text/*",
+                        "application/pdf", "application/zip", "application/octet-stream",
+                        "application/msword", "application/vnd.ms-excel",
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                        "application/x-7z-compressed", "application/x-rar-compressed",
+                        "application/gzip", "application/x-tar", "application/json",
+                    ]}],
                 },
             },
         }, ensure_ascii=False),
@@ -3202,7 +3240,6 @@ def drop_page():
           <button class="btn primary" id="pick" type="button">Выбрать файлы</button>
           <button class="btn" id="from-clip" type="button">Из буфера</button>
           <button class="btn" id="mkdir" type="button">Новая папка</button>
-          <button class="btn" id="install" type="button" hidden>Установить на телефон</button>
           <input class="search" id="search" type="search" placeholder="Поиск в этой папке…">
           <button class="btn" id="sort" type="button">Сначала новые</button>
           <!-- accept обязателен: без него Android показывает только камеру и галерею -->
@@ -3511,20 +3548,6 @@ def drop_page():
           navigator.serviceWorker.register("/sw.js").catch(() => {});
         }
 
-        let installPrompt = null;
-        window.addEventListener("beforeinstallprompt", e => {
-          e.preventDefault();
-          installPrompt = e;
-          $("install").hidden = false;
-        });
-        $("install").addEventListener("click", async () => {
-          if (!installPrompt) return;
-          installPrompt.prompt();
-          await installPrompt.userChoice;
-          installPrompt = null;
-          $("install").hidden = true;
-        });
-
         $("mkdir").addEventListener("click", async () => {
           const name = prompt("Название папки");
           if (!name || !name.trim()) return;
@@ -3714,6 +3737,7 @@ def home():
       <meta name="viewport" content="width=device-width, initial-scale=1">
       <meta name="theme-color" content="#080b12">
       <meta name="description" content="Витрина сервисов vitazgio.ru">
+      <link rel="manifest" href="/manifest.webmanifest">
       <title>vitazgio.ru — мои сервисы</title>
       <style>
         :root {
