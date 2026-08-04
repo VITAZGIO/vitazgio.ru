@@ -49,7 +49,7 @@ login_attempts = defaultdict(deque)
 login_attempts_lock = threading.Lock()
 
 NETBIRD_DEVICES = [
-    {"ip": "100.104.188.141", "name": "NOUTBOOK", "rdp_enabled": True},
+    {"ip": "100.104.18.182", "name": "VitazNout", "rdp_enabled": True},
     {"ip": "100.104.140.4", "name": "VitazComp", "rdp_enabled": True, "wol_mac": "d8:bb:c1:a6:d4:81"},
     {"ip": "100.104.1.172", "name": "windows10proxmox", "rdp_enabled": True},
     {"ip": "100.104.67.89", "name": "orangepizero3", "ssh_enabled": True},
@@ -859,7 +859,22 @@ def _guac_recv_instr(sock_file):
             return parts
 
 
-def _guac_handshake(guac_sock, hostname, username, password, width, height):
+# Пресеты качества RDP. Чем ниже качество, тем меньше данных по каналу:
+# срезаем глубину цвета и отключаем украшения рабочего стола.
+RDP_QUALITY = {
+    "high": {"color-depth": "32", "enable-wallpaper": "true", "enable-theming": "true",
+             "enable-font-smoothing": "true", "enable-full-window-drag": "true",
+             "enable-desktop-composition": "true", "enable-menu-animations": "true"},
+    "medium": {"color-depth": "16", "enable-wallpaper": "false", "enable-theming": "true",
+               "enable-font-smoothing": "true", "enable-full-window-drag": "false",
+               "enable-desktop-composition": "false", "enable-menu-animations": "false"},
+    "low": {"color-depth": "8", "enable-wallpaper": "false", "enable-theming": "false",
+            "enable-font-smoothing": "false", "enable-full-window-drag": "false",
+            "enable-desktop-composition": "false", "enable-menu-animations": "false"},
+}
+
+
+def _guac_handshake(guac_sock, hostname, username, password, width, height, quality="medium"):
     f = guac_sock.makefile("rb", buffering=0)
     guac_sock.sendall(_guac_encode("select", "rdp"))
     instr = _guac_recv_instr(f)
@@ -881,6 +896,7 @@ def _guac_handshake(guac_sock, hostname, username, password, width, height):
         "height": str(height),
         "dpi": "96",
     }
+    rdp_params.update(RDP_QUALITY.get(quality, RDP_QUALITY["medium"]))
     connect_values = [rdp_params.get(name, "") for name in arg_names]
     guac_sock.sendall(_guac_encode("connect", *connect_values))
 
@@ -906,6 +922,7 @@ def rdp_ws(ws, ip):
     password = auth.get("password")
     width = int(auth.get("width", 1280))
     height = int(auth.get("height", 720))
+    quality = auth.get("quality") if auth.get("quality") in RDP_QUALITY else "medium"
     if not username or not password:
         ws.close()
         return
@@ -918,7 +935,7 @@ def rdp_ws(ws, ip):
         return
 
     try:
-        _guac_handshake(guac_sock, ip, username, password, width, height)
+        _guac_handshake(guac_sock, ip, username, password, width, height, quality)
     except Exception as e:
         print(f"[rdp] handshake error ({ip}): {e}", flush=True)
         guac_sock.close()
@@ -1116,6 +1133,42 @@ def pc_shutdown():
         return jsonify(error=str(e)), 500
 
 
+WOL_RELAY_HOST = os.environ.get("WOL_RELAY_HOST", "100.104.221.91")   # домашний сервер
+WOL_RELAY_USER = os.environ.get("WOL_RELAY_USER") or os.environ.get("METRICS_UBUNTUSERVER_USER")
+WOL_RELAY_PASS = os.environ.get("WOL_RELAY_PASS") or os.environ.get("METRICS_UBUNTUSERVER_PASS")
+WOL_BROADCASTS = ("255.255.255.255", "192.168.1.255")
+
+
+def _wol_relay(hex_packet):
+    """Шлёт пакет с машины, стоящей в домашней сети.
+
+    Само приложение живёт в Амстердаме, а «магический пакет» — широковещательный:
+    он расходится только по той подсети, откуда отправлен, и до домашнего ПК
+    не долетает. Поэтому отправку выполняет постоянно включённый хост дома.
+    """
+    if not (WOL_RELAY_USER and WOL_RELAY_PASS):
+        return "Ретранслятор не настроен: нет WOL_RELAY_USER/PASS."
+    targets = ";".join(f"s.sendto(p,('{addr}',9))" for addr in WOL_BROADCASTS)
+    command = (
+        "python3 -c \"import socket;"
+        "s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);"
+        "s.setsockopt(socket.SOL_SOCKET,socket.SO_BROADCAST,1);"
+        f"p=bytes.fromhex('{hex_packet}');{targets}\""
+    )
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    try:
+        client.connect(WOL_RELAY_HOST, username=WOL_RELAY_USER, password=WOL_RELAY_PASS,
+                       timeout=8, look_for_keys=False, allow_agent=False)
+        _, _, stderr = client.exec_command(command, timeout=8)
+        problem = stderr.read().decode("utf-8", "replace").strip()
+        return problem or None
+    except Exception as e:
+        return f"{WOL_RELAY_HOST}: {e}"
+    finally:
+        client.close()
+
+
 @app.post("/api/wol")
 @login_required
 def wol():
@@ -1124,15 +1177,21 @@ def wol():
     mac_clean = mac.replace(":", "").replace("-", "").upper()
     if len(mac_clean) != 12 or not all(c in "0123456789ABCDEF" for c in mac_clean):
         return jsonify(error="Неверный MAC-адрес."), 400
-    mac_bytes = bytes.fromhex(mac_clean)
-    packet = b"\xff" * 6 + mac_bytes * 16
+
+    packet_hex = "ff" * 6 + (mac_clean.lower() * 16)
+    problem = _wol_relay(packet_hex)
+    if problem:
+        return jsonify(error=f"Не удалось разбудить: {problem}"), 502
+
+    # Заодно шлём из своей подсети — на случай, если приложение всё-таки
+    # окажется в одной сети с машиной.
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
             s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-            s.sendto(packet, ("255.255.255.255", 9))
-            s.sendto(packet, ("192.168.1.255", 9))
-    except OSError as e:
-        return jsonify(error=str(e)), 500
+            for addr in WOL_BROADCASTS:
+                s.sendto(bytes.fromhex(packet_hex), (addr, 9))
+    except OSError:
+        pass
     return jsonify(ok=True)
 
 
@@ -1634,6 +1693,12 @@ def drop_update(item_id):
             name = (payload.get("name") or "").strip()[:120]
             if not name:
                 return jsonify(error="Имя пустое."), 400
+            # Расширение переименованием не трогаем: иначе картинка перестаёт
+            # быть картинкой, а архив — архивом.
+            if item["kind"] != "folder":
+                old_ext = os.path.splitext(item["name"])[1]
+                if old_ext:
+                    name = os.path.splitext(name)[0] + old_ext
             item["name"] = name
         if "parent" in payload:
             target = payload.get("parent") or None
@@ -1795,6 +1860,11 @@ def cabinet():
         .gate-panel input { width: 100%; height: 46px; padding: 0 14px; color: #f4fbff; font: 700 1rem "Cascadia Code", Consolas, monospace; border: 1px solid rgba(255,255,255,.12); outline: none; background: rgba(4,10,20,.65); }
         .gate-panel input:focus { border-color: #ff782f; }
         .gate-panel input + input { margin-top: 10px; }
+        .gate-select { width: 100%; height: 46px; margin-top: 10px; padding: 0 12px; color: #f4fbff;
+                       font: 600 .8rem "Cascadia Code", Consolas, monospace; border: 1px solid rgba(255,255,255,.12);
+                       outline: none; background: rgba(4,10,20,.65); cursor: pointer; }
+        .gate-select:focus { border-color: #ff782f; }
+        .gate-select option { background: #101a2b; }
         .gate-submit { width: 100%; height: 46px; margin-top: 12px; color: #1a0d04; font: 800 .8rem "Cascadia Code", Consolas, monospace; letter-spacing: .06em; text-transform: uppercase; border: 0; background: linear-gradient(90deg, #ff782f, #ffb35c); cursor: pointer; }
         .gate-error { min-height: 18px; margin: 10px 0 0; color: #ff6ba8; font-size: .78rem; }
         .gate-close { position: absolute; top: 12px; right: 14px; padding: 5px; color: #7d8799; font-size: 1.3rem; border: 0; background: none; cursor: pointer; }
@@ -2218,6 +2288,11 @@ def cabinet():
           <form id="rdp-login-form">
             <input id="rdp-login-username" name="username" type="text" autocomplete="off" placeholder="Имя пользователя" required>
             <input id="rdp-login-password" name="password" type="password" autocomplete="off" placeholder="Пароль" required>
+            <select id="rdp-login-quality" class="gate-select">
+              <option value="high">Качество: высокое — 32 бита, все эффекты</option>
+              <option value="medium" selected>Качество: среднее — 16 бит, без обоев</option>
+              <option value="low">Качество: низкое — 8 бит, для слабой связи</option>
+            </select>
             <button class="gate-submit" type="submit">Подключиться</button>
             <p id="rdp-login-error" class="gate-error" role="alert"></p>
           </form>
@@ -2397,6 +2472,7 @@ def cabinet():
           const rdpLoginUsername = document.getElementById("rdp-login-username");
           const rdpLoginPassword = document.getElementById("rdp-login-password");
           const rdpLoginError = document.getElementById("rdp-login-error");
+          const rdpLoginQuality = document.getElementById("rdp-login-quality");
           const rdpOverlay = document.getElementById("rdp-overlay");
           const rdpTitleEl = document.getElementById("rdp-title");
           const rdpDisplay = document.getElementById("rdp-display");
@@ -2516,6 +2592,7 @@ def cabinet():
 
           const openRdpLogin = () => {
             document.getElementById("rdp-login-title").textContent = pendingDevice ? `RDP — ${pendingDevice.name}` : "Windows RDP";
+            if (rdpLoginQuality) rdpLoginQuality.value = localStorage.getItem("rdpQuality") || "medium";
             rdpLoginModal.hidden = false;
             requestAnimationFrame(() => rdpLoginUsername.focus());
           };
@@ -2537,7 +2614,7 @@ def cabinet():
           };
           rdpCloseBtn.addEventListener("click", closeRdp);
 
-          const openRdp = (ip, name, username, password, protocol = "rdp") => {
+          const openRdp = (ip, name, username, password, protocol = "rdp", quality = "medium") => {
             if (typeof Guacamole === "undefined") {
               alert("Не удалось загрузить guacamole-common-js — проверьте сеть/CDN.");
               return;
@@ -2566,7 +2643,7 @@ def cabinet():
             const height = Math.round(displayRect.height) || (window.innerHeight - 45);
 
             // ── tunnel + client ─────────────────────────────────────────
-            const tunnel = new GuacAuthTunnel(ip, { type: "auth", username, password, width, height }, protocol);
+            const tunnel = new GuacAuthTunnel(ip, { type: "auth", username, password, width, height, quality }, protocol);
             rdpClient = new Guacamole.Client(tunnel);
             const displayEl = rdpClient.getDisplay().getElement();
             rdpDisplay.innerHTML = "";
@@ -2799,8 +2876,10 @@ def cabinet():
             const device = pendingDevice;
             const username = rdpLoginUsername.value;
             const password = rdpLoginPassword.value;
+            const quality = rdpLoginQuality ? rdpLoginQuality.value : "medium";
+            if (rdpLoginQuality) localStorage.setItem("rdpQuality", quality);
             closeRdpLogin();
-            if (device) openRdp(device.ip, device.name, username, password);
+            if (device) openRdp(device.ip, device.name, username, password, "rdp", quality);
           });
           // ─────────────────────────────────────────────────────────────
 
@@ -4185,10 +4264,16 @@ def drop_page():
 
           if (act === "ren") {
             const nameEl = row.querySelector(".nm");
+            // Правим только имя без расширения — менять его нельзя,
+            // иначе файл перестаёт открываться.
+            const dot = item.kind === "folder" ? -1 : item.name.lastIndexOf(".");
+            const stem = dot > 0 ? item.name.slice(0, dot) : item.name;
+            const ext = dot > 0 ? item.name.slice(dot) : "";
             const input = document.createElement("input");
             input.className = "rename";
-            input.value = item.name;
+            input.value = stem;
             input.maxLength = 120;
+            if (ext) input.title = "Расширение " + ext + " останется прежним";
             nameEl.replaceWith(input);
             input.focus();
             input.select();
@@ -4196,7 +4281,7 @@ def drop_page():
             const save = async () => {
               if (saving) return;
               saving = true;
-              const name = input.value.trim();
+              const name = input.value.trim() ? input.value.trim() + ext : "";
               if (name && name !== item.name) {
                 try { await api("/api/drop/" + id, { method: "PATCH", headers: { "Content-Type": "application/json" },
                                                      body: JSON.stringify({ name }) }); }
