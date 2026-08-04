@@ -3713,41 +3713,29 @@ def share_target_fallback():
 @app.get("/themes")
 @login_required
 def themes_page():
-    """Витрина оформления: разделы кабинета как импланты на схеме тела.
-    Только фронтенд — данные берутся из уже существующих эндпоинтов."""
-    hex_starts = [(576, 118), (624, 118), (552, 146), (600, 146),
-                  (648, 146), (576, 174), (624, 174), (600, 202)]
-    cols, rows = [64, 338, 612, 886], [210, 352]
-
-    shards, cards = [], []
+    """Витрина оформления: разделы кабинета как органы и импланты киборга.
+    Своего бэкенда нет — данные берутся из уже существующих эндпоинтов."""
+    organs = ["ЛОБНАЯ ДОЛЯ", "ТЕМЕННАЯ ДОЛЯ", "ЗАТЫЛОЧНАЯ ДОЛЯ", "ВИСОЧНАЯ ДОЛЯ",
+              "МОЗЖЕЧОК", "СТВОЛ МОЗГА", "ТАЛАМУС", "ГИПОФИЗ"]
+    cols, rows = [60, 330, 600, 870], [250, 420]
+    cards = []
     for i, device in enumerate(NETBIRD_DEVICES[:8]):
-        sx, sy = hex_starts[i]
-        cx, cy = cols[i % 4] + 36, rows[i // 4] + 40
-        kind = ("ssh" if device.get("ssh_enabled") else
-                "rdp" if device.get("rdp_enabled") else
-                "vnc" if device.get("vnc_enabled") else "—")
-        shards.append(
-            f'<g class="shard" style="--dx:{cx - sx}px; --dy:{cy - sy}px; --i:{i}">'
-            f'<path transform="translate({sx},{sy})" class="shard-hex"'
-            f' d="M18 0 9 15.6-9 15.6-18 0-9-15.6 9-15.6Z"/>'
-            f'<path transform="translate({sx},{sy})" class="shard-core"'
-            f' d="M8 0 4 6.9-4 6.9-8 0-4-6.9 4-6.9Z"/></g>'
-        )
         left, top = cols[i % 4], rows[i // 4]
+        kind = ("SSH" if device.get("ssh_enabled") else
+                "RDP" if device.get("rdp_enabled") else
+                "VNC" if device.get("vnc_enabled") else "\u2014")
         cards.append(
-            f'<g class="ncard" style="--i:{i}" data-ip="{device["ip"]}" data-kind="{kind}">'
-            f'<path class="ncard-plate" d="M{left} {top + 12} L{left + 12} {top} '
-            f'L{left + 250} {top} L{left + 250} {top + 68} L{left + 238} {top + 80} '
-            f'L{left} {top + 80} Z"/>'
-            f'<text class="ncard-name" x="{left + 66}" y="{top + 28}">{device["name"]}</text>'
-            f'<text class="ncard-ip" x="{left + 66}" y="{top + 45}">{device["ip"]}</text>'
-            f'<text class="ncard-ping" x="{left + 240}" y="{top + 28}" text-anchor="end"'
-            f' data-ping="{device["ip"]}">— — —</text>'
-            f'<g class="ncard-btn" data-connect="{device["ip"]}">'
-            f'<rect x="{left + 66}" y="{top + 54}" width="104" height="18" rx="1"/>'
-            f'<text x="{left + 118}" y="{top + 67}" text-anchor="middle">ПОДКЛЮЧИТЬСЯ</text>'
-            f'</g>'
-            f'<text class="ncard-kind" x="{left + 240}" y="{top + 67}" text-anchor="end">{kind.upper()}</text>'
+            f'<g class="ncard" style="--i:{i}">'
+            f'<path class="ncard-plate" d="M{left} {top + 12} L{left + 12} {top} L{left + 246} {top} '
+            f'L{left + 246} {top + 68} L{left + 234} {top + 80} L{left} {top + 80} Z"/>'
+            f'<text class="ncard-organ" x="{left + 84}" y="{top + 20}">{organs[i]}</text>'
+            f'<text class="ncard-name" x="{left + 84}" y="{top + 38}">{device["name"]}</text>'
+            f'<text class="ncard-ip" x="{left + 84}" y="{top + 54}">{device["ip"]}</text>'
+            f'<text class="ncard-ping" x="{left + 236}" y="{top + 22}" text-anchor="end" '
+            f'data-ping="{device["ip"]}">\u2014 \u2014 \u2014</text>'
+            f'<g class="ncard-btn"><rect x="{left + 84}" y="{top + 60}" width="100" height="16" rx="1"/>'
+            f'<text x="{left + 134}" y="{top + 72}" text-anchor="middle">ПОДКЛЮЧИТЬСЯ</text></g>'
+            f'<text class="ncard-ip" x="{left + 236}" y="{top + 72}" text-anchor="end">{kind}</text>'
             f'</g>'
         )
 
@@ -3760,347 +3748,463 @@ def themes_page():
       <meta name="robots" content="noindex, nofollow">
       <title>Тестовые темы · vitazgio.ru</title>
       <style>
-        * { box-sizing: border-box; }
-        body { margin: 0; min-height: 100svh; overflow-x: hidden; color: #cfe9f5;
-               font-family: "Cascadia Code", Consolas, monospace; background: #05070d; }
-        [hidden] { display: none !important; }
+        * { box-sizing:border-box; }
+        body { margin:0; min-height:100svh; color:#cfe9f5; font-family:"Cascadia Code",Consolas,monospace;
+               background:#05070d; overflow-x:hidden; }
+        .stage { position:relative; min-height:100svh; padding:14px clamp(12px,2vw,28px) 30px;
+                 background:radial-gradient(ellipse 65% 50% at 42% 40%, rgba(45,226,255,.07), transparent 70%),
+                            radial-gradient(ellipse 40% 35% at 80% 30%, rgba(255,63,164,.05), transparent 70%), #05070d; }
+        .stage::after { content:""; position:fixed; inset:0; pointer-events:none; opacity:.5;
+              background:repeating-linear-gradient(180deg, rgba(0,0,0,.3) 0 1px, transparent 1px 3px); }
+        .bar { position:relative; z-index:3; display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+        .back { width:38px; height:38px; flex:none; display:grid; place-items:center; color:#2de2ff;
+                text-decoration:none; border:1px solid rgba(45,226,255,.32); border-radius:50%; background:rgba(45,226,255,.07); }
+        .back svg { width:17px; height:17px; display:block; }
+        .back:hover { color:#fff; border-color:#2de2ff; background:rgba(45,226,255,.18); }
+        .bar h1 { margin:0; font-size:clamp(1rem,2.2vw,1.5rem); font-weight:700; color:#eaf6ff; letter-spacing:.02em; }
+        .bar h1 b { color:#ff3fa4; }
+        .bar .hint { margin-left:auto; color:#46617a; font-size:.66rem; letter-spacing:.16em; text-transform:uppercase; }
+        .frame { position:relative; z-index:2; max-width:1400px; margin:6px auto 0; }
+        .toast { position:fixed; left:50%; bottom:22px; transform:translateX(-50%); z-index:9;
+                 padding:9px 16px; color:#04121c; font-size:.72rem; background:#2de2ff; }
 
-        .stage { position: relative; min-height: 100svh; padding: 18px clamp(14px, 3vw, 40px) 40px;
-                 background:
-                   radial-gradient(ellipse 70% 55% at 50% 42%, rgba(45,226,255,.09), transparent 70%),
-                   radial-gradient(ellipse 50% 40% at 82% 78%, rgba(255,63,164,.07), transparent 70%),
-                   linear-gradient(#05070d, #070a14); }
-        /* сетка-подложка и развёртка поверх всего */
-        .stage::before { content: ""; position: fixed; inset: 0; pointer-events: none; opacity: .5;
-              background-image: linear-gradient(rgba(45,226,255,.05) 1px, transparent 1px),
-                                linear-gradient(90deg, rgba(45,226,255,.05) 1px, transparent 1px);
-              background-size: 44px 44px; mask-image: radial-gradient(ellipse 75% 65% at 50% 45%, #000, transparent 78%); }
-        .stage::after { content: ""; position: fixed; inset: 0; pointer-events: none; opacity: .55;
-              background: repeating-linear-gradient(180deg, rgba(0,0,0,.28) 0 1px, transparent 1px 3px); }
+  body { margin:0; background:#05070d; }
+  svg { width:100%; height:auto; display:block; }
 
-        .bar { position: relative; z-index: 3; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
-        .back { width: 40px; height: 40px; flex: none; display: grid; place-items: center; color: #2de2ff;
-                text-decoration: none; border: 1px solid rgba(45,226,255,.32); border-radius: 50%;
-                background: rgba(45,226,255,.07); }
-        .back svg { width: 18px; height: 18px; display: block; }
-        .back:hover { color: #fff; border-color: #2de2ff; background: rgba(45,226,255,.18); }
-        .bar h1 { margin: 0; font-size: clamp(1.1rem, 2.4vw, 1.7rem); font-weight: 700; letter-spacing: .02em; color: #eaf6ff; }
-        .bar h1 b { color: #ff3fa4; font-weight: 700; }
-        .bar .hint { margin-left: auto; color: #4d5b73; font-size: .68rem; letter-spacing: .16em; text-transform: uppercase; }
+  .plate     { fill:url(#gPlate);   stroke:#12161c; stroke-width:2; stroke-linejoin:round; }
+  .plate-in  { fill:url(#gPlateIn); stroke:#12161c; stroke-width:1.7; stroke-linejoin:round; }
+  .seam      { fill:none; stroke:#2b323b; stroke-width:1.2; }
+  .seam-thin { fill:none; stroke:#414b58; stroke-width:.8; }
+  .ghost     { fill:none; stroke:#2de2ff; stroke-width:1; opacity:.22; stroke-dasharray:5 6; }
+  .cavity    { fill:#080b11; stroke:#12161c; stroke-width:2; }
+  .rib       { fill:none; stroke:#2a343f; stroke-width:3.4; stroke-linecap:round; }
+  .trace     { fill:none; stroke:#2de2ff; stroke-width:.8; opacity:.45; }
+  .muscle    { fill:url(#gMus); stroke:#4a121c; stroke-width:1.2; }
+  .fiber     { fill:none; stroke:#c2515c; stroke-width:.7; opacity:.5; }
+  .bone      { fill:#e2dcd0; stroke:#12161c; stroke-width:1.5; }
+  .cable     { fill:none; stroke:#0f1319; stroke-width:5.5; stroke-linecap:round; }
+  .cable-hi  { fill:none; stroke:#333e4b; stroke-width:1.5; stroke-linecap:round; }
+  .lens      { fill:url(#gLens); stroke:#0e1218; stroke-width:1.4; }
+  .hot       { fill:none; stroke:#ff3fa4; stroke-width:1.3; opacity:.9; }
 
-        .frame { position: relative; z-index: 2; margin: 10px auto 0; max-width: 1240px; }
-        svg.scheme { width: 100%; height: auto; display: block; overflow: visible; }
+  .lobe   { stroke:#5d1b28; stroke-width:1.3; }
+  .lobe-f { fill:#c8737f; } .lobe-p { fill:#b96878; }
+  .lobe-o { fill:#a85a6a; } .lobe-t { fill:#d2848d; }
+  .cereb  { fill:#8e4757; stroke:#4d1620; stroke-width:1.3; }
+  .stem   { fill:#dda691; stroke:#5d1b28; stroke-width:1.3; }
+  .deep   { fill:#e6bcaa; stroke:#5d1b28; stroke-width:1.1; }
+  .gyrus  { fill:none; stroke:#7d2c3b; stroke-width:1.1; opacity:.8; stroke-linecap:round; }
+  .cerebline { fill:none; stroke:#5d2130; stroke-width:.7; opacity:.85; }
 
-        /* ── фигура ── */
-        .body-line { fill: none; stroke: rgba(120,200,235,.42); stroke-width: 1.6; }
-        .body-fill { fill: rgba(20,44,66,.34); stroke: rgba(120,200,235,.5); stroke-width: 1.6; }
-        .body-soft { fill: rgba(45,226,255,.05); stroke: rgba(45,226,255,.22); stroke-width: 1; }
-        .tick { stroke: rgba(45,226,255,.3); stroke-width: 1; }
-        .scheme text { font-family: "Cascadia Code", Consolas, monospace; }
-        .cap { fill: #46617a; font-size: 9px; letter-spacing: .22em; }
+  .lbl  { fill:#4d6379; font:9px "Cascadia Code",Consolas,monospace; letter-spacing:.22em; }
+  .lead { fill:none; stroke:#28394a; stroke-width:1; }
+  .hud  { fill:rgba(6,14,22,.85); stroke:#2de2ff; stroke-width:1.2; }
+  /* ── взаимодействие ── */
+  .zone { cursor:pointer; }
+  .zone:hover .lobe, .zone:hover .cereb, .zone:hover .stem, .zone:hover .deep { filter:brightness(1.2); }
+  .shard { transition:transform .8s cubic-bezier(.2,.9,.25,1); transition-delay:calc(var(--i) * 50ms); }
+  .open .shard { transform:translate(var(--dx), var(--dy)); filter:drop-shadow(0 0 8px rgba(255,63,164,.45)); }
+  #figure, #arm, #projection, #clock, #labels { transition:opacity .55s, filter .55s; }
+  .open #figure, .open #arm, .open #projection, .open #clock, .open #labels { opacity:.13; filter:blur(1.6px); }
+  .open #brainzone { opacity:1 !important; filter:none !important; }
 
-        /* нервные линии — по ним бежит импульс */
-        .nerve { fill: none; stroke: rgba(45,226,255,.22); stroke-width: 1.2; }
-        .pulse { fill: none; stroke: #2de2ff; stroke-width: 2; stroke-linecap: round;
-                 stroke-dasharray: 3 190; filter: drop-shadow(0 0 4px #2de2ff);
-                 animation: run 3.4s linear infinite; }
-        .pulse.p2 { stroke: #ff3fa4; filter: drop-shadow(0 0 4px #ff3fa4); animation-duration: 4.6s; animation-delay: -1.2s; }
-        .pulse.p3 { animation-duration: 5.2s; animation-delay: -2.6s; }
-        @keyframes run { from { stroke-dashoffset: 193; } to { stroke-dashoffset: 0; } }
+  .ncard { opacity:0; pointer-events:none; transform:translateY(16px);
+           transition:opacity .45s, transform .45s; transition-delay:calc(var(--i) * 50ms + .3s); }
+  .open .ncard { opacity:1; pointer-events:auto; transform:none; }
+  .ncard-plate { fill:rgba(8,16,26,.95); stroke:rgba(45,226,255,.42); stroke-width:1.2; }
+  .ncard:hover .ncard-plate { stroke:#2de2ff; fill:rgba(14,28,46,.98); }
+  .ncard-organ { fill:#ff7f9c; font:8px "Cascadia Code",monospace; letter-spacing:.14em; }
+  .ncard-name  { fill:#eaf6ff; font:700 13px "Cascadia Code",monospace; }
+  .ncard-ip    { fill:#4d6a86; font:10px "Cascadia Code",monospace; }
+  .ncard-ping  { fill:#63f5ad; font:700 12px "Cascadia Code",monospace; }
+  .ncard-ping.off { fill:#ff5f7a; }
+  .ncard-btn rect { fill:rgba(45,226,255,.1); stroke:rgba(45,226,255,.45); stroke-width:1; cursor:pointer; }
+  .ncard-btn text { fill:#2de2ff; font:8.5px "Cascadia Code",monospace; letter-spacing:.1em; pointer-events:none; }
+  .ncard-btn:hover rect { fill:#2de2ff; }
+  .ncard-btn:hover text { fill:#04121c; }
 
-        /* активные зоны */
-        .zone { cursor: pointer; }
-        .zone .halo { fill: transparent; stroke: rgba(45,226,255,0); stroke-width: 1.2; transition: stroke .25s, fill .25s; }
-        .zone:hover .halo { stroke: rgba(45,226,255,.55); fill: rgba(45,226,255,.05); }
-        .zone .tag { fill: #2de2ff; font-size: 9.5px; letter-spacing: .2em; opacity: .55; transition: opacity .25s; }
-        .zone:hover .tag { opacity: 1; }
+  #jaw { transition:transform .5s cubic-bezier(.3,.8,.3,1); transform-origin:-30px 58px; }
+  .mouth #jaw { transform:rotate(11deg); }
 
-        /* мозг */
-        .shard-hex { fill: rgba(255,63,164,.14); stroke: #ff3fa4; stroke-width: 1.4; }
-        .shard-core { fill: rgba(45,226,255,.5); stroke: none; }
-        .shard { transition: transform .78s cubic-bezier(.2,.9,.25,1); transition-delay: calc(var(--i) * 45ms); }
-        .brainpack { animation: bob 5s ease-in-out infinite; transform-origin: 600px 160px; }
-        @keyframes bob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
-        .open .shard { transform: translate(var(--dx), var(--dy)); }
-        .open .brainpack { animation: none; }
-        .open .figure { opacity: .18; filter: blur(1.4px); }
-        .figure { transition: opacity .6s, filter .6s; }
-
-        /* карточки узлов */
-        .ncard { opacity: 0; pointer-events: none; transform: translateY(14px);
-                 transition: opacity .45s, transform .45s; transition-delay: calc(var(--i) * 45ms + .28s); }
-        .open .ncard { opacity: 1; pointer-events: auto; transform: none; }
-        .ncard-plate { fill: rgba(9,18,30,.92); stroke: rgba(45,226,255,.4); stroke-width: 1.2; }
-        .ncard:hover .ncard-plate { stroke: #2de2ff; fill: rgba(14,28,46,.95); }
-        .ncard-name { fill: #eaf6ff; font-size: 13px; font-weight: 700; }
-        .ncard-ip   { fill: #4d6a86; font-size: 10px; }
-        .ncard-ping { fill: #63f5ad; font-size: 12px; font-weight: 700; }
-        .ncard-ping.off { fill: #ff5f7a; }
-        .ncard-kind { fill: #3f5a72; font-size: 9px; letter-spacing: .16em; }
-        .ncard-btn rect { fill: rgba(45,226,255,.1); stroke: rgba(45,226,255,.45); stroke-width: 1; cursor: pointer; }
-        .ncard-btn text { fill: #2de2ff; font-size: 8.5px; letter-spacing: .12em; pointer-events: none; }
-        .ncard-btn:hover rect { fill: #2de2ff; }
-        .ncard-btn:hover text { fill: #04121c; }
-
-        /* часы на оторванной руке */
-        .watch-face { fill: rgba(4,12,20,.95); stroke: #2de2ff; stroke-width: 1.4; }
-        .watch-time { fill: #2de2ff; font-size: 20px; font-weight: 800; letter-spacing: -.02em; }
-        .watch-sec  { fill: #ff3fa4; font-size: 10px; font-weight: 700; }
-        .watch-date { fill: #46617a; font-size: 7.5px; letter-spacing: .18em; }
-        .severed { stroke: #ff3fa4; stroke-width: 1.6; fill: none; stroke-dasharray: 4 4; opacity: .8; }
-        .drip { fill: #ff3fa4; opacity: .5; animation: drip 3.2s ease-in infinite; }
-        @keyframes drip { 0%,70% { transform: translateY(0); opacity: 0; } 80% { opacity: .6; } 100% { transform: translateY(16px); opacity: 0; } }
-
-        /* голосовой имплант — плеер */
-        .voice-box { fill: rgba(6,16,26,.94); stroke: rgba(255,63,164,.55); stroke-width: 1.3; }
-        .voice-title { fill: #eaf6ff; font-size: 10px; font-weight: 700; }
-        .voice-sub { fill: #46617a; font-size: 8px; }
-        .eqbar { fill: #ff3fa4; transition: height .12s, y .12s; }
-        .vbtn { cursor: pointer; }
-        .vbtn circle { fill: rgba(255,63,164,.14); stroke: #ff3fa4; stroke-width: 1.2; }
-        .vbtn:hover circle { fill: #ff3fa4; }
-        .vbtn path { fill: #ff3fa4; }
-        .vbtn:hover path { fill: #04121c; }
-
-        /* грудная пластина — метрики */
-        .vit-row-label { fill: #46617a; font-size: 8px; letter-spacing: .1em; }
-        .vit-track { fill: rgba(255,255,255,.07); }
-        .vit-fill { fill: #2de2ff; transition: width .5s; }
-        .vit-fill.warn { fill: #ffb35c; }
-        .vit-fill.bad { fill: #ff5f7a; }
-        .vit-val { fill: #cfe9f5; font-size: 8px; }
-        .vit-host { fill: #7fd8ff; font-size: 9px; letter-spacing: .1em; }
-
-        .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 9;
-                 padding: 10px 18px; color: #04121c; font-size: .74rem; background: #2de2ff; }
       </style>
     </head>
     <body>
-      <div class="stage" id="stage">
+      <div class="stage">
         <div class="bar">
           <a class="back" href="/cabinet" aria-label="Назад в кабинет">
             <svg viewBox="0 0 24 24" fill="none"><path d="M19 12H5m0 0 6-6m-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </a>
-          <h1>ТЕСТОВЫЕ ТЕМЫ · <b>ИМПЛАНТЫ</b></h1>
-          <span class="hint" id="hint">нажми на мозг</span>
+          <h1>КИБОРГ · <b>ПОЛУРАЗБОР</b></h1>
+          <span class="hint" id="hint">мозг — узлы сети · рот — плеер</span>
         </div>
-
         <div class="frame">
-        <svg class="scheme" viewBox="0 0 1200 640" xmlns="http://www.w3.org/2000/svg" id="scheme">
+<svg id="scheme" viewBox="0 0 1200 900" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="gPlate" x1="0" y1="0" x2=".35" y2="1">
+      <stop offset="0" stop-color="#f4f0e8"/><stop offset=".5" stop-color="#dbd5c9"/><stop offset="1" stop-color="#a29a8c"/>
+    </linearGradient>
+    <linearGradient id="gPlateIn" x1="0" y1="0" x2=".3" y2="1">
+      <stop offset="0" stop-color="#c3bcae"/><stop offset="1" stop-color="#8a8377"/>
+    </linearGradient>
+    <linearGradient id="gMus" x1="0" y1="0" x2=".2" y2="1">
+      <stop offset="0" stop-color="#a83c48"/><stop offset="1" stop-color="#5f1a24"/>
+    </linearGradient>
+    <radialGradient id="gLens" cx=".35" cy=".3" r=".8">
+      <stop offset="0" stop-color="#b7f7ff"/><stop offset=".45" stop-color="#2de2ff"/><stop offset="1" stop-color="#07303d"/>
+    </radialGradient>
+    <linearGradient id="gBeam" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#2de2ff" stop-opacity=".30"/>
+      <stop offset="1" stop-color="#2de2ff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
 
-          <g class="figure" id="figure">
-            <!-- нервные магистрали -->
-            <path class="nerve" id="n1" d="M600 250 C600 300 560 320 560 380"/>
-            <path class="pulse"      d="M600 250 C600 300 560 320 560 380"/>
-            <path class="nerve" id="n2" d="M600 250 C600 300 645 320 645 380"/>
-            <path class="pulse p2"   d="M600 250 C600 300 645 320 645 380"/>
-            <path class="nerve" d="M520 300 C420 320 330 340 300 300"/>
-            <path class="pulse p3" d="M520 300 C420 320 330 340 300 300"/>
+  <!-- ═══ ФИГУРА: голова, шея и торс в одной системе координат ═══ -->
+  <g id="figure" transform="translate(388,322)">
 
-            <!-- торс -->
-            <path class="body-fill" d="M600 268 C660 268 700 292 716 330 L742 470 C748 508 736 540 706 556 L494 556 C464 540 452 508 458 470 L484 330 C500 292 540 268 600 268 Z"/>
-            <path class="body-soft" d="M600 268 C640 268 664 282 676 302 L664 316 C648 300 626 292 600 292 C574 292 552 300 536 316 L524 302 C536 282 560 268 600 268 Z"/>
-            <path class="body-line" d="M600 300 L600 556 M520 350 L680 350 M512 400 L688 400"/>
+    <!-- ── ТОРС ── -->
+      <path class="muscle" d="M-96 96 C-60 118 -8 130 44 126 L64 168 C6 178 -60 164 -110 136 Z"/>
+      <path class="fiber" d="M-88 108 C-52 128 -6 138 44 136 M-92 120 C-56 140 -8 150 46 148"/>
+    <g id="torso">
+      <path class="ghost" d="M-24 132 C40 126 104 146 134 186 C156 216 162 254 164 292
+        L168 396 C172 438 148 466 110 474 L-94 474 C-134 466 -156 438 -152 396
+        L-144 292 C-144 250 -132 210 -108 182 C-84 152 -60 136 -24 132 Z"/>
+      <path class="cavity" d="M-22 138 C38 132 98 152 128 190 C148 218 155 254 157 292
+        L161 394 C165 432 144 458 108 466 L-92 466 C-128 458 -149 432 -145 394
+        L-137 292 C-137 252 -126 214 -104 188 C-82 158 -56 142 -22 138 Z"/>
 
-            <!-- шея -->
-            <path class="body-fill" d="M574 232 L626 232 L626 270 L574 270 Z"/>
+      <!-- мышцы плечевого пояса -->
+      <path class="muscle" d="M-108 186 C-70 158 -18 148 32 156 C74 162 108 182 126 210
+        L134 268 C104 236 60 218 12 214 C-40 210 -84 226 -114 254 Z"/>
+      <path class="fiber" d="M-92 200 C-46 176 8 172 56 182 M-98 224 C-50 200 8 196 62 206
+        M-104 248 C-56 224 6 220 66 230"/>
 
-            <!-- череп -->
-            <path class="body-fill" d="M600 62 C654 62 686 96 686 148 L686 186 C686 208 672 222 654 228 L644 254 L556 254 L546 228 C528 222 514 208 514 186 L514 148 C514 96 546 62 600 62 Z"/>
-            <path class="body-line" d="M556 254 L556 232 M644 254 L644 232 M514 176 L686 176"/>
-            <path class="tick" d="M524 200 L544 200 M656 200 L676 200"/>
+      <path class="muscle" d="M-118 282 C-60 262 6 260 56 276 L60 440 C6 424 -62 426 -122 446 Z" opacity=".45"/>
+      <!-- рёбра: слева броня снята -->
+      <path class="rib" d="M-118 288 C-66 268 -4 266 46 280"/>
+      <path class="rib" d="M-122 326 C-68 306 -4 304 50 318"/>
+      <path class="rib" d="M-126 364 C-70 344 -4 342 54 356"/>
+      <path class="rib" d="M-128 402 C-72 382 -4 380 56 394"/>
+      <path class="rib" d="M-130 440 C-72 420 -4 418 58 432"/>
+      <path class="trace" d="M-112 296 C-64 280 -6 278 40 288"/>
+      <path class="trace" d="M-120 372 C-66 356 -6 354 46 364"/>
 
-            <!-- мозг: зона -->
-            <g class="zone" id="brainzone">
-              <path class="halo" d="M528 84 C528 62 672 62 672 84 L672 214 C672 234 528 234 528 214 Z"/>
-              <g class="brainpack">""" + "".join(shards) + """</g>
-              <text class="tag" x="600" y="46" text-anchor="middle">N E T B I R D</text>
-            </g>
+      <!-- позвоночник -->
+      <g>
+        <path class="bone" d="M-140 260 L-114 254 L-111 288 L-137 294 Z"/>
+        <path class="bone" d="M-142 302 L-116 296 L-113 330 L-139 336 Z"/>
+        <path class="bone" d="M-144 344 L-118 338 L-115 372 L-141 378 Z"/>
+        <path class="bone" d="M-146 386 L-120 380 L-117 414 L-143 420 Z"/>
+        <path class="bone" d="M-148 428 L-122 422 L-119 456 L-145 462 Z"/>
+      </g>
 
-            <!-- голосовой имплант -->
-            <g class="zone" id="voicezone">
-              <path class="halo" d="M646 236 L860 236 L860 330 L646 330 Z"/>
-              <path class="body-line" d="M626 252 L700 252"/>
-              <rect class="voice-box" x="700" y="238" width="158" height="86" rx="2"/>
-              <text class="voice-sub" x="712" y="254">ГОЛОСОВОЙ МОДУЛЬ</text>
-              <text class="voice-title" id="v-title" x="712" y="272">— тишина —</text>
-              <text class="voice-sub" id="v-artist" x="712" y="286">плеер выключен</text>
-              <g id="eq" transform="translate(712,316)"></g>
-              <g class="vbtn" id="v-play" transform="translate(836,300)">
-                <circle r="13"/>
-                <path id="v-icon" d="M-4 -6 L7 0 L-4 6 Z"/>
-              </g>
-              <text class="tag" x="700" y="230">П Л Е Е Р</text>
-            </g>
+      <!-- грудная броня справа -->
+      <path class="plate" d="M60 168 C102 178 130 202 142 236 L152 300 L159 394
+        C163 430 144 454 110 462 L48 462 L56 388 C64 316 68 240 60 168 Z"/>
+      <path class="seam" d="M74 240 C106 252 128 272 140 300"/>
+      <path class="seam-thin" d="M60 336 L156 348 M56 412 L160 424"/>
+      <circle cx="132" cy="212" r="4" fill="#2b323b"/>
 
-            <!-- грудная пластина: метрики -->
-            <g class="zone" id="vitalzone">
-              <path class="halo" d="M496 356 L704 356 L704 512 L496 512 Z"/>
-              <rect class="voice-box" x="504" y="364" width="192" height="140" rx="2" style="stroke:rgba(45,226,255,.5)"/>
-              <text class="voice-sub" x="516" y="380">ЖИЗНЕННЫЕ ПОКАЗАТЕЛИ</text>
-              <g id="vitals"></g>
-              <text class="tag" x="504" y="352">М Е Т Р И К И</text>
-            </g>
+      <!-- порт данных в груди -->
+      <a href="/drop"><g id="chestport" class="zone">
+        <rect x="76" y="326" width="60" height="44" rx="3" fill="#0f1319" stroke="#39424e" stroke-width="2"/>
+        <path class="trace" d="M85 340 L127 340 M85 350 L127 350 M85 360 L115 360"/>
+        <circle cx="127" cy="360" r="3.6" fill="#2de2ff"/>
+      </g></a>
 
-            <!-- оторванная рука с часами -->
-            <g class="zone" id="armzone">
-              <path class="halo" d="M120 250 L330 250 L330 560 L120 560 Z"/>
-              <path class="severed" d="M262 268 L318 288"/>
-              <circle class="drip" cx="286" cy="282" r="2.4"/>
-              <circle class="drip" cx="292" cy="286" r="1.8" style="animation-delay:-1.6s"/>
-              <path class="body-fill" d="M268 274 C300 286 306 316 292 344 L262 404 C250 428 226 434 208 420 C190 406 188 382 200 360 L238 292 C244 280 256 270 268 274 Z"/>
-              <path class="body-fill" d="M206 414 C226 424 232 448 222 470 L200 512 C192 530 174 536 160 528 C146 520 142 502 150 486 L176 434 C184 418 196 410 206 414 Z"/>
-              <path class="body-line" d="M244 300 C258 310 262 328 254 344 M186 500 L206 510"/>
-              <path class="body-fill" d="M156 528 C168 534 172 548 166 560 L150 588 C144 600 130 604 120 598 C110 592 108 578 114 568 L132 538 C138 528 148 524 156 528 Z"/>
-              <rect class="watch-face" x="112" y="426" width="126" height="66" rx="3" transform="rotate(-24 175 459)"/>
-              <g transform="rotate(-24 175 459)">
-                <text class="watch-time" id="w-time" x="124" y="460">--:--</text>
-                <text class="watch-sec"  id="w-sec"  x="196" y="460">--</text>
-                <text class="watch-date" id="w-date" x="124" y="478">—</text>
-              </g>
-              <text class="tag" x="128" y="416">Ч А С Ы</text>
-              <text class="cap" x="128" y="612">МОДУЛЬ ОТСОЕДИНЁН</text>
-            </g>
-          </g>
+      <!-- наплечник -->
+      <path class="plate" d="M76 148 C112 154 140 172 154 198 C164 218 164 240 156 256
+        L126 236 C122 212 104 190 80 178 Z"/>
+      <path class="seam-thin" d="M88 170 C114 180 132 196 142 218"/>
 
-          <!-- карточки узлов -->
-          <g id="nodes">""" + "".join(cards) + """</g>
-        </svg>
+      <!-- плечевой разъём: рука снята -->
+      <g id="socket">
+        <ellipse cx="-116" cy="200" rx="32" ry="37" transform="rotate(-20 -116 200)"
+                 fill="#0f1319" stroke="#39424e" stroke-width="2.4"/>
+        <ellipse cx="-116" cy="200" rx="18" ry="21" transform="rotate(-20 -116 200)"
+                 fill="none" stroke="#2de2ff" stroke-width="1.6" opacity=".8"/>
+        <circle cx="-116" cy="200" r="5" fill="#2de2ff" opacity=".9"/>
+        <path class="hot" d="M-146 176 C-152 196 -150 216 -140 234" stroke-dasharray="5 5"/>
+      </g>
+    </g>
+
+    <!-- ── ШЕЯ: соединяет голову с торсом ── -->
+    <g id="neck" transform="translate(-4,-34)">
+      <path class="muscle" d="M-48 44 C-32 66 -8 82 16 88 L20 140 C-14 134 -48 116 -70 88 Z"/>
+      <path class="fiber" d="M-44 54 C-28 74 -6 88 18 94 M-50 68 C-34 88 -12 102 16 108"/>
+      <path class="muscle" d="M-84 34 C-94 58 -94 92 -82 118 L-62 108 C-72 86 -72 62 -64 42 Z"/>
+      <path class="fiber" d="M-82 48 C-90 70 -90 92 -80 112"/>
+      <path class="bone" d="M-70 30 L-40 24 L-36 40 L-66 46 Z"/>
+      <path class="bone" d="M-74 52 L-44 46 L-40 62 L-70 68 Z"/>
+      <path class="bone" d="M-78 74 L-48 68 L-44 84 L-74 90 Z"/>
+      <path class="bone" d="M-82 96 L-52 90 L-48 106 L-78 112 Z"/>
+      <path class="bone" d="M-86 118 L-56 112 L-52 128 L-82 134 Z"/>
+      <path class="cable" d="M-100 26 C-118 60 -118 104 -100 140"/>
+      <path class="cable-hi" d="M-100 26 C-118 60 -118 104 -100 140"/>
+      <path class="cable" d="M-90 20 C-110 58 -110 108 -90 146"/>
+
+      <!-- шейный разъём: журнал входов -->
+      <g id="neckport">
+        <rect x="-30" y="92" width="42" height="30" rx="3" fill="#0f1319" stroke="#39424e" stroke-width="2"/>
+        <path class="hot" d="M-22 102 L2 102 M-22 110 L-4 110"/>
+        <circle cx="6" cy="112" r="3" fill="#ff3fa4"/>
+      </g>
+    </g>
+
+    <!-- ── ГОЛОВА ── -->
+    <g id="head" transform="translate(10,-128) scale(1.22)">
+      <path class="ghost" d="M0 -138 C30 -138 48 -126 58 -110 C72 -88 80 -74 86 -62
+        C90 -54 90 -50 92 -46 C98 -38 108 -30 112 -22 C115 -16 110 -8 96 -6
+        C100 -2 102 0 100 4 C104 8 102 12 98 16 C100 20 100 24 96 26
+        C96 34 94 40 92 44 C88 54 82 60 72 62 C52 70 30 74 10 74
+        C-6 72 -20 66 -30 56 C-52 48 -72 38 -88 22 C-104 4 -112 -14 -112 -34
+        C-112 -62 -102 -84 -86 -100 C-66 -122 -34 -138 0 -138 Z"/>
+
+      <path class="cavity" d="M-108 -36 C-108 -62 -98 -84 -82 -99 C-62 -119 -32 -132 2 -132
+        C30 -132 48 -120 58 -104 C70 -84 78 -66 82 -54 C60 -14 6 2 -34 -4
+        C-70 -10 -100 -16 -108 -36 Z"/>
+
+      <path class="rib" d="M-96 -44 C-92 -70 -78 -92 -58 -106"/>
+      <path class="trace" d="M-88 -46 C-84 -68 -72 -86 -56 -98"/>
+
+      <g id="brainzone" class="zone"><g id="brain">
+        <g class="shard" style="--dx:-411px; --dy:194px; --i:0"><path class="lobe lobe-f" d="M14 -116 C44 -120 68 -102 71 -74 C73 -58 67 -46 55 -38
+                                     C43 -44 27 -52 15 -62 C7 -78 9 -98 14 -116 Z"/>
+        <path class="gyrus" d="M26 -108 C40 -104 52 -94 58 -83"/>
+        <path class="gyrus" d="M20 -93 C34 -89 48 -79 55 -68"/>
+        <path class="gyrus" d="M20 -76 C32 -70 44 -61 50 -52"/></g>
+        <g class="shard" style="--dx:-75px; --dy:206px; --i:1"><path class="lobe lobe-p" d="M-40 -114 C-18 -124 -2 -122 14 -116 C9 -98 7 -78 15 -62
+                                     C1 -58 -21 -56 -38 -60 C-45 -80 -45 -99 -40 -114 Z"/>
+        <path class="gyrus" d="M-32 -106 C-21 -96 -15 -81 -15 -65"/>
+        <path class="gyrus" d="M-16 -113 C-5 -101 0 -86 0 -66"/></g>
+        <g class="shard" style="--dx:253px; --dy:200px; --i:2"><path class="lobe lobe-o" d="M-84 -56 C-82 -84 -66 -104 -40 -114 C-45 -99 -45 -80 -38 -60
+                                     C-54 -54 -72 -50 -84 -56 Z"/>
+        <path class="gyrus" d="M-73 -60 C-67 -76 -60 -92 -50 -103"/>
+        <path class="gyrus" d="M-79 -50 C-73 -66 -66 -82 -56 -95"/></g>
+        <g class="shard" style="--dx:440px; --dy:142px; --i:3"><path class="lobe lobe-t" d="M-38 -60 C-21 -56 1 -58 15 -62 C27 -52 43 -44 55 -38
+                                     C45 -20 19 -12 -7 -14 C-25 -16 -35 -30 -38 -46 Z"/>
+        <path class="gyrus" d="M-26 -42 C-8 -32 18 -28 42 -32"/>
+        <path class="gyrus" d="M-24 -28 C-6 -20 16 -18 36 -22"/></g>
+        <g class="shard" style="--dx:-279px; --dy:295px; --i:4"><path class="cereb" d="M-82 -46 C-98 -34 -98 -10 -80 -2 C-62 6 -44 2 -36 -10 C-30 -20 -38 -38 -54 -46 Z"/>
+        <path class="cerebline" d="M-90 -34 L-42 -38 M-93 -26 L-39 -28 M-92 -18 L-40 -18 M-88 -10 L-46 -8"/></g>
+        <g class="shard" style="--dx:-53px; --dy:254px; --i:5"><path class="stem" d="M-46 -16 C-42 4 -40 22 -38 38 L-14 38 C-16 20 -20 0 -24 -16 Z"/>
+        <path class="cerebline" d="M-40 2 L-20 2 M-39 14 L-19 14 M-38 26 L-18 26"/></g>
+        <g class="shard" style="--dx:200px; --dy:320px; --i:6"><ellipse class="deep" cx="-16" cy="-44" rx="15" ry="10"/></g>
+        <g class="shard" style="--dx:452px; --dy:281px; --i:7"><ellipse class="deep" cx="-2" cy="-12" rx="8" ry="6"/></g>
+      </g></g>
+
+      <path class="plate" d="M-112 -34 C-112 -62 -102 -84 -86 -100 L-74 -88
+        C-88 -73 -97 -55 -97 -35 C-97 -12 -87 8 -70 23 C-56 35 -44 46 -30 56
+        C-52 48 -72 38 -88 22 C-104 4 -112 -14 -112 -34 Z"/>
+      <path class="seam" d="M-104 -44 C-102 -20 -93 2 -78 18"/>
+
+      <g id="lid" transform="translate(-14,-26) rotate(-12)">
+        <path class="plate" d="M-86 -100 C-66 -122 -34 -138 0 -138 C30 -138 48 -126 58 -110
+                               L45 -97 C35 -111 18 -121 -2 -121 C-31 -121 -57 -108 -73 -88 Z"/>
+        <path class="seam-thin" d="M-70 -96 C-52 -112 -26 -122 0 -122"/>
+        <circle cx="-80" cy="-95" r="4" fill="#2b323b"/>
+      </g>
+      <circle cx="-92" cy="-116" r="5.5" fill="#151a21" stroke="#39424e" stroke-width="1.6"/>
+      <path class="cable" d="M-86 -104 C-94 -118 -98 -128 -102 -138"/>
+      <path class="cable-hi" d="M-86 -104 C-94 -118 -98 -128 -102 -138"/>
+
+      <g transform="translate(7,1)">
+        <path class="plate" d="M58 -110 C72 -88 80 -70 86 -58 C90 -50 90 -46 92 -42
+          C98 -34 108 -28 112 -20 C115 -14 110 -6 96 -4 C100 0 102 2 100 6
+          C104 10 102 14 98 18 L70 18 C58 6 50 -12 46 -34 C42 -60 44 -88 45 -97 Z"/>
+        <path class="seam" d="M62 -96 C70 -74 74 -52 74 -34"/>
+        <path class="seam-thin" d="M88 -44 C96 -38 104 -30 108 -22"/>
+        <path class="cavity" d="M50 -76 C63 -81 79 -76 86 -65 C79 -54 63 -50 52 -55 Z"/>
+        <ellipse class="lens" cx="68" cy="-65" rx="10" ry="7.6"/>
+        <circle cx="70.5" cy="-67.5" r="2.8" fill="#eafcff"/>
+      </g>
+
+      <g id="jawzone" class="zone"><g id="jaw" transform="translate(5,5)">
+        <path class="plate-in" d="M98 18 C100 22 100 26 96 28 C96 36 94 42 92 46
+          C88 56 82 62 72 64 C52 72 30 76 10 76 C-6 74 -20 68 -30 58 L-14 42
+          C2 52 24 54 46 50 C64 46 78 36 86 22 Z"/>
+        <path class="seam-thin" d="M-4 58 C18 60 42 56 62 46"/>
+        <path class="cavity" d="M60 27 C74 23 87 21 93 23 C91 31 83 39 69 43 C59 45 55 39 57 33 Z"/>
+        <path class="hot" d="M63 31 L89 27 M63 36 L85 32"/>
+      </g></g>
+
+      <g transform="translate(-34,-14)">
+        <path class="plate-in" d="M-16 -18 C-2 -24 12 -18 14 -4 C16 10 6 22 -8 22 C-20 22 -28 12 -26 -2 Z"/>
+        <circle r="11" fill="#0f1319" stroke="#39424e" stroke-width="2"/>
+        <circle r="6" fill="none" stroke="#2de2ff" stroke-width="1.4" opacity=".85"/>
+        <circle r="2.4" fill="#2de2ff"/>
+      </g>
+    </g>
+  </g>
+
+  <!-- ═══ ОТОРВАННАЯ РУКА ═══ -->
+  <g id="arm" transform="translate(144,536) rotate(9)">
+    <path class="ghost" d="M-4 -40 C22 -30 46 -22 66 -20 L54 60 C48 130 40 200 30 264
+      C26 292 6 308 -18 304 C-42 300 -58 280 -54 254 L-30 90 C-24 40 -16 -6 -4 -40 Z"/>
+    <path class="hot" d="M-10 -46 C14 -34 40 -26 64 -24" stroke-dasharray="5 5"/>
+    <path class="muscle" d="M-6 -34 C18 -22 44 -14 66 -12 C60 18 50 46 38 72
+      C18 60 0 44 -12 24 C-10 -2 -8 -20 -6 -34 Z"/>
+    <path class="fiber" d="M4 -22 C24 -10 46 -4 64 -2 M-2 0 C16 14 38 22 54 24"/>
+    <path class="bone" d="M14 -8 C30 2 46 6 60 6 L44 92 C26 84 12 72 4 56 Z"/>
+    <path class="plate" d="M28 66 C50 70 64 86 62 108 L38 246 C34 270 14 286 -8 282
+      C-32 278 -46 258 -42 234 L-16 96 C-12 74 8 62 28 66 Z"/>
+    <path class="seam" d="M4 116 L54 124 M-4 168 L46 176 M-12 220 L38 228"/>
+    <path class="seam-thin" d="M18 82 C38 86 50 96 54 110"/>
+    <path class="plate-in" d="M-8 286 C10 288 22 300 20 316 L14 348 C12 364 -2 374 -18 372
+      C-34 370 -44 356 -42 340 L-36 308 C-34 292 -22 284 -8 286 Z"/>
+    <path class="seam-thin" d="M-30 314 L12 320 M-32 334 L10 340"/>
+    <path class="plate-in" d="M-20 374 C-8 376 0 386 -2 398 L-8 424 C-10 436 -22 442 -34 440
+      C-46 438 -52 428 -50 416 L-44 390 C-42 378 -32 372 -20 374 Z"/>
+
+    <!-- часы на предплечье -->
+    <g id="watch">
+      <rect x="-30" y="150" width="94" height="52" rx="5" transform="rotate(-6 17 176)"
+            fill="#060e16" stroke="#2de2ff" stroke-width="2"/>
+      <g transform="rotate(-6 17 176)">
+        <text id="w-time" x="-20" y="184" fill="#2de2ff" style="font:800 24px 'Cascadia Code',Consolas,monospace">--:--</text>
+        <text id="w-date" x="-20" y="197" fill="#4d6379" style="font:8px 'Cascadia Code',Consolas,monospace">—</text>
+        <circle cx="56" cy="160" r="3.5" fill="#ff3fa4"/>
+      </g>
+    </g>
+  </g>
+
+  <!-- ═══ ПРОЕКЦИЯ ИЗ ГЛАЗА ═══ -->
+  <g id="projection">
+    <path d="M536 250 L742 200 L742 470 L536 302 Z" fill="url(#gBeam)"/>
+    <rect x="742" y="150" width="404" height="322" rx="2" class="hud"/>
+    <path d="M742 150 L1146 150 L1146 178 L742 178 Z" fill="rgba(45,226,255,.1)"/>
+    <text x="758" y="169" class="lbl" fill="#7fd8ff">П Р О Е К Ц И Я · Д А Т Ч И К И</text>
+    <g id="vitals" transform="translate(758,214)"></g>
+  </g>
+
+  <!-- ═══ ХРОНОМЕТР ═══ -->
+  <g id="clock">
+    <path class="hud" d="M40 96 L316 96 L316 216 L96 216 L74 238 L74 216 L40 216 Z"/>
+    <text x="58" y="120" class="lbl" fill="#7fd8ff">Х Р О Н О М Е Т Р</text>
+    <text id="c-time" x="58" y="176" fill="#2de2ff" style="font:800 46px 'Cascadia Code',Consolas,monospace">--:--</text>
+    <text id="c-sec" x="228" y="176" fill="#ff3fa4" style="font:800 20px 'Cascadia Code',Consolas,monospace">--</text>
+    <text id="c-date" x="58" y="200" class="lbl">—</text>
+  </g>
+
+  <!-- ═══ ПОДПИСИ ═══ -->
+  <g id="labels" transform="translate(-64,0)">
+    <path class="lead" d="M452 118 L452 86 L560 86"/>
+    <text x="568" y="90" class="lbl">М О З Г  ·  N E T B I R D</text>
+    <path class="lead" d="M556 214 L610 202"/>
+    <text x="616" y="206" class="lbl">Г Л А З · М Е Т Р И К И</text>
+    <path class="lead" d="M584 318 L640 330"/>
+    <text x="646" y="334" class="lbl">Р О Т · П Л Е Е Р</text>
+    <path class="lead" d="M470 372 L556 388"/>
+    <text x="562" y="392" class="lbl">Ш Е Я · Ж У Р Н А Л</text>
+    <path class="lead" d="M588 650 L654 638"/>
+    <text x="660" y="642" class="lbl">Г Р У Д Ь · Д Р О П</text>
+    <path class="lead" d="M614 438 L672 428"/>
+    <text x="678" y="432" class="lbl">У С Т Р О Й С Т В А</text>
+    <path class="lead" d="M244 726 L156 742"/>
+    <text x="96" y="746" class="lbl">Ч А С Ы</text>
+    <path class="lead" d="M312 528 L344 518"/>
+    <text x="110" y="492" class="lbl">Р А З Ъ Ё М  П Л Е Ч А</text>
+  </g>
+  <g id="nodes">__NODES__</g>
+</svg>
         </div>
       </div>
-
       <audio id="audio" preload="none"></audio>
-
       <script>
       (() => {
         const $ = id => document.getElementById(id);
-        const stage = $("stage"), scheme = $("scheme");
+        const scheme = $("scheme");
         let toastTimer = null;
-        const toast = text => {
-          document.querySelectorAll(".toast").forEach(t => t.remove());
-          const el = document.createElement("div");
-          el.className = "toast"; el.textContent = text;
-          document.body.appendChild(el);
-          clearTimeout(toastTimer); toastTimer = setTimeout(() => el.remove(), 2600);
+        const toast = t => {
+          document.querySelectorAll(".toast").forEach(x => x.remove());
+          const el = document.createElement("div"); el.className = "toast"; el.textContent = t;
+          document.body.appendChild(el); clearTimeout(toastTimer);
+          toastTimer = setTimeout(() => el.remove(), 2600);
         };
 
-        // ── мозг: раскол на узлы ──
         let open = false;
         const setOpen = v => {
-          open = v;
-          scheme.classList.toggle("open", v);
-          $("hint").textContent = v ? "нажми ещё раз, чтобы собрать" : "нажми на мозг";
+          open = v; scheme.classList.toggle("open", v);
+          $("hint").textContent = v ? "нажми ещё раз или Escape \u2014 собрать череп" : "мозг \u2014 узлы сети · рот \u2014 плеер";
         };
-        $("brainzone").addEventListener("click", () => setOpen(!open));
+        $("brainzone").addEventListener("click", e => { e.preventDefault(); setOpen(!open); });
         document.addEventListener("keydown", e => { if (e.key === "Escape" && open) setOpen(false); });
+        document.querySelectorAll(".ncard-btn").forEach(b => b.addEventListener("click", e => {
+          e.stopPropagation(); toast("Это витрина оформления \u2014 подключение живёт в кабинете");
+        }));
 
-        document.querySelectorAll(".ncard-btn").forEach(btn => {
-          btn.addEventListener("click", e => {
-            e.stopPropagation();
-            toast("Это витрина оформления — подключение живёт в кабинете");
-          });
-        });
-
-        // ── живой пинг ──
-        const refreshPing = async () => {
+        const ping = async () => {
           try {
-            const r = await fetch("/api/netbird/status", { credentials: "same-origin" });
-            const data = await r.json();
+            const r = await fetch("/api/netbird/status", { credentials:"same-origin" });
+            const d = await r.json();
             document.querySelectorAll("[data-ping]").forEach(el => {
-              const s = data[el.dataset.ping];
-              if (s && s.online) {
-                el.textContent = (s.latency_ms != null ? s.latency_ms + " ms" : "online");
-                el.classList.remove("off");
-              } else { el.textContent = "офлайн"; el.classList.add("off"); }
+              const s = d[el.dataset.ping];
+              if (s && s.online) { el.textContent = s.latency_ms != null ? s.latency_ms + " ms" : "в сети"; el.classList.remove("off"); }
+              else { el.textContent = "офлайн"; el.classList.add("off"); }
             });
           } catch {}
         };
-        refreshPing(); setInterval(refreshPing, 10000);
+        ping(); setInterval(ping, 10000);
 
-        // ── часы на руке ──
         const pad = n => String(n).padStart(2, "0");
-        const months = ["ЯНВ","ФЕВ","МАР","АПР","МАЯ","ИЮН","ИЮЛ","АВГ","СЕН","ОКТ","НОЯ","ДЕК"];
+        const MON = ["ЯНВ","ФЕВ","МАР","АПР","МАЯ","ИЮН","ИЮЛ","АВГ","СЕН","ОКТ","НОЯ","ДЕК"];
+        const DAY = ["ВОСКРЕСЕНЬЕ","ПОНЕДЕЛЬНИК","ВТОРНИК","СРЕДА","ЧЕТВЕРГ","ПЯТНИЦА","СУББОТА"];
+        const MONL = ["ЯНВАРЯ","ФЕВРАЛЯ","МАРТА","АПРЕЛЯ","МАЯ","ИЮНЯ","ИЮЛЯ","АВГУСТА","СЕНТЯБРЯ","ОКТЯБРЯ","НОЯБРЯ","ДЕКАБРЯ"];
         const tick = () => {
-          const d = new Date();
-          $("w-time").textContent = pad(d.getHours()) + ":" + pad(d.getMinutes());
-          $("w-sec").textContent = pad(d.getSeconds());
-          $("w-date").textContent = pad(d.getDate()) + " " + months[d.getMonth()];
+          const d = new Date(), hm = pad(d.getHours()) + ":" + pad(d.getMinutes());
+          $("c-time").textContent = hm; $("c-sec").textContent = pad(d.getSeconds());
+          $("c-date").textContent = DAY[d.getDay()] + ", " + d.getDate() + " " + MONL[d.getMonth()];
+          $("w-time").textContent = hm; $("w-date").textContent = pad(d.getDate()) + " " + MON[d.getMonth()];
         };
         tick(); setInterval(tick, 1000);
 
-        // ── метрики на грудной пластине ──
-        const vitals = $("vitals");
+        const vit = $("vitals");
         const drawVitals = async () => {
           try {
-            const r = await fetch("/api/metrics", { credentials: "same-origin" });
-            const list = (await r.json()).slice(0, 3);
-            let y = 396, out = "";
+            const list = (await (await fetch("/api/metrics", { credentials:"same-origin" })).json()).slice(0, 3);
+            let y = 0, out = "";
             list.forEach(({ name, data }) => {
-              out += `<text class="vit-host" x="516" y="${y}">${name}</text>`;
-              [["CPU", data && data.cpu], ["RAM", data && data.ram], ["DSK", data && data.disk]]
-                .forEach(([label, v], k) => {
-                  const yy = y + 11 + k * 9;
-                  const pct = Math.max(0, Math.min(100, v || 0));
-                  const cls = pct > 85 ? " bad" : pct > 60 ? " warn" : "";
-                  out += `<text class="vit-row-label" x="516" y="${yy}">${label}</text>`
-                       + `<rect class="vit-track" x="542" y="${yy - 5}" width="106" height="4"/>`
-                       + `<rect class="vit-fill${cls}" x="542" y="${yy - 5}" width="${pct * 1.06}" height="4"/>`
-                       + `<text class="vit-val" x="656" y="${yy}">${v != null ? Math.round(v) + "%" : "—"}</text>`;
-                });
-              y += 44;
+              out += `<text class="lbl" fill="#9ad9f0" y="${y}" style="letter-spacing:.08em">${name}</text>`;
+              [["CPU", data && data.cpu], ["RAM", data && data.ram], ["DSK", data && data.disk]].forEach(([k, v], j) => {
+                const yy = y + 20 + j * 16, p = Math.max(0, Math.min(100, v || 0));
+                const col = p > 85 ? "#ff5f7a" : p > 60 ? "#ffb35c" : "#2de2ff";
+                out += `<text class="lbl" y="${yy}">${k}</text>`
+                     + `<rect x="46" y="${yy - 8}" width="230" height="6" fill="rgba(255,255,255,.08)"/>`
+                     + `<rect x="46" y="${yy - 8}" width="${p * 2.3}" height="6" fill="${col}"/>`
+                     + `<text class="lbl" x="300" y="${yy}" fill="#cfe9f5" text-anchor="end">${v != null ? Math.round(v) + "%" : "\u2014"}</text>`;
+              });
+              y += 88;
             });
-            vitals.innerHTML = out;
+            vit.innerHTML = out;
           } catch {}
         };
         drawVitals(); setInterval(drawVitals, 30000);
 
-        // ── плеер на голосовом импланте ──
-        const audio = $("audio"), eq = $("eq");
-        const bars = [];
-        for (let i = 0; i < 16; i++) {
-          const b = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-          b.setAttribute("class", "eqbar");
-          b.setAttribute("x", i * 7); b.setAttribute("width", 4);
-          b.setAttribute("y", -3); b.setAttribute("height", 3);
-          eq.appendChild(b); bars.push(b);
-        }
+        const audio = $("audio");
         let tracks = [], idx = -1;
-        fetch("/api/music", { credentials: "same-origin" })
-          .then(r => r.json()).then(d => { tracks = d.tracks.sort(() => Math.random() - .5); })
-          .catch(() => {});
-
-        const play = i => {
-          if (!tracks.length) { toast("Треков пока нет — добавь их в кабинете"); return; }
+        fetch("/api/music", { credentials:"same-origin" }).then(r => r.json())
+          .then(d => { tracks = d.tracks.sort(() => Math.random() - .5); }).catch(() => {});
+        const playAt = i => {
+          if (!tracks.length) { toast("Треков нет \u2014 добавь их в кабинете"); return; }
           idx = (i + tracks.length) % tracks.length;
           audio.src = "/api/music/file/" + encodeURIComponent(tracks[idx].id);
           audio.play().catch(() => {});
-          $("v-title").textContent = tracks[idx].title.slice(0, 22);
-          $("v-artist").textContent = (tracks[idx].artist || "без исполнителя").slice(0, 24);
+          toast(((tracks[idx].artist ? tracks[idx].artist + " \u2014 " : "") + tracks[idx].title).slice(0, 46));
         };
-        $("v-play").addEventListener("click", e => {
-          e.stopPropagation();
-          if (audio.paused) { idx < 0 ? play(0) : audio.play().catch(() => {}); }
+        const jaw = $("jawzone");
+        if (jaw) jaw.addEventListener("click", e => {
+          e.preventDefault(); e.stopPropagation();
+          if (audio.paused) { idx < 0 ? playAt(0) : audio.play().catch(() => {}); }
           else audio.pause();
         });
-        audio.addEventListener("ended", () => play(idx + 1));
-        audio.addEventListener("play",  () => $("v-icon").setAttribute("d", "M-5 -6 L-1 -6 L-1 6 L-5 6 Z M2 -6 L6 -6 L6 6 L2 6 Z"));
-        audio.addEventListener("pause", () => $("v-icon").setAttribute("d", "M-4 -6 L7 0 L-4 6 Z"));
-
-        const animate = () => {
-          const on = !audio.paused;
-          bars.forEach(b => {
-            const h = on ? 3 + Math.random() * 17 : 3;
-            b.setAttribute("height", h); b.setAttribute("y", -h);
-          });
-          setTimeout(animate, on ? 90 : 400);
-        };
-        animate();
+        audio.addEventListener("ended", () => playAt(idx + 1));
+        audio.addEventListener("play",  () => scheme.classList.add("mouth"));
+        audio.addEventListener("pause", () => scheme.classList.remove("mouth"));
       })();
       </script>
     </body>
     </html>
     """
-    return html
+    return html.replace("__NODES__", "".join(cards))
 
 
 @app.get("/drop")
