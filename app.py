@@ -2149,7 +2149,7 @@ def cabinet():
           </section>
 
           <!-- Запомненные устройства — логотип справа -->
-          <section class="panel panel--right" style="--accent:#63f5ad; margin-bottom:32px">
+          <section class="panel panel--right" style="--accent:#63f5ad">
             <button class="panel-head" id="devices-toggle" type="button" aria-expanded="false" aria-controls="devices-body">
               <span class="panel-logo">
                 <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
@@ -2179,6 +2179,25 @@ def cabinet():
               <div id="devices-list"><p class="widget-empty">Загрузка…</p></div>
             </div>
           </section>
+
+          <!-- Тестовые темы: витрина оформления -->
+          <a class="panel panel--right" href="/themes" style="--accent:#ff3fa4; margin-bottom:32px">
+            <span class="panel-head">
+              <span class="panel-logo">
+                <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
+                  <path d="M24 6c8 0 13 5.5 13 13v7c0 3.5-2 5.5-4.5 6.5L31 38H17l-1.5-5.5C13 31.5 11 29.5 11 26v-7C11 11.5 16 6 24 6Z" stroke="#ff3fa4" stroke-width="2.4"/>
+                  <path d="M24 14v18M17 20h14M18 27h12" stroke="#2de2ff" stroke-width="1.8" stroke-linecap="round"/>
+                  <circle cx="24" cy="14" r="2.6" fill="#2de2ff"/>
+                  <path d="M17 41h14" stroke="#ff3fa4" stroke-width="2.4" stroke-linecap="round"/>
+                </svg>
+              </span>
+              <span class="panel-text">
+                <span class="panel-title">Тестовые темы</span>
+                <span class="panel-sub">разделы как импланты · киберпанк</span>
+              </span>
+              <span class="panel-arrow panel-arrow--go" aria-hidden="true">⟶</span>
+            </span>
+          </a>
 
         </div>
 
@@ -3689,6 +3708,399 @@ def share_target_fallback():
             _drop_write_index()
         saved += 1
     return redirect(url_for("drop_page") + ("?saved=%d" % saved if saved else ""))
+
+
+@app.get("/themes")
+@login_required
+def themes_page():
+    """Витрина оформления: разделы кабинета как импланты на схеме тела.
+    Только фронтенд — данные берутся из уже существующих эндпоинтов."""
+    hex_starts = [(576, 118), (624, 118), (552, 146), (600, 146),
+                  (648, 146), (576, 174), (624, 174), (600, 202)]
+    cols, rows = [64, 338, 612, 886], [210, 352]
+
+    shards, cards = [], []
+    for i, device in enumerate(NETBIRD_DEVICES[:8]):
+        sx, sy = hex_starts[i]
+        cx, cy = cols[i % 4] + 36, rows[i // 4] + 40
+        kind = ("ssh" if device.get("ssh_enabled") else
+                "rdp" if device.get("rdp_enabled") else
+                "vnc" if device.get("vnc_enabled") else "—")
+        shards.append(
+            f'<g class="shard" style="--dx:{cx - sx}px; --dy:{cy - sy}px; --i:{i}">'
+            f'<path transform="translate({sx},{sy})" class="shard-hex"'
+            f' d="M18 0 9 15.6-9 15.6-18 0-9-15.6 9-15.6Z"/>'
+            f'<path transform="translate({sx},{sy})" class="shard-core"'
+            f' d="M8 0 4 6.9-4 6.9-8 0-4-6.9 4-6.9Z"/></g>'
+        )
+        left, top = cols[i % 4], rows[i // 4]
+        cards.append(
+            f'<g class="ncard" style="--i:{i}" data-ip="{device["ip"]}" data-kind="{kind}">'
+            f'<path class="ncard-plate" d="M{left} {top + 12} L{left + 12} {top} '
+            f'L{left + 250} {top} L{left + 250} {top + 68} L{left + 238} {top + 80} '
+            f'L{left} {top + 80} Z"/>'
+            f'<text class="ncard-name" x="{left + 66}" y="{top + 28}">{device["name"]}</text>'
+            f'<text class="ncard-ip" x="{left + 66}" y="{top + 45}">{device["ip"]}</text>'
+            f'<text class="ncard-ping" x="{left + 240}" y="{top + 28}" text-anchor="end"'
+            f' data-ping="{device["ip"]}">— — —</text>'
+            f'<g class="ncard-btn" data-connect="{device["ip"]}">'
+            f'<rect x="{left + 66}" y="{top + 54}" width="104" height="18" rx="1"/>'
+            f'<text x="{left + 118}" y="{top + 67}" text-anchor="middle">ПОДКЛЮЧИТЬСЯ</text>'
+            f'</g>'
+            f'<text class="ncard-kind" x="{left + 240}" y="{top + 67}" text-anchor="end">{kind.upper()}</text>'
+            f'</g>'
+        )
+
+    html = """
+    <!DOCTYPE html>
+    <html lang="ru">
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <meta name="robots" content="noindex, nofollow">
+      <title>Тестовые темы · vitazgio.ru</title>
+      <style>
+        * { box-sizing: border-box; }
+        body { margin: 0; min-height: 100svh; overflow-x: hidden; color: #cfe9f5;
+               font-family: "Cascadia Code", Consolas, monospace; background: #05070d; }
+        [hidden] { display: none !important; }
+
+        .stage { position: relative; min-height: 100svh; padding: 18px clamp(14px, 3vw, 40px) 40px;
+                 background:
+                   radial-gradient(ellipse 70% 55% at 50% 42%, rgba(45,226,255,.09), transparent 70%),
+                   radial-gradient(ellipse 50% 40% at 82% 78%, rgba(255,63,164,.07), transparent 70%),
+                   linear-gradient(#05070d, #070a14); }
+        /* сетка-подложка и развёртка поверх всего */
+        .stage::before { content: ""; position: fixed; inset: 0; pointer-events: none; opacity: .5;
+              background-image: linear-gradient(rgba(45,226,255,.05) 1px, transparent 1px),
+                                linear-gradient(90deg, rgba(45,226,255,.05) 1px, transparent 1px);
+              background-size: 44px 44px; mask-image: radial-gradient(ellipse 75% 65% at 50% 45%, #000, transparent 78%); }
+        .stage::after { content: ""; position: fixed; inset: 0; pointer-events: none; opacity: .55;
+              background: repeating-linear-gradient(180deg, rgba(0,0,0,.28) 0 1px, transparent 1px 3px); }
+
+        .bar { position: relative; z-index: 3; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+        .back { width: 40px; height: 40px; flex: none; display: grid; place-items: center; color: #2de2ff;
+                text-decoration: none; border: 1px solid rgba(45,226,255,.32); border-radius: 50%;
+                background: rgba(45,226,255,.07); }
+        .back svg { width: 18px; height: 18px; display: block; }
+        .back:hover { color: #fff; border-color: #2de2ff; background: rgba(45,226,255,.18); }
+        .bar h1 { margin: 0; font-size: clamp(1.1rem, 2.4vw, 1.7rem); font-weight: 700; letter-spacing: .02em; color: #eaf6ff; }
+        .bar h1 b { color: #ff3fa4; font-weight: 700; }
+        .bar .hint { margin-left: auto; color: #4d5b73; font-size: .68rem; letter-spacing: .16em; text-transform: uppercase; }
+
+        .frame { position: relative; z-index: 2; margin: 10px auto 0; max-width: 1240px; }
+        svg.scheme { width: 100%; height: auto; display: block; overflow: visible; }
+
+        /* ── фигура ── */
+        .body-line { fill: none; stroke: rgba(120,200,235,.42); stroke-width: 1.6; }
+        .body-fill { fill: rgba(20,44,66,.34); stroke: rgba(120,200,235,.5); stroke-width: 1.6; }
+        .body-soft { fill: rgba(45,226,255,.05); stroke: rgba(45,226,255,.22); stroke-width: 1; }
+        .tick { stroke: rgba(45,226,255,.3); stroke-width: 1; }
+        .scheme text { font-family: "Cascadia Code", Consolas, monospace; }
+        .cap { fill: #46617a; font-size: 9px; letter-spacing: .22em; }
+
+        /* нервные линии — по ним бежит импульс */
+        .nerve { fill: none; stroke: rgba(45,226,255,.22); stroke-width: 1.2; }
+        .pulse { fill: none; stroke: #2de2ff; stroke-width: 2; stroke-linecap: round;
+                 stroke-dasharray: 3 190; filter: drop-shadow(0 0 4px #2de2ff);
+                 animation: run 3.4s linear infinite; }
+        .pulse.p2 { stroke: #ff3fa4; filter: drop-shadow(0 0 4px #ff3fa4); animation-duration: 4.6s; animation-delay: -1.2s; }
+        .pulse.p3 { animation-duration: 5.2s; animation-delay: -2.6s; }
+        @keyframes run { from { stroke-dashoffset: 193; } to { stroke-dashoffset: 0; } }
+
+        /* активные зоны */
+        .zone { cursor: pointer; }
+        .zone .halo { fill: transparent; stroke: rgba(45,226,255,0); stroke-width: 1.2; transition: stroke .25s, fill .25s; }
+        .zone:hover .halo { stroke: rgba(45,226,255,.55); fill: rgba(45,226,255,.05); }
+        .zone .tag { fill: #2de2ff; font-size: 9.5px; letter-spacing: .2em; opacity: .55; transition: opacity .25s; }
+        .zone:hover .tag { opacity: 1; }
+
+        /* мозг */
+        .shard-hex { fill: rgba(255,63,164,.14); stroke: #ff3fa4; stroke-width: 1.4; }
+        .shard-core { fill: rgba(45,226,255,.5); stroke: none; }
+        .shard { transition: transform .78s cubic-bezier(.2,.9,.25,1); transition-delay: calc(var(--i) * 45ms); }
+        .brainpack { animation: bob 5s ease-in-out infinite; transform-origin: 600px 160px; }
+        @keyframes bob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+        .open .shard { transform: translate(var(--dx), var(--dy)); }
+        .open .brainpack { animation: none; }
+        .open .figure { opacity: .18; filter: blur(1.4px); }
+        .figure { transition: opacity .6s, filter .6s; }
+
+        /* карточки узлов */
+        .ncard { opacity: 0; pointer-events: none; transform: translateY(14px);
+                 transition: opacity .45s, transform .45s; transition-delay: calc(var(--i) * 45ms + .28s); }
+        .open .ncard { opacity: 1; pointer-events: auto; transform: none; }
+        .ncard-plate { fill: rgba(9,18,30,.92); stroke: rgba(45,226,255,.4); stroke-width: 1.2; }
+        .ncard:hover .ncard-plate { stroke: #2de2ff; fill: rgba(14,28,46,.95); }
+        .ncard-name { fill: #eaf6ff; font-size: 13px; font-weight: 700; }
+        .ncard-ip   { fill: #4d6a86; font-size: 10px; }
+        .ncard-ping { fill: #63f5ad; font-size: 12px; font-weight: 700; }
+        .ncard-ping.off { fill: #ff5f7a; }
+        .ncard-kind { fill: #3f5a72; font-size: 9px; letter-spacing: .16em; }
+        .ncard-btn rect { fill: rgba(45,226,255,.1); stroke: rgba(45,226,255,.45); stroke-width: 1; cursor: pointer; }
+        .ncard-btn text { fill: #2de2ff; font-size: 8.5px; letter-spacing: .12em; pointer-events: none; }
+        .ncard-btn:hover rect { fill: #2de2ff; }
+        .ncard-btn:hover text { fill: #04121c; }
+
+        /* часы на оторванной руке */
+        .watch-face { fill: rgba(4,12,20,.95); stroke: #2de2ff; stroke-width: 1.4; }
+        .watch-time { fill: #2de2ff; font-size: 20px; font-weight: 800; letter-spacing: -.02em; }
+        .watch-sec  { fill: #ff3fa4; font-size: 10px; font-weight: 700; }
+        .watch-date { fill: #46617a; font-size: 7.5px; letter-spacing: .18em; }
+        .severed { stroke: #ff3fa4; stroke-width: 1.6; fill: none; stroke-dasharray: 4 4; opacity: .8; }
+        .drip { fill: #ff3fa4; opacity: .5; animation: drip 3.2s ease-in infinite; }
+        @keyframes drip { 0%,70% { transform: translateY(0); opacity: 0; } 80% { opacity: .6; } 100% { transform: translateY(16px); opacity: 0; } }
+
+        /* голосовой имплант — плеер */
+        .voice-box { fill: rgba(6,16,26,.94); stroke: rgba(255,63,164,.55); stroke-width: 1.3; }
+        .voice-title { fill: #eaf6ff; font-size: 10px; font-weight: 700; }
+        .voice-sub { fill: #46617a; font-size: 8px; }
+        .eqbar { fill: #ff3fa4; transition: height .12s, y .12s; }
+        .vbtn { cursor: pointer; }
+        .vbtn circle { fill: rgba(255,63,164,.14); stroke: #ff3fa4; stroke-width: 1.2; }
+        .vbtn:hover circle { fill: #ff3fa4; }
+        .vbtn path { fill: #ff3fa4; }
+        .vbtn:hover path { fill: #04121c; }
+
+        /* грудная пластина — метрики */
+        .vit-row-label { fill: #46617a; font-size: 8px; letter-spacing: .1em; }
+        .vit-track { fill: rgba(255,255,255,.07); }
+        .vit-fill { fill: #2de2ff; transition: width .5s; }
+        .vit-fill.warn { fill: #ffb35c; }
+        .vit-fill.bad { fill: #ff5f7a; }
+        .vit-val { fill: #cfe9f5; font-size: 8px; }
+        .vit-host { fill: #7fd8ff; font-size: 9px; letter-spacing: .1em; }
+
+        .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 9;
+                 padding: 10px 18px; color: #04121c; font-size: .74rem; background: #2de2ff; }
+      </style>
+    </head>
+    <body>
+      <div class="stage" id="stage">
+        <div class="bar">
+          <a class="back" href="/cabinet" aria-label="Назад в кабинет">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M19 12H5m0 0 6-6m-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </a>
+          <h1>ТЕСТОВЫЕ ТЕМЫ · <b>ИМПЛАНТЫ</b></h1>
+          <span class="hint" id="hint">нажми на мозг</span>
+        </div>
+
+        <div class="frame">
+        <svg class="scheme" viewBox="0 0 1200 640" xmlns="http://www.w3.org/2000/svg" id="scheme">
+
+          <g class="figure" id="figure">
+            <!-- нервные магистрали -->
+            <path class="nerve" id="n1" d="M600 250 C600 300 560 320 560 380"/>
+            <path class="pulse"      d="M600 250 C600 300 560 320 560 380"/>
+            <path class="nerve" id="n2" d="M600 250 C600 300 645 320 645 380"/>
+            <path class="pulse p2"   d="M600 250 C600 300 645 320 645 380"/>
+            <path class="nerve" d="M520 300 C420 320 330 340 300 300"/>
+            <path class="pulse p3" d="M520 300 C420 320 330 340 300 300"/>
+
+            <!-- торс -->
+            <path class="body-fill" d="M600 268 C660 268 700 292 716 330 L742 470 C748 508 736 540 706 556 L494 556 C464 540 452 508 458 470 L484 330 C500 292 540 268 600 268 Z"/>
+            <path class="body-soft" d="M600 268 C640 268 664 282 676 302 L664 316 C648 300 626 292 600 292 C574 292 552 300 536 316 L524 302 C536 282 560 268 600 268 Z"/>
+            <path class="body-line" d="M600 300 L600 556 M520 350 L680 350 M512 400 L688 400"/>
+
+            <!-- шея -->
+            <path class="body-fill" d="M574 232 L626 232 L626 270 L574 270 Z"/>
+
+            <!-- череп -->
+            <path class="body-fill" d="M600 62 C654 62 686 96 686 148 L686 186 C686 208 672 222 654 228 L644 254 L556 254 L546 228 C528 222 514 208 514 186 L514 148 C514 96 546 62 600 62 Z"/>
+            <path class="body-line" d="M556 254 L556 232 M644 254 L644 232 M514 176 L686 176"/>
+            <path class="tick" d="M524 200 L544 200 M656 200 L676 200"/>
+
+            <!-- мозг: зона -->
+            <g class="zone" id="brainzone">
+              <path class="halo" d="M528 84 C528 62 672 62 672 84 L672 214 C672 234 528 234 528 214 Z"/>
+              <g class="brainpack">""" + "".join(shards) + """</g>
+              <text class="tag" x="600" y="46" text-anchor="middle">N E T B I R D</text>
+            </g>
+
+            <!-- голосовой имплант -->
+            <g class="zone" id="voicezone">
+              <path class="halo" d="M646 236 L860 236 L860 330 L646 330 Z"/>
+              <path class="body-line" d="M626 252 L700 252"/>
+              <rect class="voice-box" x="700" y="238" width="158" height="86" rx="2"/>
+              <text class="voice-sub" x="712" y="254">ГОЛОСОВОЙ МОДУЛЬ</text>
+              <text class="voice-title" id="v-title" x="712" y="272">— тишина —</text>
+              <text class="voice-sub" id="v-artist" x="712" y="286">плеер выключен</text>
+              <g id="eq" transform="translate(712,316)"></g>
+              <g class="vbtn" id="v-play" transform="translate(836,300)">
+                <circle r="13"/>
+                <path id="v-icon" d="M-4 -6 L7 0 L-4 6 Z"/>
+              </g>
+              <text class="tag" x="700" y="230">П Л Е Е Р</text>
+            </g>
+
+            <!-- грудная пластина: метрики -->
+            <g class="zone" id="vitalzone">
+              <path class="halo" d="M496 356 L704 356 L704 512 L496 512 Z"/>
+              <rect class="voice-box" x="504" y="364" width="192" height="140" rx="2" style="stroke:rgba(45,226,255,.5)"/>
+              <text class="voice-sub" x="516" y="380">ЖИЗНЕННЫЕ ПОКАЗАТЕЛИ</text>
+              <g id="vitals"></g>
+              <text class="tag" x="504" y="352">М Е Т Р И К И</text>
+            </g>
+
+            <!-- оторванная рука с часами -->
+            <g class="zone" id="armzone">
+              <path class="halo" d="M120 250 L330 250 L330 560 L120 560 Z"/>
+              <path class="severed" d="M262 268 L318 288"/>
+              <circle class="drip" cx="286" cy="282" r="2.4"/>
+              <circle class="drip" cx="292" cy="286" r="1.8" style="animation-delay:-1.6s"/>
+              <path class="body-fill" d="M268 274 C300 286 306 316 292 344 L262 404 C250 428 226 434 208 420 C190 406 188 382 200 360 L238 292 C244 280 256 270 268 274 Z"/>
+              <path class="body-fill" d="M206 414 C226 424 232 448 222 470 L200 512 C192 530 174 536 160 528 C146 520 142 502 150 486 L176 434 C184 418 196 410 206 414 Z"/>
+              <path class="body-line" d="M244 300 C258 310 262 328 254 344 M186 500 L206 510"/>
+              <path class="body-fill" d="M156 528 C168 534 172 548 166 560 L150 588 C144 600 130 604 120 598 C110 592 108 578 114 568 L132 538 C138 528 148 524 156 528 Z"/>
+              <rect class="watch-face" x="112" y="426" width="126" height="66" rx="3" transform="rotate(-24 175 459)"/>
+              <g transform="rotate(-24 175 459)">
+                <text class="watch-time" id="w-time" x="124" y="460">--:--</text>
+                <text class="watch-sec"  id="w-sec"  x="196" y="460">--</text>
+                <text class="watch-date" id="w-date" x="124" y="478">—</text>
+              </g>
+              <text class="tag" x="128" y="416">Ч А С Ы</text>
+              <text class="cap" x="128" y="612">МОДУЛЬ ОТСОЕДИНЁН</text>
+            </g>
+          </g>
+
+          <!-- карточки узлов -->
+          <g id="nodes">""" + "".join(cards) + """</g>
+        </svg>
+        </div>
+      </div>
+
+      <audio id="audio" preload="none"></audio>
+
+      <script>
+      (() => {
+        const $ = id => document.getElementById(id);
+        const stage = $("stage"), scheme = $("scheme");
+        let toastTimer = null;
+        const toast = text => {
+          document.querySelectorAll(".toast").forEach(t => t.remove());
+          const el = document.createElement("div");
+          el.className = "toast"; el.textContent = text;
+          document.body.appendChild(el);
+          clearTimeout(toastTimer); toastTimer = setTimeout(() => el.remove(), 2600);
+        };
+
+        // ── мозг: раскол на узлы ──
+        let open = false;
+        const setOpen = v => {
+          open = v;
+          scheme.classList.toggle("open", v);
+          $("hint").textContent = v ? "нажми ещё раз, чтобы собрать" : "нажми на мозг";
+        };
+        $("brainzone").addEventListener("click", () => setOpen(!open));
+        document.addEventListener("keydown", e => { if (e.key === "Escape" && open) setOpen(false); });
+
+        document.querySelectorAll(".ncard-btn").forEach(btn => {
+          btn.addEventListener("click", e => {
+            e.stopPropagation();
+            toast("Это витрина оформления — подключение живёт в кабинете");
+          });
+        });
+
+        // ── живой пинг ──
+        const refreshPing = async () => {
+          try {
+            const r = await fetch("/api/netbird/status", { credentials: "same-origin" });
+            const data = await r.json();
+            document.querySelectorAll("[data-ping]").forEach(el => {
+              const s = data[el.dataset.ping];
+              if (s && s.online) {
+                el.textContent = (s.latency_ms != null ? s.latency_ms + " ms" : "online");
+                el.classList.remove("off");
+              } else { el.textContent = "офлайн"; el.classList.add("off"); }
+            });
+          } catch {}
+        };
+        refreshPing(); setInterval(refreshPing, 10000);
+
+        // ── часы на руке ──
+        const pad = n => String(n).padStart(2, "0");
+        const months = ["ЯНВ","ФЕВ","МАР","АПР","МАЯ","ИЮН","ИЮЛ","АВГ","СЕН","ОКТ","НОЯ","ДЕК"];
+        const tick = () => {
+          const d = new Date();
+          $("w-time").textContent = pad(d.getHours()) + ":" + pad(d.getMinutes());
+          $("w-sec").textContent = pad(d.getSeconds());
+          $("w-date").textContent = pad(d.getDate()) + " " + months[d.getMonth()];
+        };
+        tick(); setInterval(tick, 1000);
+
+        // ── метрики на грудной пластине ──
+        const vitals = $("vitals");
+        const drawVitals = async () => {
+          try {
+            const r = await fetch("/api/metrics", { credentials: "same-origin" });
+            const list = (await r.json()).slice(0, 3);
+            let y = 396, out = "";
+            list.forEach(({ name, data }) => {
+              out += `<text class="vit-host" x="516" y="${y}">${name}</text>`;
+              [["CPU", data && data.cpu], ["RAM", data && data.ram], ["DSK", data && data.disk]]
+                .forEach(([label, v], k) => {
+                  const yy = y + 11 + k * 9;
+                  const pct = Math.max(0, Math.min(100, v || 0));
+                  const cls = pct > 85 ? " bad" : pct > 60 ? " warn" : "";
+                  out += `<text class="vit-row-label" x="516" y="${yy}">${label}</text>`
+                       + `<rect class="vit-track" x="542" y="${yy - 5}" width="106" height="4"/>`
+                       + `<rect class="vit-fill${cls}" x="542" y="${yy - 5}" width="${pct * 1.06}" height="4"/>`
+                       + `<text class="vit-val" x="656" y="${yy}">${v != null ? Math.round(v) + "%" : "—"}</text>`;
+                });
+              y += 44;
+            });
+            vitals.innerHTML = out;
+          } catch {}
+        };
+        drawVitals(); setInterval(drawVitals, 30000);
+
+        // ── плеер на голосовом импланте ──
+        const audio = $("audio"), eq = $("eq");
+        const bars = [];
+        for (let i = 0; i < 16; i++) {
+          const b = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+          b.setAttribute("class", "eqbar");
+          b.setAttribute("x", i * 7); b.setAttribute("width", 4);
+          b.setAttribute("y", -3); b.setAttribute("height", 3);
+          eq.appendChild(b); bars.push(b);
+        }
+        let tracks = [], idx = -1;
+        fetch("/api/music", { credentials: "same-origin" })
+          .then(r => r.json()).then(d => { tracks = d.tracks.sort(() => Math.random() - .5); })
+          .catch(() => {});
+
+        const play = i => {
+          if (!tracks.length) { toast("Треков пока нет — добавь их в кабинете"); return; }
+          idx = (i + tracks.length) % tracks.length;
+          audio.src = "/api/music/file/" + encodeURIComponent(tracks[idx].id);
+          audio.play().catch(() => {});
+          $("v-title").textContent = tracks[idx].title.slice(0, 22);
+          $("v-artist").textContent = (tracks[idx].artist || "без исполнителя").slice(0, 24);
+        };
+        $("v-play").addEventListener("click", e => {
+          e.stopPropagation();
+          if (audio.paused) { idx < 0 ? play(0) : audio.play().catch(() => {}); }
+          else audio.pause();
+        });
+        audio.addEventListener("ended", () => play(idx + 1));
+        audio.addEventListener("play",  () => $("v-icon").setAttribute("d", "M-5 -6 L-1 -6 L-1 6 L-5 6 Z M2 -6 L6 -6 L6 6 L2 6 Z"));
+        audio.addEventListener("pause", () => $("v-icon").setAttribute("d", "M-4 -6 L7 0 L-4 6 Z"));
+
+        const animate = () => {
+          const on = !audio.paused;
+          bars.forEach(b => {
+            const h = on ? 3 + Math.random() * 17 : 3;
+            b.setAttribute("height", h); b.setAttribute("y", -h);
+          });
+          setTimeout(animate, on ? 90 : 400);
+        };
+        animate();
+      })();
+      </script>
+    </body>
+    </html>
+    """
+    return html
 
 
 @app.get("/drop")
