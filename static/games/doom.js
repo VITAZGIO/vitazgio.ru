@@ -1322,7 +1322,9 @@
       var turn = 0;
       if (keys.ArrowLeft || keys.q) turn -= 1;
       if (keys.ArrowRight) turn += 1;
-      turn += stick.x;
+      // Ручка крутит мягче клавиш: на полный отклон приходится 60% скорости,
+      // иначе от лёгкого наклона большим пальцем разворачивает слишком резко.
+      turn += stick.x * 0.6;
       p.dir += turn * 2.6 * sec + mouseDX;
       mouseDX = 0;
 

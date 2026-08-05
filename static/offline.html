@@ -34,6 +34,11 @@
       background: linear-gradient(90deg, #2de2ff, #7df9ff); cursor: pointer;
     }
     button.ghost { color: #bfe6f5; background: transparent; border: 1px solid rgba(45,226,255,.3); }
+    .pads { width: min(760px, 100%); }
+    .pad { flex: 1; min-height: 58px; font-size: .82rem; touch-action: none; }
+    .pad.on { filter: brightness(.8); transform: translateY(2px); }
+    /* На мышке эти кнопки не нужны: там есть пробел и стрелка вниз. */
+    @media (hover: hover) and (pointer: fine) { .pads { display: none; } }
     .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
            background: #ff6b81; margin-right: 8px; animation: pulse 1.6s ease-in-out infinite; }
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
@@ -45,7 +50,11 @@
 
   <div class="frame"><canvas id="game" width="760" height="240"></canvas></div>
 
-  <div class="hint" id="hint">ПРОБЕЛ ИЛИ ТЫК ПО ЭКРАНУ — ПРЫЖОК · ВНИЗ — ПРИГНУТЬСЯ</div>
+  <div class="hint" id="hint">ТЫК ПО ЭКРАНУ ИЛИ ПРОБЕЛ — ПРЫЖОК · ЗАЖАТЬ «ПРИГНУТЬСЯ» ИЛИ ↓ — ПОД ПТИЦУ</div>
+  <div class="row pads">
+    <button id="jump" class="pad" type="button">Прыжок</button>
+    <button id="duck" class="pad ghost" type="button">Пригнуться</button>
+  </div>
   <div class="row">
     <button id="retry" type="button">Проверить связь</button>
     <button id="restart" class="ghost" type="button">Начать заново</button>
@@ -62,13 +71,18 @@
   var best = 0;
   try { best = parseInt(localStorage.getItem("vitaz-fox-best") || "0", 10) || 0; } catch (e) {}
 
+  // Подобрано так, чтобы лиса взлетала примерно на высоту куста и
+  // приземлялась за ~0.75 секунды: успеваешь увидеть следующее препятствие.
+  var START_SPEED = 4.6, JUMP_V = -10.6, GRAVITY = 0.72;
+
   var fox, obstacles, clouds, speed, score, over, started, groundShift, raf, last;
+  var duckHeld = false;
 
   function reset() {
     fox = { x: 78, y: GROUND, vy: 0, onGround: true, duck: false, run: 0, blink: 0 };
     obstacles = [];
     clouds = [{ x: 200, y: 50, s: 1 }, { x: 520, y: 78, s: .7 }];
-    speed = 6.2;
+    speed = START_SPEED;
     score = 0;
     over = false;
     started = false;
@@ -216,7 +230,10 @@
   function spawn() {
     var roll = Math.random();
     if (roll < 0.18 && score > 260) {
-      obstacles.push({ kind: "bird", x: W + 40, w: 26, h: 54 + Math.random() * 26 });
+      // Высота подобрана по росту лисы: стоящая (30 px) в птицу упирается,
+      // пригнувшаяся (20 px) проходит под ней. Раньше птицы летали выше
+      // головы вообще всегда, и приседание было бесполезным.
+      obstacles.push({ kind: "bird", x: W + 40, w: 26, h: 38 + Math.random() * 6 });
     } else if (roll < 0.55) {
       obstacles.push({ kind: "rock", x: W + 40, w: 22 + Math.random() * 14, h: 20 + Math.random() * 14 });
     } else {
@@ -240,16 +257,18 @@
   function jump() {
     if (over) { reset(); started = true; return; }
     started = true;
-    if (fox.onGround) { fox.vy = -12.4; fox.onGround = false; }
+    if (fox.onGround) { fox.vy = JUMP_V; fox.onGround = false; }
   }
 
   function update(dt) {
     if (!started || over) return;
     var k = dt / 16.7;
     score += 0.28 * k;
-    speed = 6.2 + Math.min(7, score / 90);
+    // Стартуем медленно и разгоняемся долго: раньше уже к третьему прыжку
+    // было не успеть среагировать.
+    speed = START_SPEED + Math.min(6, score / 150);
 
-    fox.vy += 0.62 * k;
+    fox.vy += GRAVITY * k;
     fox.y += fox.vy * k;
     if (fox.y >= GROUND) { fox.y = GROUND; fox.vy = 0; fox.onGround = true; }
     if (fox.duck && !fox.onGround) fox.vy += 0.5 * k;   // приседая, падаем быстрее
@@ -258,7 +277,10 @@
 
     groundShift = (groundShift + speed * k) % 40;
 
-    if (!obstacles.length || obstacles[obstacles.length - 1].x < W - (150 + Math.random() * 240)) {
+    // Промежуток считаем во времени, а не в пикселях: иначе с разгоном
+    // препятствия сами собой сбиваются в кучу.
+    var gapPx = speed * (58 + Math.random() * 42);
+    if (!obstacles.length || obstacles[obstacles.length - 1].x < W - gapPx) {
       spawn();
     }
     for (var i = obstacles.length - 1; i >= 0; i--) {
@@ -362,6 +384,33 @@
   });
   canvas.addEventListener("touchstart", function (e) { jump(); e.preventDefault(); }, { passive: false });
   canvas.addEventListener("mousedown", function () { jump(); });
+
+  // Кнопка «пригнуться» работает по удержанию: отпустил — лиса разогнулась.
+  // Пальцем это надёжнее клавиши: экранной стрелки вниз на телефоне нет.
+  function bindHold(el, onDown, onUp) {
+    var held = false;
+    function down(e) {
+      if (e) e.preventDefault();
+      if (held) return;
+      held = true; el.classList.add("on"); onDown();
+    }
+    function up(e) {
+      if (e) e.preventDefault();
+      if (!held) return;
+      held = false; el.classList.remove("on"); if (onUp) onUp();
+    }
+    el.addEventListener("touchstart", down, { passive: false });
+    el.addEventListener("touchend", up);
+    el.addEventListener("touchcancel", up);
+    el.addEventListener("mousedown", down);
+    el.addEventListener("mouseup", up);
+    el.addEventListener("mouseleave", up);
+  }
+
+  bindHold(document.getElementById("jump"), jump);
+  bindHold(document.getElementById("duck"),
+           function () { fox.duck = true; },
+           function () { fox.duck = false; });
 
   document.getElementById("restart").addEventListener("click", function () { reset(); started = true; });
   document.getElementById("retry").addEventListener("click", function () {
