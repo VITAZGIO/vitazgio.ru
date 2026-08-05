@@ -7,3 +7,7 @@ drop_data/
 data/
 pc_shutdown_key*
 ssh_host_key*
+
+# Личные настройки Claude Code: в них попадают команды целиком, вместе с
+# паролями, которыми их запускали. В общий репозиторий им нельзя.
+.claude/settings.local.json

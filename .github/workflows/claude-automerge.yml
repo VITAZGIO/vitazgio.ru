@@ -1,0 +1,66 @@
+name: Claude auto-merge
+
+# Ветки claude/** сливаются в main и уезжают на сервер сами, без ручного
+# слияния. Ставится один раз, дальше цепочка такая:
+#   пуш в claude/** → проверка синтаксиса → слияние в main → деплой.
+#
+# Как остановить автоматику:
+#   · разово — написать [hold] в сообщении коммита, тогда ветка просто ляжет
+#     в репозиторий и будет ждать ручного слияния;
+#   · насовсем — удалить этот файл или выключить workflow в Actions.
+
+on:
+  push:
+    branches:
+      - "claude/**"
+
+permissions:
+  contents: write
+
+# Две ветки одновременно в main не вливаем: второй запуск подождёт первого,
+# иначе push отлетит с «non-fast-forward».
+concurrency:
+  group: claude-automerge
+  cancel-in-progress: false
+
+jobs:
+  merge:
+    runs-on: self-hosted
+    if: ${{ !contains(github.event.head_commit.message, '[hold]') }}
+
+    steps:
+      # Дешёвая страховка от главной беды автодеплоя: опечатка в app.py
+      # положила бы сайт целиком, потому что контейнер не поднялся бы.
+      # Синтаксис ловим до слияния — тогда main остаётся рабочим.
+      - name: Check syntax
+        run: |
+          set -e
+          work="${RUNNER_TEMP:-/tmp}/claude-check"
+          rm -rf "$work"
+          git clone --quiet --depth 1 --branch "$GITHUB_REF_NAME" \
+            "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" "$work"
+          python3 -m py_compile "$work/app.py"
+          rm -rf "$work"
+
+      - name: Merge into main
+        run: |
+          set -e
+          work="${RUNNER_TEMP:-/tmp}/claude-automerge"
+          rm -rf "$work"
+          git clone --quiet \
+            "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" "$work"
+          cd "$work"
+          git config user.name "vitazgio automerge"
+          git config user.email "automerge@vitazgio.ru"
+          git checkout main
+          # Сообщение коммита в команду не подставляем: в нём может оказаться
+          # что угодно, вплоть до кавычек и подстановок, ломающих скрипт.
+          git merge --no-edit "$GITHUB_SHA"
+          git push origin main
+          cd "${RUNNER_TEMP:-/tmp}"
+          rm -rf "$work"
+
+  # Ровно те же шаги, что и при обычном пуше в main.
+  deploy:
+    needs: merge
+    uses: ./.github/workflows/deploy.yml

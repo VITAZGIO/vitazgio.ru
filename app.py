@@ -8,6 +8,7 @@ import os
 import platform
 import re
 import secrets
+import shutil
 import socket
 import subprocess
 import threading
@@ -23,6 +24,7 @@ from zoneinfo import ZoneInfo
 import paramiko
 from flask import Flask, Response, g, jsonify, redirect, request, send_file, session, url_for
 from flask_sock import Sock
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 app = Flask(__name__)
 app.config.update(
@@ -31,6 +33,20 @@ app.config.update(
     SESSION_COOKIE_SAMESITE="Strict",
     SESSION_COOKIE_SECURE=os.environ.get("SESSION_COOKIE_SECURE", "false").lower() == "true",
 )
+
+# Трафик доходит до приложения только через реверс-прокси, поэтому без этой
+# обёртки request.remote_addr — всегда адрес прокси: счётчик попыток входа
+# получался общим на всех, а схема в ссылках дропа — http вместо https.
+# ProxyFix берёт из X-Forwarded-For запись, которую поставил наш собственный
+# прокси (крайнюю справа), — снаружи её подделать нельзя, в отличие от левых.
+TRUSTED_PROXY_HOPS = int(os.environ.get("TRUSTED_PROXY_HOPS", "1"))
+app.wsgi_app = ProxyFix(
+    app.wsgi_app,
+    x_for=TRUSTED_PROXY_HOPS,
+    x_proto=TRUSTED_PROXY_HOPS,
+    x_host=TRUSTED_PROXY_HOPS,
+)
+
 sock = Sock(app)
 
 # Репозиторий публичный, поэтому соль и хэш берём из .env: иначе их можно
@@ -81,9 +97,17 @@ login_log: list = []
 login_log_lock = threading.Lock()
 LOGIN_LOG_DAYS = 14          # с запасом: просили хранить не меньше недели
 LOGIN_LOG_MAX = 500          # потолок, чтобы файл не рос бесконечно
+LOGIN_LOG_MAX_FAIL = 200     # отдельный потолок для неудачных попыток
 
-# Машины для сбора метрик через SSH
+# Машины для сбора метрик. Первая — та, на которой крутится сам сайт: до неё
+# ходить по SSH не нужно, /proc читается локально (контейнер живёт в
+# network_mode: host, поэтому видит память и аптайм самого сервера).
 METRICS_TARGETS = [
+    {
+        "ip": "local",
+        "name": "vps-amsterdam",
+        "local": True,
+    },
     {
         "ip": "100.104.67.89",
         "name": "orangepizero3",
@@ -104,20 +128,111 @@ METRICS_TARGETS = [
     },
 ]
 METRICS_INTERVAL = 30
+METRICS_CPU_SAMPLE = 1  # пауза между двумя замерами /proc/stat, секунды
 metrics_data: dict = {t["ip"]: None for t in METRICS_TARGETS}
 metrics_lock = threading.Lock()
 
-# Команда сбора метрик (CPU%, RAM%, disk%, uptime_sec, temp_C)
+# Сбор метрик: CPU-строка, пауза, CPU-строка ещё раз, RAM%, disk%, uptime, temp.
+# Два замера /proc/stat обязательны: там лежат счётчики, накопленные с момента
+# загрузки, и одно их деление даёт среднюю загрузку за весь аптайм — цифру,
+# которая почти не двигается. Настоящая загрузка — это разница между замерами.
 _METRICS_CMD = (
-    "awk '/^cpu /{u=$2+$4;t=$2+$3+$4+$5;if(t>0)printf \"%.1f\\n\",u/t*100;else print 0}' /proc/stat; "
+    "grep '^cpu ' /proc/stat; "
+    f"sleep {METRICS_CPU_SAMPLE}; "
+    "grep '^cpu ' /proc/stat; "
     "awk '/MemTotal/{t=$2}/MemAvailable/{a=$2}END{if(t>0)printf \"%.1f\\n\",(t-a)/t*100;else print 0}' /proc/meminfo; "
     "df / --output=pcent 2>/dev/null | tail -1 | tr -d ' %'; "
     "awk '{printf \"%.0f\\n\",$1}' /proc/uptime; "
-    "cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null | awk '{printf \"%.1f\\n\",$1/1000}' || echo ''"
+    # Температура есть не везде; печатаем 0 вместо пустоты, иначе съезжает
+    # нумерация строк и disk с uptime подставляются не туда.
+    "{ cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null || echo 0; } "
+    "| awk '{printf \"%.1f\\n\",$1/1000}'"
 )
 
 
+def _cpu_busy_total(cpu_line: str):
+    """Из строки «cpu user nice system idle iowait …» — (занято, всего) тиков."""
+    fields = [float(x) for x in cpu_line.split()[1:] if x.replace(".", "", 1).isdigit()]
+    if len(fields) < 4:
+        return None
+    total = sum(fields)
+    idle = fields[3] + (fields[4] if len(fields) > 4 else 0)  # idle + iowait
+    return total - idle, total
+
+
+def _cpu_percent(first_line: str, second_line: str):
+    """Загрузка между двумя замерами. None, если замеры непригодны."""
+    first, second = _cpu_busy_total(first_line), _cpu_busy_total(second_line)
+    if not first or not second:
+        return None
+    busy_delta, total_delta = second[0] - first[0], second[1] - first[1]
+    if total_delta <= 0:
+        return None
+    return round(max(0.0, min(100.0, busy_delta / total_delta * 100)), 1)
+
+
+def _parse_metrics(lines: list) -> dict:
+    """Разбирает вывод _METRICS_CMD. Каждое поле независимо: если конкретная
+    машина чего-то не отдала, остальные цифры всё равно доезжают."""
+
+    def at(index):
+        return lines[index].strip() if len(lines) > index else ""
+
+    def as_float(text):
+        try:
+            return float(text)
+        except ValueError:
+            return None
+
+    temp = as_float(at(5))
+    return {
+        "cpu": _cpu_percent(at(0), at(1)),
+        "ram": as_float(at(2)),
+        "disk": int(at(3)) if at(3).isdigit() else None,
+        "uptime": int(at(4)) if at(4).isdigit() else None,
+        "temp": temp if temp else None,  # 0.0 — это «датчика нет»
+        "ts": time.time(),
+    }
+
+
+def _collect_metrics_local() -> dict | None:
+    """Метрики машины, на которой работает само приложение."""
+    try:
+        with open("/proc/stat") as fh:
+            first = fh.readline()
+        time.sleep(METRICS_CPU_SAMPLE)
+        with open("/proc/stat") as fh:
+            second = fh.readline()
+
+        meminfo = {}
+        with open("/proc/meminfo") as fh:
+            for row in fh:
+                key, _, rest = row.partition(":")
+                meminfo[key] = float(rest.split()[0]) if rest.split() else 0.0
+        total, available = meminfo.get("MemTotal", 0), meminfo.get("MemAvailable", 0)
+
+        # Диск смотрим по каталогу приложения: он проброшен с хоста, значит
+        # покажет реальный раздел сервера, а не оверлей контейнера.
+        usage = shutil.disk_usage(os.path.dirname(os.path.abspath(__file__)))
+        with open("/proc/uptime") as fh:
+            uptime = int(float(fh.read().split()[0]))
+
+        return {
+            "cpu": _cpu_percent(first, second),
+            "ram": round((total - available) / total * 100, 1) if total else None,
+            "disk": round(usage.used / usage.total * 100) if usage.total else None,
+            "uptime": uptime,
+            "temp": None,
+            "ts": time.time(),
+        }
+    except (OSError, ValueError, ZeroDivisionError):
+        return None
+
+
 def _collect_metrics_for(target: dict) -> dict | None:
+    if target.get("local"):
+        return _collect_metrics_local()
+
     user = os.environ.get(target["user_env"])
     passwd = os.environ.get(target["pass_env"])
     if not user or not passwd:
@@ -127,17 +242,9 @@ def _collect_metrics_for(target: dict) -> dict | None:
     try:
         client.connect(target["ip"], username=user, password=passwd,
                        timeout=6, look_for_keys=False, allow_agent=False)
-        _, stdout, _ = client.exec_command(_METRICS_CMD, timeout=8)
-        lines = stdout.read().decode(errors="replace").strip().splitlines()
-        result = {
-            "cpu": float(lines[0]) if len(lines) > 0 and lines[0] else None,
-            "ram": float(lines[1]) if len(lines) > 1 and lines[1] else None,
-            "disk": int(lines[2]) if len(lines) > 2 and lines[2].isdigit() else None,
-            "uptime": int(lines[3]) if len(lines) > 3 and lines[3].isdigit() else None,
-            "temp": float(lines[4]) if len(lines) > 4 and lines[4] else None,
-            "ts": time.time(),
-        }
-        return result
+        # Команда сама спит секунду между замерами CPU — таймаут с запасом.
+        _, stdout, _ = client.exec_command(_METRICS_CMD, timeout=8 + METRICS_CPU_SAMPLE)
+        return _parse_metrics(stdout.read().decode(errors="replace").splitlines())
     except Exception:
         return None
     finally:
@@ -402,11 +509,38 @@ _music_load()
 
 
 def _client_ip():
-    """Реальный адрес клиента: до приложения трафик идёт через NPM."""
-    forwarded = request.headers.get("X-Forwarded-For", "")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
+    """Реальный адрес клиента.
+
+    Разбором X-Forwarded-For занимается ProxyFix выше, и это принципиально:
+    раньше здесь бралась левая запись заголовка, а её клиент присылает сам —
+    NPM свою дописывает следом, не затирая чужую. Так в журнал входов можно
+    было записать любой выдуманный адрес.
+    """
     return request.remote_addr or "unknown"
+
+
+def _rate_blocked(store, lock, key, window, limit):
+    """Не пора ли притормозить этот адрес. Заодно чистит остывшие записи,
+    чтобы словарь не рос по одной строке на каждый заглянувший IP."""
+    now = time.monotonic()
+    with lock:
+        for stale, hits in [(k, v) for k, v in store.items() if k != key]:
+            if not hits or now - hits[-1] > window:
+                store.pop(stale, None)
+        attempts = store[key]
+        while attempts and now - attempts[0] > window:
+            attempts.popleft()
+        return len(attempts) >= limit
+
+
+def _rate_hit(store, lock, key):
+    with lock:
+        store[key].append(time.monotonic())
+
+
+def _rate_clear(store, lock, key):
+    with lock:
+        store.pop(key, None)
 
 
 def _devices_write():
@@ -548,9 +682,17 @@ LOGIN_LOG_PATH = os.path.join(DATA_DIR, "login_log.json")
 
 
 def _login_log_trim():
-    """Вызывать под login_log_lock: режет старьё по возрасту и по количеству."""
+    """Вызывать под login_log_lock: режет старьё по возрасту и по количеству.
+
+    Успехи и провалы урезаются по отдельности. Иначе достаточно было бы
+    подолбиться неверным паролем пятьсот раз, чтобы вытеснить из журнала все
+    настоящие входы — то есть заодно стереть следы того, что искал.
+    """
     edge = time.time() - LOGIN_LOG_DAYS * 86400
-    login_log[:] = [row for row in login_log if row.get("at", 0) >= edge][-LOGIN_LOG_MAX:]
+    rows = [row for row in login_log if row.get("at", 0) >= edge]
+    good = [row for row in rows if row.get("kind", "ok") == "ok"][-LOGIN_LOG_MAX:]
+    bad = [row for row in rows if row.get("kind", "ok") != "ok"][-LOGIN_LOG_MAX_FAIL:]
+    login_log[:] = sorted(good + bad, key=lambda row: row.get("at", 0))
 
 
 def _login_log_save():
@@ -573,7 +715,8 @@ def _login_log_load():
     _login_log_trim()
 
 
-def _log_login(note=""):
+def _log_login(note="", kind="ok"):
+    """kind: ok — вошли, fail — пароль не подошёл, block — упёрлись в лимит."""
     with login_log_lock:
         ua = request.headers.get("User-Agent", "")[:100]
         login_log.append({
@@ -581,6 +724,7 @@ def _log_login(note=""):
             "ip": _client_ip(),
             "ts": datetime.now(ZoneInfo("Europe/Moscow")).strftime("%d.%m.%Y %H:%M:%S"),
             "ua": f"{ua} · {note}" if note else ua,
+            "kind": kind,
         })
         _login_log_trim()
         _login_log_save()
@@ -633,25 +777,21 @@ def security_headers(response):
 
 @app.post("/api/login")
 def login():
-    client = request.remote_addr or "unknown"
-    now = time.monotonic()
+    client = _client_ip()
 
-    with login_attempts_lock:
-        attempts = login_attempts[client]
-        while attempts and now - attempts[0] > LOGIN_WINDOW_SECONDS:
-            attempts.popleft()
-        if len(attempts) >= LOGIN_MAX_ATTEMPTS:
-            return jsonify(error="Слишком много попыток. Попробуйте через 5 минут."), 429
+    if _rate_blocked(login_attempts, login_attempts_lock, client,
+                     LOGIN_WINDOW_SECONDS, LOGIN_MAX_ATTEMPTS):
+        _log_login("лимит попыток", kind="block")
+        return jsonify(error="Слишком много попыток. Попробуйте через 5 минут."), 429
 
     payload = request.get_json(silent=True) or {}
     password = payload.get("password", "")
     if not isinstance(password, str) or not password_matches(password):
-        with login_attempts_lock:
-            login_attempts[client].append(now)
+        _rate_hit(login_attempts, login_attempts_lock, client)
+        _log_login("неверный пароль", kind="fail")
         return jsonify(error="Неверный пароль."), 401
 
-    with login_attempts_lock:
-        login_attempts.pop(client, None)
+    _rate_clear(login_attempts, login_attempts_lock, client)
     session.clear()
     session["authenticated"] = True
     session.permanent = False
@@ -701,27 +841,21 @@ def console_login():
     if not SSH_GATE_PASSWORD_PREFIX:
         return jsonify(error="Консоль не настроена."), 503
 
-    client = request.remote_addr or "unknown"
-    now = time.monotonic()
-
-    with console_login_attempts_lock:
-        attempts = console_login_attempts[client]
-        while attempts and now - attempts[0] > CONSOLE_LOGIN_WINDOW_SECONDS:
-            attempts.popleft()
-        if len(attempts) >= CONSOLE_LOGIN_MAX_ATTEMPTS:
-            return jsonify(error="Слишком много попыток. Попробуйте через 5 минут."), 429
+    client = _client_ip()
+    if _rate_blocked(console_login_attempts, console_login_attempts_lock, client,
+                     CONSOLE_LOGIN_WINDOW_SECONDS, CONSOLE_LOGIN_MAX_ATTEMPTS):
+        return jsonify(error="Слишком много попыток. Попробуйте через 5 минут."), 429
 
     payload = request.get_json(silent=True) or {}
     password = payload.get("password", "")
     if not isinstance(password, str) or not hmac.compare_digest(
         password.encode(), console_password_today().encode()
     ):
-        with console_login_attempts_lock:
-            console_login_attempts[client].append(now)
+        _rate_hit(console_login_attempts, console_login_attempts_lock, client)
+        _log_login("неверный суточный пароль (консоль)", kind="fail")
         return jsonify(error="Неверный пароль."), 401
 
-    with console_login_attempts_lock:
-        console_login_attempts.pop(client, None)
+    _rate_clear(console_login_attempts, console_login_attempts_lock, client)
     session["console_authenticated"] = True
     return jsonify(ok=True)
 
@@ -821,7 +955,7 @@ def console_ws(ws, ip):
         client.close()
 
 
-rdp_enabled_ips = {device["ip"] for device in NETBIRD_DEVICES}
+rdp_enabled_ips = {device["ip"] for device in NETBIRD_DEVICES if device.get("rdp_enabled")}
 vnc_enabled_ips = {device["ip"] for device in NETBIRD_DEVICES if device.get("vnc_enabled")}
 
 
@@ -1331,25 +1465,20 @@ def device_trust():
     if not SSH_GATE_PASSWORD_PREFIX:
         return jsonify(error="Суточный пароль не настроен на сервере."), 503
 
-    client = request.remote_addr or "unknown"
-    now = time.monotonic()
-    with console_login_attempts_lock:
-        attempts = console_login_attempts[client]
-        while attempts and now - attempts[0] > CONSOLE_LOGIN_WINDOW_SECONDS:
-            attempts.popleft()
-        if len(attempts) >= CONSOLE_LOGIN_MAX_ATTEMPTS:
-            return jsonify(error="Слишком много попыток. Попробуйте через 5 минут."), 429
+    client = _client_ip()
+    if _rate_blocked(console_login_attempts, console_login_attempts_lock, client,
+                     CONSOLE_LOGIN_WINDOW_SECONDS, CONSOLE_LOGIN_MAX_ATTEMPTS):
+        return jsonify(error="Слишком много попыток. Попробуйте через 5 минут."), 429
 
     password = (request.get_json(silent=True) or {}).get("password", "")
     if not isinstance(password, str) or not hmac.compare_digest(
         password.encode(), console_password_today().encode()
     ):
-        with console_login_attempts_lock:
-            console_login_attempts[client].append(now)
+        _rate_hit(console_login_attempts, console_login_attempts_lock, client)
+        _log_login("неверный суточный пароль (доверие устройству)", kind="fail")
         return jsonify(error="Неверный суточный пароль."), 401
 
-    with console_login_attempts_lock:
-        console_login_attempts.pop(client, None)
+    _rate_clear(console_login_attempts, console_login_attempts_lock, client)
 
     ua = request.headers.get("User-Agent", "")
     raw = request.cookies.get(DEVICE_COOKIE) or ""
@@ -2039,6 +2168,9 @@ def cabinet():
         .log-ts { color: #6b7385; white-space: nowrap; }
         .log-ip { color: #69e8ff; }
         .log-ua { color: #4a5060; font-size: .68rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; grid-column: 1 / -1; }
+        .log-bad .log-ip { color: #ff6b81; }
+        .log-bad .log-ip::before { content: "✕ "; }
+        .log-alarm { margin: 0 0 8px; padding: 6px 9px; color: #ffb35c; font-size: .72rem; border-left: 2px solid #ff6b81; background: rgba(255,107,129,.07); }
 
         /* Запомненные устройства */
         .dev-remember { display: flex; align-items: center; gap: 9px; padding: 4px 0 2px; color: #c4cad5; font-size: .82rem; cursor: pointer; }
@@ -2358,10 +2490,26 @@ def cabinet():
         <div id="term-body" class="term-body"></div>
       </div>
 
-      <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css">
-      <script defer src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
-      <script defer src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
-      <script defer src="https://cdn.jsdelivr.net/npm/guacamole-common-js@1.5.0/dist/cjs/guacamole-common.min.js"></script>
+      <!-- Библиотеки лежат в static/vendor, а не на CDN: когда jsdelivr
+           недоступен, консоль и RDP переставали открываться вообще без
+           объяснений. Адрес CDN оставлен запасным на случай, если файл
+           почему-то не отдался. -->
+      <script>
+        // Догружает библиотеку с CDN, если своя копия почему-то не отдалась.
+        function vendorFallback(el, url) {
+          el.onerror = null;
+          var script = document.createElement("script");
+          script.src = url;
+          document.head.appendChild(script);
+        }
+      </script>
+      <link rel="stylesheet" href="/static/vendor/xterm.css">
+      <script defer src="/static/vendor/xterm.js"
+              onerror="vendorFallback(this, 'https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js')"></script>
+      <script defer src="/static/vendor/xterm-addon-fit.js"
+              onerror="vendorFallback(this, 'https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js')"></script>
+      <script defer src="/static/vendor/guacamole-common.min.js"
+              onerror="vendorFallback(this, 'https://cdn.jsdelivr.net/npm/guacamole-common-js@1.5.0/dist/cjs/guacamole-common.min.js')"></script>
       <script>
         (() => {
           // Раскрытием занимается общий обработчик .panel-head[aria-controls]
@@ -3413,9 +3561,13 @@ def cabinet():
               const r = await fetch("/api/login-log", { credentials: "same-origin" });
               const data = await r.json();
               if (!data.length) { listEl.innerHTML = '<p class="widget-empty">Нет записей</p>'; return; }
-              listEl.innerHTML = data.map(e =>
-                `<div class="log-row"><span class="log-ts">${esc(e.ts)}</span><span class="log-ip">${esc(e.ip)}</span><span class="log-ua">${esc(e.ua)}</span></div>`
-              ).join("");
+              const fails = data.filter(e => e.kind && e.kind !== "ok").length;
+              const head = fails
+                ? `<p class="log-alarm">Неудачных попыток за две недели: ${fails}</p>` : "";
+              listEl.innerHTML = head + data.map(e => {
+                const bad = e.kind && e.kind !== "ok";
+                return `<div class="log-row${bad ? " log-bad" : ""}"><span class="log-ts">${esc(e.ts)}</span><span class="log-ip">${esc(e.ip)}</span><span class="log-ua">${esc(e.ua)}</span></div>`;
+              }).join("");
             } catch {}
           };
           if (toggle) toggle.addEventListener("widget-open", e => { if (e.detail && !loaded) { loaded = true; load(); } });
