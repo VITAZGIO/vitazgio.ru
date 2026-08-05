@@ -10,8 +10,20 @@
 (function () {
   "use strict";
 
-  var VIEW_W = 400, VIEW_H = 200, BAR_H = 56;
-  var SCREEN_W = VIEW_W, SCREEN_H = VIEW_H + BAR_H;
+  // Разрешение буфера подбирается под устройство: на телефоне каждый пиксель
+  // считается тем же джаваскриптом, но процессор там втрое слабее, поэтому
+  // картинку делаем мельче — растягивается она всё равно на весь экран.
+  var VIEW_W, VIEW_H, BAR_H, SCREEN_W, SCREEN_H;
+
+  function setResolution(touch) {
+    VIEW_W = touch ? 280 : 400;
+    VIEW_H = touch ? 140 : 200;
+    BAR_H = touch ? 42 : 56;
+    SCREEN_W = VIEW_W;
+    SCREEN_H = VIEW_H + BAR_H;
+  }
+  setResolution(false);
+
   var TEX = 64;
   var FOV = Math.PI / 3;
 
@@ -861,19 +873,26 @@
 
   /* ══ Игра ═══════════════════════════════════════════════════════════════ */
   function start(root, api) {
+    setResolution(api.touch);
     if (!textures) textures = buildTextures();
     if (!sprites) sprites = buildSprites();
 
     var canvas = document.createElement("canvas");
     canvas.width = SCREEN_W; canvas.height = SCREEN_H;
-    canvas.style.cssText = "width:min(100%,1120px);height:auto;image-rendering:pixelated;" +
-      "image-rendering:crisp-edges;background:#000;cursor:crosshair;max-height:calc(100vh - 110px)";
+    canvas.style.cssText = (api.touch
+      ? "width:100%;height:auto;max-height:100%;touch-action:none;cursor:default;"
+      : "width:min(100%,1120px);height:auto;max-height:100%;cursor:crosshair;") +
+      "min-height:0;object-fit:contain;image-rendering:pixelated;" +
+      "image-rendering:crisp-edges;background:#000";
     var wrap = document.createElement("div");
-    wrap.style.cssText = "display:flex;flex-direction:column;align-items:center;gap:8px;width:100%";
+    wrap.style.cssText = "display:flex;flex-direction:column;align-items:center;gap:6px;" +
+      "width:100%;max-height:100%;min-height:0";
     var tip = document.createElement("div");
-    tip.style.cssText = "color:#4a6379;font-size:.66rem;letter-spacing:.08em;text-align:center";
-    tip.textContent = "WASD — движение · МЫШЬ или ← → — обзор · CTRL/ЛКМ — огонь · E — двери · " +
-      "1-3 — оружие · TAB — карта · клик по экрану захватывает мышь";
+    tip.style.cssText = "color:#4a6379;font-size:.64rem;letter-spacing:.08em;text-align:center;flex:none";
+    tip.textContent = api.touch
+      ? "ВЕДИ ПАЛЬЦЕМ ПО ЭКРАНУ — ОСМОТРЕТЬСЯ · КРЕСТОВИНА — ИДТИ"
+      : "WASD — движение · МЫШЬ или ← → — обзор · CTRL/ЛКМ — огонь · E — двери · " +
+        "1-3 — оружие · TAB — карта · клик по экрану захватывает мышь";
     wrap.append(canvas, tip);
     root.appendChild(wrap);
 
@@ -1806,51 +1825,68 @@
     function drawFace(x, y, size) {
       var hp = state.player.health;
       var g = ctx;
+      // Все размеры внутри — доли от стороны: панель на телефоне мельче,
+      // и рисовать лицо фиксированными пикселями там нечем.
+      var u = size / 28;
+      var px = function (v) { return x + v * u; };
+      var py = function (v) { return y + v * u; };
+      var sz = function (v) { return v * u; };
+
       var skin = hp > 60 ? "#c98d63" : hp > 30 ? "#bd7e56" : "#a96a48";
       g.fillStyle = "#1a1410";
       g.fillRect(x, y, size, size);
       // волосы
       g.fillStyle = "#5b3a20";
-      g.fillRect(x + 3, y + 2, size - 6, 7);
+      g.fillRect(px(3), py(2), sz(22), sz(7));
       // лицо
       g.fillStyle = skin;
-      g.fillRect(x + 4, y + 6, size - 8, size - 10);
-      // глаза — смотрят в сторону поворота
-      var look = Math.round(Math.sin(state.time / 900) * 1.4);
+      g.fillRect(px(4), py(6), sz(20), sz(18));
+      // глаза — чуть косятся, чтобы лицо не выглядело мёртвым
+      var look = Math.sin(state.time / 900) * 1.4;
       g.fillStyle = "#ffffff";
-      g.fillRect(x + 7 + look, y + 12, 4, 3);
-      g.fillRect(x + size - 11 + look, y + 12, 4, 3);
+      g.fillRect(px(7 + look), py(12), sz(4), sz(3));
+      g.fillRect(px(17 + look), py(12), sz(4), sz(3));
       g.fillStyle = "#1a1a2a";
-      g.fillRect(x + 8 + look, y + 13, 2, 2);
-      g.fillRect(x + size - 10 + look, y + 13, 2, 2);
+      g.fillRect(px(8 + look), py(13), sz(2), sz(2));
+      g.fillRect(px(18 + look), py(13), sz(2), sz(2));
       // брови: злее при низком здоровье
       g.fillStyle = "#3a2412";
       var brow = hp > 60 ? 0 : 1;
-      g.fillRect(x + 6, y + 10 - brow, 6, 2);
-      g.fillRect(x + size - 12, y + 10 - brow, 6, 2);
+      g.fillRect(px(6), py(10 - brow), sz(6), sz(2));
+      g.fillRect(px(16), py(10 - brow), sz(6), sz(2));
       // рот
       g.fillStyle = "#5a2020";
       if (state.dead) {
         g.fillStyle = "#7a1010";
-        g.fillRect(x + 6, y + 18, size - 12, 5);
+        g.fillRect(px(6), py(18), sz(16), sz(5));
       } else if (state.faceMood === "pain") {
-        g.fillRect(x + 7, y + 19, size - 14, 4);
-      } else if (hp > 70) {
-        g.fillRect(x + 8, y + 20, size - 16, 2);
+        g.fillRect(px(7), py(19), sz(14), sz(4));
       } else {
-        g.fillRect(x + 8, y + 21, size - 16, 2);
+        g.fillRect(px(8), py(hp > 70 ? 20 : 21), sz(12), sz(2));
       }
       // кровь по мере урона
       if (hp < 70) {
         g.fillStyle = "rgba(150,20,16,.85)";
-        g.fillRect(x + 6, y + 8, 2, 6 + (70 - hp) / 8);
-        if (hp < 40) g.fillRect(x + size - 9, y + 12, 2, 5);
-        if (hp < 20) g.fillRect(x + 11, y + 16, 3, 7);
+        g.fillRect(px(6), py(8), sz(2), sz(6 + (70 - hp) / 8));
+        if (hp < 40) g.fillRect(px(19), py(12), sz(2), sz(5));
+        if (hp < 20) g.fillRect(px(11), py(16), sz(3), sz(7));
       }
     }
 
     function drawBar() {
       var y = VIEW_H;
+      // Панель раскладывается в долях ширины экрана: буфер на телефоне уже,
+      // и жёстко прибитые координаты уезжали бы за край.
+      var k = SCREEN_W / 400;
+      var pad = 6 * k, gap = 6 * k;
+      var weights = [62, 74, 62, 44, 62, 54];
+      var sum = weights.reduce(function (a, b) { return a + b; }, 0);
+      var usable = SCREEN_W - pad * 2 - gap * (weights.length - 1);
+      var widths = weights.map(function (wt) { return usable * wt / sum; });
+      var xs = [];
+      var cursor = pad;
+      widths.forEach(function (wd) { xs.push(cursor); cursor += wd + gap; });
+
       var grad = ctx.createLinearGradient(0, y, 0, y + BAR_H);
       grad.addColorStop(0, "#4a4238");
       grad.addColorStop(0.1, "#3a342c");
@@ -1860,51 +1896,61 @@
       ctx.fillStyle = "rgba(0,0,0,.4)";
       ctx.fillRect(0, y, SCREEN_W, 2);
 
-      function slot(x, w, label) {
+      var inset = 5 * k;
+      function slot(i, label) {
+        var x = xs[i], w = widths[i];
         ctx.fillStyle = "rgba(0,0,0,.32)";
-        ctx.fillRect(x, y + 6, w, BAR_H - 12);
+        ctx.fillRect(x, y + inset, w, BAR_H - inset * 2);
         ctx.strokeStyle = "rgba(255,255,255,.07)";
-        ctx.strokeRect(x + 0.5, y + 6.5, w - 1, BAR_H - 13);
+        ctx.strokeRect(x + 0.5, y + inset + 0.5, w - 1, BAR_H - inset * 2 - 1);
         ctx.fillStyle = "#8a7f6c";
-        ctx.font = 'bold 7px "Cascadia Code", Consolas, monospace';
+        ctx.font = "bold " + Math.max(5, Math.round(7 * k)) + 'px "Cascadia Code", Consolas, monospace';
         ctx.textAlign = "center";
-        ctx.fillText(label, x + w / 2, y + BAR_H - 7);
+        ctx.fillText(label, x + w / 2, y + BAR_H - 6 * k);
+        return { x: x, w: w };
       }
 
+      var digit = Math.max(2, Math.round(4 * k));
+      var numY = y + 12 * k;
       var w = WEAPONS[state.weapon];
-      slot(6, 62, "ПАТРОНЫ");
-      bigNumber(String(state.ammo[w.ammo]), 16, y + 14, 4, "#ff2b2b");
 
-      slot(74, 74, "ЗДОРОВЬЕ");
-      bigNumber(state.player.health + "%", 82, y + 14, 4, "#ff2b2b");
+      var s0 = slot(0, "ПАТРОНЫ");
+      bigNumber(String(state.ammo[w.ammo]), s0.x + 9 * k, numY, digit, "#ff2b2b");
+
+      var s1 = slot(1, "ЗДОРОВЬЕ");
+      bigNumber(state.player.health + "%", s1.x + 8 * k, numY, digit, "#ff2b2b");
 
       // ARMS — какие стволы уже есть
-      slot(154, 62, "ОРУЖИЕ");
+      var s2 = slot(2, "ОРУЖИЕ");
       var owned = [["1", true], ["2", state.weapons.shotgun], ["3", state.weapons.chaingun]];
-      var ax = 162;
+      var small = Math.max(2, Math.round(3 * k));
+      var ax = s2.x + 7 * k;
       owned.forEach(function (o) {
         var active = (o[0] === "1" && state.weapon === "pistol") ||
                      (o[0] === "2" && state.weapon === "shotgun") ||
                      (o[0] === "3" && state.weapon === "chaingun");
-        bigNumber(o[0], ax, y + 16, 3, o[1] ? (active ? "#ffd84a" : "#ff2b2b") : "#5c5346");
-        ax += 18;
+        bigNumber(o[0], ax, y + 14 * k, small, o[1] ? (active ? "#ffd84a" : "#ff2b2b") : "#5c5346");
+        ax += small * 6;
       });
 
-      slot(222, 44, "ЛИЦО");
-      drawFace(230, y + 10, 28);
+      var s3 = slot(3, "ЛИЦО");
+      var faceSize = Math.min(s3.w - 6 * k, BAR_H - 14 * k);
+      drawFace(s3.x + (s3.w - faceSize) / 2, y + inset + 3 * k, faceSize);
 
-      slot(272, 62, "БРОНЯ");
-      bigNumber(state.armor + "%", 280, y + 14, 4, "#3ad14e");
+      var s4 = slot(4, "БРОНЯ");
+      bigNumber(state.armor + "%", s4.x + 8 * k, numY, digit, "#3ad14e");
 
-      slot(340, 54, "КЛЮЧИ");
+      var s5 = slot(5, "КЛЮЧИ");
       var keyColors = [["red", "#d63a3a"], ["blue", "#4472e8"], ["yellow", "#e0c020"]];
-      keyColors.forEach(function (k, i) {
-        var kx = 350, ky = y + 11 + i * 12;
-        ctx.fillStyle = state.keys[k[0]] ? k[1] : "rgba(255,255,255,.07)";
-        ctx.fillRect(kx, ky, 26, 8);
-        if (state.keys[k[0]]) {
+      var keyH = (BAR_H - inset * 2 - 12 * k) / 3;
+      keyColors.forEach(function (key, i) {
+        var kx = s5.x + 5 * k, kw = s5.w - 10 * k;
+        var ky = y + inset + 4 * k + i * (keyH + 2 * k);
+        ctx.fillStyle = state.keys[key[0]] ? key[1] : "rgba(255,255,255,.07)";
+        ctx.fillRect(kx, ky, kw, keyH);
+        if (state.keys[key[0]]) {
           ctx.fillStyle = "rgba(255,255,255,.4)";
-          ctx.fillRect(kx, ky, 26, 2);
+          ctx.fillRect(kx, ky, kw, Math.max(1, keyH * 0.25));
         }
       });
     }
@@ -2013,6 +2059,80 @@
       render();
     }
 
+    /* ── Управление с телефона ─────────────────────────────────────────── */
+    // Обзор — ведём пальцем по экрану. Прицеливание кнопками в шутере
+    // невыносимо, а так получается привычно по мобильным меркам.
+    var lookId = null, lookX = 0, lookMoved = 0;
+
+    function onTouchStart(e) {
+      if (lookId !== null) return;
+      var t = e.changedTouches[0];
+      lookId = t.identifier;
+      lookX = t.clientX;
+      lookMoved = 0;
+      e.preventDefault();
+    }
+    function onTouchMove(e) {
+      for (var i = 0; i < e.changedTouches.length; i++) {
+        var t = e.changedTouches[i];
+        if (t.identifier !== lookId) continue;
+        var dx = t.clientX - lookX;
+        lookX = t.clientX;
+        lookMoved += Math.abs(dx);
+        mouseDX += dx * 0.006;
+        e.preventDefault();
+      }
+    }
+    function onTouchEnd(e) {
+      for (var i = 0; i < e.changedTouches.length; i++) {
+        if (e.changedTouches[i].identifier !== lookId) continue;
+        // Короткий тык без ведения — это выстрел, как в тире.
+        if (lookMoved < 8) fire();
+        lookId = null;
+      }
+    }
+
+    if (api.touch) {
+      canvas.addEventListener("touchstart", onTouchStart, { passive: false });
+      canvas.addEventListener("touchmove", onTouchMove, { passive: false });
+      canvas.addEventListener("touchend", onTouchEnd);
+      canvas.addEventListener("touchcancel", onTouchEnd);
+
+      var holdKey = function (name) {
+        return {
+          down: function () { keys[name] = true; },
+          up: function () { keys[name] = false; },
+        };
+      };
+
+      api.deck({
+        pad: {
+          up: holdKey("w"), down: holdKey("s"),
+          left: holdKey("a"), right: holdKey("d"),
+        },
+        actions: [
+          { label: "ДВЕРЬ", color: "#ffd84a", down: tryUse },
+          { label: "ОГОНЬ", color: "#ff3b30", big: true,
+            down: function () { firing = true; }, up: function () { firing = false; } },
+        ],
+        extra: [
+          { label: "СТВОЛ", down: function () {
+            // Перебираем только то, что уже подобрано.
+            var order = ["pistol", "shotgun", "chaingun"];
+            var have = order.filter(function (n) { return state.weapons[n]; });
+            var next = have[(have.indexOf(state.weapon) + 1) % have.length];
+            switchWeapon(next);
+          } },
+          { label: "КАРТА", down: function () { state.showMap = !state.showMap; } },
+          { label: "◀", down: function () { keys.ArrowLeft = true; },
+            up: function () { keys.ArrowLeft = false; } },
+          { label: "▶", down: function () { keys.ArrowRight = true; },
+            up: function () { keys.ArrowRight = false; } },
+          { label: "ЗАНОВО", down: restart },
+        ],
+      });
+    }
+
     document.addEventListener("keydown", onKeyDown);
     document.addEventListener("keyup", onKeyUp);
     canvas.addEventListener("mousedown", onMouseDown);
@@ -2032,6 +2152,10 @@
         document.removeEventListener("keydown", onKeyDown);
         document.removeEventListener("keyup", onKeyUp);
         canvas.removeEventListener("mousedown", onMouseDown);
+        canvas.removeEventListener("touchstart", onTouchStart);
+        canvas.removeEventListener("touchmove", onTouchMove);
+        canvas.removeEventListener("touchend", onTouchEnd);
+        canvas.removeEventListener("touchcancel", onTouchEnd);
         document.removeEventListener("mouseup", onMouseUp);
         document.removeEventListener("mousemove", onMouseMove);
         document.removeEventListener("pointerlockchange", onLockChange);

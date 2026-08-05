@@ -39,19 +39,27 @@
   }
 
   function start(root, api) {
+    // Свечение через shadowBlur перерисовывается для каждого сегмента и на
+    // телефоне режет частоту кадров вдвое. Там рисуем без него.
+    var GLOW = !api.touch;
+
     var wrap = document.createElement("div");
-    wrap.style.cssText = "display:flex;flex-direction:column;align-items:center;gap:10px;" +
-      "max-width:100%;max-height:100%";
+    wrap.style.cssText = "display:flex;flex-direction:column;align-items:center;gap:8px;" +
+      "width:100%;max-height:100%;min-height:0";
     var hud = document.createElement("div");
-    hud.style.cssText = "display:flex;gap:22px;font:700 .82rem " + api.font +
+    hud.style.cssText = "display:flex;gap:18px;flex:none;font:700 .8rem " + api.font +
       ";letter-spacing:.08em;color:#8fa5b8";
     var canvas = document.createElement("canvas");
     canvas.width = W; canvas.height = H;
-    canvas.style.cssText = "max-width:min(100%,900px);max-height:70vh;width:auto;height:auto;" +
-      "border:1px solid rgba(45,226,255,.22);background:#05070d;image-rendering:auto";
+    canvas.style.cssText = (api.touch
+      ? "width:100%;height:auto;max-height:100%;"
+      : "max-width:100%;max-height:100%;width:auto;height:auto;") +
+      "min-height:0;object-fit:contain;border:1px solid rgba(45,226,255,.22);background:#05070d";
     var tip = document.createElement("div");
-    tip.style.cssText = "color:#4a6379;font-size:.68rem;letter-spacing:.1em";
-    tip.textContent = "СТРЕЛКИ ИЛИ WASD — ДВИЖЕНИЕ · ПРОБЕЛ — ПАУЗА · ENTER — ЗАНОВО";
+    tip.style.cssText = "color:#4a6379;font-size:.66rem;letter-spacing:.1em;flex:none;text-align:center";
+    tip.textContent = api.touch
+      ? "КРЕСТОВИНА — ДВИЖЕНИЕ · СВАЙП ПО ЭКРАНУ ТОЖЕ РАБОТАЕТ"
+      : "СТРЕЛКИ ИЛИ WASD — ДВИЖЕНИЕ · ПРОБЕЛ — ПАУЗА · ENTER — ЗАНОВО";
     wrap.append(hud, canvas, tip);
     root.appendChild(wrap);
 
@@ -167,7 +175,7 @@
       // Еда пульсирует, чтобы её было видно боковым зрением.
       var pulse = 1 + Math.sin(now / 160) * 0.12;
       var fs = (CELL - 8) * pulse;
-      ctx.shadowColor = FOOD; ctx.shadowBlur = 18;
+      if (GLOW) { ctx.shadowColor = FOOD; ctx.shadowBlur = 18; }
       ctx.fillStyle = FOOD;
       roundRect(ctx, (food.x + 0.5) * CELL - fs / 2, (food.y + 0.5) * CELL - fs / 2, fs, fs, 4);
       ctx.fill();
@@ -182,7 +190,7 @@
       }
 
       // Тело рисуем с интерполяцией между шагами — иначе движение дёргается.
-      ctx.shadowColor = BODY; ctx.shadowBlur = 12;
+      if (GLOW) { ctx.shadowColor = BODY; ctx.shadowBlur = 12; }
       for (var s = snake.length - 1; s >= 0; s--) {
         var cur = snake[s];
         var old = prevSnake[Math.min(s, prevSnake.length - 1)] || cur;
@@ -198,14 +206,14 @@
         ctx.fill();
 
         if (s === 0) {
-          ctx.shadowBlur = 0;
+          if (GLOW) ctx.shadowBlur = 0;
           ctx.fillStyle = "#04121c";
           var ex = px + CELL / 2, ey = py + CELL / 2;
           var ox = dir.x * 4, oy = dir.y * 4;
           var sx = dir.x ? 0 : 4, sy = dir.y ? 0 : 4;
           ctx.fillRect(ex + ox - sx - 2, ey + oy - sy - 2, 3, 3);
           ctx.fillRect(ex + ox + sx - 1, ey + oy + sy - 1, 3, 3);
-          ctx.shadowColor = BODY; ctx.shadowBlur = 12;
+          if (GLOW) { ctx.shadowColor = BODY; ctx.shadowBlur = 12; }
         }
       }
       ctx.shadowBlur = 0;
@@ -295,6 +303,29 @@
       if (!(nd.x === -last.x && nd.y === -last.y) && queue.length < 2) queue.push(nd);
       touchStart = null;
     }, { passive: true });
+
+    // Поворот из панели идёт по тому же пути, что и стрелка на клавиатуре.
+    function turn(x, y) {
+      var nd = { x: x, y: y };
+      var last = queue.length ? queue[queue.length - 1] : dir;
+      if ((nd.x === -last.x && nd.y === -last.y) || (nd.x === last.x && nd.y === last.y)) return;
+      if (queue.length < 2) queue.push(nd);
+    }
+
+    api.deck({
+      pad: {
+        up: function () { turn(0, -1); },
+        down: function () { turn(0, 1); },
+        left: function () { turn(-1, 0); },
+        right: function () { turn(1, 0); },
+      },
+      actions: [
+        { label: "ПАУЗА", color: "#ffb35c",
+          down: function () { if (alive) { paused = !paused; hud_(); } } },
+        { label: "ЗАНОВО", color: "#63f5ad", big: true,
+          down: function () { reset(); hud_(); } },
+      ],
+    });
 
     document.addEventListener("keydown", onKey);
     reset();

@@ -2003,6 +2003,20 @@ def cabinet():
         .term-close { padding: 7px 12px; color: #dffaff; font: 700 .76rem "Cascadia Code", Consolas, monospace; border: 1px solid rgba(255,255,255,.16); background: transparent; cursor: pointer; }
         .term-close:hover { background: rgba(255,255,255,.08); }
         .term-body { flex: 1; padding: 10px; overflow: hidden; }
+        .term-tools { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 12px; flex: none;
+                      background: rgba(255,255,255,.03); border-bottom: 1px solid rgba(255,255,255,.07); }
+        .term-key { min-width: 46px; padding: 9px 12px; color: #c4cad5;
+                    font: 600 .74rem "Cascadia Code", Consolas, monospace;
+                    border: 1px solid rgba(255,255,255,.14); border-radius: 5px;
+                    background: linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,.02));
+                    cursor: pointer; touch-action: manipulation; user-select: none; -webkit-user-select: none; }
+        .term-key:active { color: #2de2ff; border-color: rgba(45,226,255,.5); background: rgba(45,226,255,.14); }
+        .term-key-wide { min-width: 96px; color: #1a0d04; border: 0;
+                         background: linear-gradient(90deg, #ff782f, #ffb35c); font-weight: 800; }
+        .term-key-go { color: #04121c; border: 0; background: linear-gradient(90deg, #2de2ff, #7df9ff); font-weight: 800; }
+        .term-toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+                      z-index: 120; padding: 9px 16px; color: #04121c; font: 700 .74rem "Cascadia Code", Consolas, monospace;
+                      background: #2de2ff; }
         .rdp-overlay { position: fixed; z-index: 100; inset: 0; display: flex; flex-direction: column; background: #000; }
         .rdp-content { display: flex; flex: 1; min-height: 0; overflow: hidden; }
         .rdp-display { flex: 1; overflow: hidden; cursor: none; position: relative; min-width: 0; }
@@ -2486,6 +2500,17 @@ def cabinet():
         <div class="term-header">
           <span id="term-title"></span><span id="ssh-quality" class="conn-quality"></span>
           <button id="term-close" class="term-close" type="button">Закрыть</button>
+        </div>
+        <!-- Ряд кнопок для телефона: с экранной клавиатуры ни стрелок, ни Tab,
+             ни Ctrl нет, а вставку буфера браузер сам в терминал не отдаёт. -->
+        <div class="term-tools" id="term-tools">
+          <button class="term-key term-key-wide" type="button" data-paste>Вставить</button>
+          <button class="term-key term-key-go" type="button" data-key="enter">Enter ⏎</button>
+          <button class="term-key" type="button" data-key="up">↑</button>
+          <button class="term-key" type="button" data-key="down">↓</button>
+          <button class="term-key" type="button" data-key="tab">Tab</button>
+          <button class="term-key" type="button" data-key="ctrlc">Ctrl+C</button>
+          <button class="term-key" type="button" data-key="esc">Esc</button>
         </div>
         <div id="term-body" class="term-body"></div>
       </div>
@@ -3124,6 +3149,50 @@ def cabinet():
             termBody.innerHTML = "";
           };
           termClose.addEventListener("click", closeTerminal);
+
+          // ── Кнопки консоли ───────────────────────────────────────────
+          // Всё уходит в тот же канал, что и набор с клавиатуры, поэтому
+          // сервер про эти кнопки ничего не знает и знать не должен.
+          const termSend = (data) => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({ type: "data", data }));
+            }
+            if (term) term.focus();
+          };
+
+          const termToast = (text) => {
+            const el = document.createElement("div");
+            el.className = "term-toast";
+            el.textContent = text;
+            document.body.appendChild(el);
+            setTimeout(() => el.remove(), 1800);
+          };
+
+          // Коды держим здесь, а не в атрибутах разметки: в атрибуте «\\r» так и
+          // остался бы двумя символами, и терминал получал бы текст вместо Enter.
+          const TERM_KEYS = {
+            enter: "\\r", up: "\\x1b[A", down: "\\x1b[B",
+            tab: "\\t", ctrlc: "\\x03", esc: "\\x1b",
+          };
+          document.querySelectorAll("#term-tools [data-key]").forEach(btn => {
+            btn.addEventListener("click", () => termSend(TERM_KEYS[btn.dataset.key] || ""));
+          });
+
+          document.querySelector("#term-tools [data-paste]").addEventListener("click", async () => {
+            let text = null;
+            try {
+              // Работает только по HTTPS и только по жесту пользователя —
+              // нажатие кнопки как раз им и является.
+              text = await navigator.clipboard.readText();
+            } catch (e) {
+              // Firefox и старые браузеры чтение буфера не дают: спрашиваем руками.
+              text = window.prompt("Вставьте команды сюда (браузер не даёт прочитать буфер сам):", "");
+            }
+            if (!text) { termToast("Буфер пуст"); return; }
+            termSend(text);
+            const lines = text.split("\\n").filter(l => l.trim()).length;
+            termToast(lines > 1 ? `Вставлено строк: ${lines}` : "Вставлено");
+          });
 
           const openTerminal = (ip, name, username, password) => {
             termTitle.textContent = name + " — " + ip;

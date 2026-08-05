@@ -144,14 +144,19 @@
   function start(root, api) {
     var canvas = document.createElement("canvas");
     canvas.width = W; canvas.height = H;
-    canvas.style.cssText = "max-width:100%;max-height:calc(100vh - 120px);width:auto;height:auto;" +
-      "image-rendering:auto";
+    canvas.style.cssText = (api.touch
+      ? "width:100%;height:auto;max-height:100%;"
+      : "max-width:100%;max-height:100%;width:auto;height:auto;") +
+      "min-height:0;object-fit:contain";
     var wrap = document.createElement("div");
-    wrap.style.cssText = "display:flex;flex-direction:column;align-items:center;gap:10px";
+    wrap.style.cssText = "display:flex;flex-direction:column;align-items:center;gap:8px;" +
+      "width:100%;max-height:100%;min-height:0";
     var tip = document.createElement("div");
-    tip.style.cssText = "color:#4a6379;font-size:.66rem;letter-spacing:.09em;text-align:center";
-    tip.textContent = "← → — двигать · ↑/X — поворот · Z — против часовой · ↓ — ускорить · " +
-      "ПРОБЕЛ — сбросить · C — карман · P — пауза";
+    tip.style.cssText = "color:#4a6379;font-size:.64rem;letter-spacing:.09em;text-align:center;flex:none";
+    tip.textContent = api.touch
+      ? "КРЕСТОВИНА — ДВИГАТЬ И УСКОРИТЬ · КРУГЛЫЕ — ПОВОРОТ И СБРОС"
+      : "← → — двигать · ↑/X — поворот · Z — против часовой · ↓ — ускорить · " +
+        "ПРОБЕЛ — сбросить · C — карман · P — пауза";
     wrap.append(canvas, tip);
     root.appendChild(wrap);
     var ctx = canvas.getContext("2d");
@@ -533,7 +538,31 @@
       }
     }
 
-    /* ── Ввод ───────────────────────────────────────────────────────────── */
+    /* ── Ввод ─────────────────────────────────────────────────────────────
+       Клавиатура и панель на телефоне дёргают одни и те же действия, чтобы
+       автоповтор и удержание вели себя одинаково. */
+    function actionDown(name) {
+      if (name === "restart") { if (over) reset(); return; }
+      if (name === "pause") { if (!over) paused = !paused; return; }
+      if (over || paused || !piece) return;
+      switch (name) {
+        case "left": move(-1, 0); dasDir = -1; dasTimer = DAS; arrTimer = 0; break;
+        case "right": move(1, 0); dasDir = 1; dasTimer = DAS; arrTimer = 0; break;
+        case "softdrop": keyState.ArrowDown = true; break;
+        case "cw": rotate(1); break;
+        case "ccw": rotate(-1); break;
+        case "flip": rotate(2); break;
+        case "drop": hardDrop(); break;
+        case "hold": doHold(); break;
+      }
+    }
+
+    function actionUp(name) {
+      if (name === "left" && dasDir === -1) dasDir = 0;
+      if (name === "right" && dasDir === 1) dasDir = 0;
+      if (name === "softdrop") keyState.ArrowDown = false;
+    }
+
     function onKeyDown(e) {
       var k = e.key;
       var lower = k.length === 1 ? k.toLowerCase() : k;
@@ -546,14 +575,14 @@
       if (keyState[k]) { e.preventDefault(); return; }   // автоповтор системы игнорируем
       keyState[k] = true;
 
-      if (k === "ArrowLeft") { move(-1, 0); dasDir = -1; dasTimer = DAS; arrTimer = 0; e.preventDefault(); }
-      else if (k === "ArrowRight") { move(1, 0); dasDir = 1; dasTimer = DAS; arrTimer = 0; e.preventDefault(); }
+      if (k === "ArrowLeft") { actionDown("left"); e.preventDefault(); }
+      else if (k === "ArrowRight") { actionDown("right"); e.preventDefault(); }
       else if (k === "ArrowDown") { e.preventDefault(); }
-      else if (k === "ArrowUp" || lower === "x" || lower === "ч") { rotate(1); e.preventDefault(); }
-      else if (lower === "z" || lower === "я" || k === "Control") { rotate(-1); e.preventDefault(); }
-      else if (lower === "a" || lower === "ф") { rotate(2); e.preventDefault(); }
-      else if (k === " ") { hardDrop(); e.preventDefault(); }
-      else if (lower === "c" || lower === "с" || k === "Shift") { doHold(); e.preventDefault(); }
+      else if (k === "ArrowUp" || lower === "x" || lower === "ч") { actionDown("cw"); e.preventDefault(); }
+      else if (lower === "z" || lower === "я" || k === "Control") { actionDown("ccw"); e.preventDefault(); }
+      else if (lower === "a" || lower === "ф") { actionDown("flip"); e.preventDefault(); }
+      else if (k === " ") { actionDown("drop"); e.preventDefault(); }
+      else if (lower === "c" || lower === "с" || k === "Shift") { actionDown("hold"); e.preventDefault(); }
     }
 
     function onKeyUp(e) {
@@ -605,6 +634,28 @@
       tick(dt);
       draw(dt);
     }
+
+    function padButton(name) {
+      return { down: function () { actionDown(name); }, up: function () { actionUp(name); } };
+    }
+
+    api.deck({
+      pad: {
+        left: padButton("left"),
+        right: padButton("right"),
+        down: padButton("softdrop"),
+      },
+      actions: [
+        { label: "◀ ПОВ", color: "#2de2ff", down: function () { actionDown("ccw"); } },
+        { label: "ПОВ ▶", color: "#2de2ff", down: function () { actionDown("cw"); } },
+        { label: "СБРОС", color: "#ff3fa4", big: true, down: function () { actionDown("drop"); } },
+      ],
+      extra: [
+        { label: "КАРМАН", down: function () { actionDown("hold"); } },
+        { label: "ПАУЗА", down: function () { actionDown("pause"); } },
+        { label: "ЗАНОВО", down: function () { reset(); } },
+      ],
+    });
 
     document.addEventListener("keydown", onKeyDown);
     document.addEventListener("keyup", onKeyUp);
