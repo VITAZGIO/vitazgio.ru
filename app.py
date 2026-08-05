@@ -3804,6 +3804,13 @@ def service_worker():
     )
 
 
+@app.get("/favicon.ico")
+def favicon():
+    """Браузеры просят его сами, без всяких ссылок в разметке. Отдаём ту же
+    иконку, что и приложению, — иначе в логах вечный 404."""
+    return redirect(url_for("app_icon", size=192))
+
+
 @app.get("/icon-<int:size>.png")
 def app_icon(size):
     if size not in (192, 512):
@@ -5286,6 +5293,23 @@ def home():
 
         .secret-trigger:focus-visible { opacity: .14; outline: 1px solid #2de2ff; }
 
+        /* Зеркало кнопки кабинета, только в левом углу и про игры. */
+        .games-trigger {
+          position: fixed;
+          z-index: 50;
+          left: 0;
+          bottom: 0;
+          width: 64px;
+          height: 64px;
+          padding: 0;
+          opacity: 0;
+          border: 0;
+          background: transparent;
+          cursor: default;
+        }
+
+        .games-trigger:focus-visible { opacity: .14; outline: 1px solid #ff3fa4; }
+
         .auth-modal {
           position: fixed;
           z-index: 100;
@@ -5412,6 +5436,7 @@ def home():
         <footer><span>© 2026 vitazgio.ru · Основан 2:12 04.05.2026</span></footer>
       </main>
       <button id="secret-trigger" class="secret-trigger" type="button" aria-label="Открыть личный кабинет"></button>
+      <button id="games-trigger" class="games-trigger" type="button" aria-label="Открыть игры"></button>
       <div id="auth-modal" class="auth-modal" hidden>
         <div class="auth-backdrop" data-auth-close></div>
         <section class="auth-panel" role="dialog" aria-modal="true" aria-labelledby="auth-title">
@@ -5531,96 +5556,31 @@ def home():
           });
         })();
 
-        // ── Konami code + змейка ──
+        // ── Игры: кнопка-невидимка слева внизу и код Konami ──
+        // Сама аркада живёт в /static/games/ и подгружается только по требованию:
+        // на обычном заходе на витрину эти килобайты никто не качает.
         (() => {
+          let pending = null;
+          const openArcade = (game) => {
+            if (window.VitazArcade) { window.VitazArcade.open(game); return; }
+            if (pending) return;
+            pending = document.createElement("script");
+            pending.src = "/static/games/arcade.js";
+            pending.onload = () => { pending = null; window.VitazArcade.open(game); };
+            pending.onerror = () => { pending = null; };
+            document.head.appendChild(pending);
+          };
+
+          const trigger = document.getElementById("games-trigger");
+          if (trigger) trigger.addEventListener("click", () => openArcade());
+
+          // Пасхалка осталась прежней, только теперь ведёт сразу в змейку.
           const SEQ = ["ArrowUp","ArrowUp","ArrowDown","ArrowDown","ArrowLeft","ArrowRight","ArrowLeft","ArrowRight","b","a"];
           let pos = 0;
           document.addEventListener("keydown", e => {
-            if (e.key === SEQ[pos]) { pos++; if (pos === SEQ.length) { pos = 0; startSnake(); } }
+            if (e.key === SEQ[pos]) { pos++; if (pos === SEQ.length) { pos = 0; openArcade("snake"); } }
             else { pos = e.key === SEQ[0] ? 1 : 0; }
           });
-
-          const startSnake = () => {
-            if (document.getElementById("snake-overlay")) return;
-            const overlay = document.createElement("div");
-            overlay.id = "snake-overlay";
-            Object.assign(overlay.style, {
-              position:"fixed", inset:"0", zIndex:"9999", background:"rgba(5,7,12,.97)",
-              display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center",
-              fontFamily:"Consolas,monospace",
-            });
-            const info = document.createElement("div");
-            info.style.cssText = "color:#6b7385;font-size:.75rem;margin-bottom:12px;letter-spacing:.06em";
-            info.textContent = "↑↓←→ — движение   Escape — выход";
-            const scoreEl = document.createElement("div");
-            scoreEl.style.cssText = "color:#2de2ff;font-size:1.1rem;font-weight:700;margin-bottom:10px;letter-spacing:.04em";
-            scoreEl.textContent = "ОЧКИ: 0";
-            const canvas = document.createElement("canvas");
-            const SZ = 20, COLS = 24, ROWS = 20;
-            canvas.width = COLS * SZ; canvas.height = ROWS * SZ;
-            canvas.style.cssText = "border:1px solid rgba(45,226,255,.2);";
-            const msgEl = document.createElement("div");
-            msgEl.style.cssText = "color:#ff782f;font-size:1rem;font-weight:700;margin-top:14px;min-height:24px;letter-spacing:.04em";
-            overlay.append(info, scoreEl, canvas, msgEl);
-            document.body.appendChild(overlay);
-            const ctx = canvas.getContext("2d");
-            let snake, dir, nextDir, food, score, running, raf;
-            const rnd = n => Math.floor(Math.random() * n);
-            const reset = () => {
-              snake = [{x:12,y:10},{x:11,y:10},{x:10,y:10}];
-              dir = {x:1,y:0}; nextDir = {x:1,y:0};
-              food = {x:rnd(COLS), y:rnd(ROWS)};
-              score = 0; running = true; msgEl.textContent = "";
-              scoreEl.textContent = "ОЧКИ: 0";
-            };
-            const draw = () => {
-              ctx.fillStyle = "#05070c"; ctx.fillRect(0,0,canvas.width,canvas.height);
-              // Grid
-              ctx.strokeStyle = "rgba(255,255,255,.04)"; ctx.lineWidth = .5;
-              for (let x=0;x<COLS;x++) { ctx.beginPath(); ctx.moveTo(x*SZ,0); ctx.lineTo(x*SZ,canvas.height); ctx.stroke(); }
-              for (let y=0;y<ROWS;y++) { ctx.beginPath(); ctx.moveTo(0,y*SZ); ctx.lineTo(canvas.width,y*SZ); ctx.stroke(); }
-              // Food
-              ctx.fillStyle = "#ff782f";
-              ctx.fillRect(food.x*SZ+3, food.y*SZ+3, SZ-6, SZ-6);
-              // Snake
-              snake.forEach((s,i) => {
-                ctx.fillStyle = i===0 ? "#2de2ff" : `rgba(45,226,255,${0.75 - i*0.02})`;
-                ctx.fillRect(s.x*SZ+1, s.y*SZ+1, SZ-2, SZ-2);
-              });
-            };
-            let last = 0;
-            const SPEED = 130;
-            const step = ts => {
-              if (!running) return;
-              raf = requestAnimationFrame(step);
-              if (ts - last < SPEED) return;
-              last = ts;
-              dir = nextDir;
-              const head = { x: (snake[0].x + dir.x + COLS) % COLS, y: (snake[0].y + dir.y + ROWS) % ROWS };
-              if (snake.some(s => s.x===head.x && s.y===head.y)) {
-                running = false;
-                msgEl.textContent = `GAME OVER — очков: ${score}. Enter — заново`;
-                draw(); return;
-              }
-              snake.unshift(head);
-              if (head.x===food.x && head.y===food.y) {
-                score++;
-                scoreEl.textContent = `ОЧКИ: ${score}`;
-                food = {x:rnd(COLS), y:rnd(ROWS)};
-              } else { snake.pop(); }
-              draw();
-            };
-            const keyFn = e => {
-              const m = {ArrowUp:{x:0,y:-1},ArrowDown:{x:0,y:1},ArrowLeft:{x:-1,y:0},ArrowRight:{x:1,y:0}};
-              if (e.key === "Escape") { cancelAnimationFrame(raf); overlay.remove(); document.removeEventListener("keydown",keyFn); return; }
-              if (e.key === "Enter" && !running) { reset(); raf = requestAnimationFrame(step); return; }
-              const nd = m[e.key];
-              if (nd && !(nd.x===-dir.x && nd.y===-dir.y)) { nextDir = nd; e.preventDefault(); }
-            };
-            document.addEventListener("keydown", keyFn);
-            reset();
-            raf = requestAnimationFrame(step);
-          };
         })();
       </script>
     </body>
