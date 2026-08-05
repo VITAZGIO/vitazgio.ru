@@ -208,6 +208,7 @@ window.VitazArcade = (function () {
 
   function formatValue(game, value) {
     var meta = board.games[game];
+    if (meta && meta.unit === "cpm") return value + " зн/м";
     if (!meta || meta.unit !== "time") return String(value);
     var m = Math.floor(value / 60), s = value % 60;
     return m + ":" + (s < 10 ? "0" : "") + s;
@@ -332,7 +333,7 @@ window.VitazArcade = (function () {
     return loaded[src];
   }
 
-  var MODULES = ["snake", "tetris", "doom", "roulette"];
+  var MODULES = ["snake", "tetris", "doom", "roulette", "typing"];
 
   function loadAll() {
     return Promise.all(MODULES.map(function (name) {

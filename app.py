@@ -700,11 +700,22 @@ ARCADE_SUBMIT_MAX = 40       # результатов с одного адрес
 # не сравнимы с новыми, — например, в DOOM добавили уровень и время
 # прохождения выросло у всех. Записи прошлой эпохи отваливаются сами при
 # первой же загрузке файла.
+# lo/hi — границы правдоподобного результата. Считает очки браузер, подделать
+# запрос может кто угодно, но хотя бы заведомая чушь в таблицу не попадёт:
+# человек не печатает тысячу знаков в минуту и не проходит DOOM за пять секунд.
 ARCADE_GAMES = {
-    "snake":    {"title": "Змейка",  "order": "max", "unit": "score", "epoch": 1},
-    "tetris":   {"title": "Тетрис",  "order": "max", "unit": "score", "epoch": 1},
-    "doom":     {"title": "DOOM",    "order": "min", "unit": "time",  "epoch": 1},
-    "roulette": {"title": "Рулетка", "order": "max", "unit": "score", "epoch": 1},
+    "snake":    {"title": "Змейка",  "order": "max", "unit": "score", "epoch": 1,
+                 "lo": 10, "hi": 20_000},
+    "tetris":   {"title": "Тетрис",  "order": "max", "unit": "score", "epoch": 1,
+                 "lo": 10, "hi": 2_000_000},
+    "doom":     {"title": "DOOM",    "order": "min", "unit": "time",  "epoch": 1,
+                 "lo": 40, "hi": 7_200},
+    "roulette": {"title": "Рулетка", "order": "max", "unit": "score", "epoch": 1,
+                 "lo": 1, "hi": 100_000},
+    # Печать меряется чистой скоростью: знаков в минуту за вычетом опечаток.
+    # Мировые рекорды слепой печати — около 900 зн/мин, потолок с запасом.
+    "typing":   {"title": "Печать",  "order": "max", "unit": "cpm",   "epoch": 1,
+                 "lo": 30, "hi": 1_500},
 }
 
 arcade_scores: dict = {}
@@ -1477,15 +1488,17 @@ def arcade_score_add():
         value = int(payload.get("value"))
     except (TypeError, ValueError):
         return jsonify(error="Плохой результат."), 400
-    if not 0 <= value <= ARCADE_VALUE_MAX:
-        return jsonify(error="Плохой результат."), 400
+    meta = ARCADE_GAMES[game]
+    if not meta.get("lo", 0) <= value <= min(meta.get("hi", ARCADE_VALUE_MAX),
+                                             ARCADE_VALUE_MAX):
+        return jsonify(error="Результат вне правдоподобных границ."), 400
 
     row = {
         "id": secrets.token_urlsafe(6),
         "name": _arcade_clean_name(payload.get("name")),
         "value": value,
         "at": time.time(),
-        "epoch": ARCADE_GAMES[game]["epoch"],
+        "epoch": meta["epoch"],
     }
     with arcade_lock:
         rows = _arcade_sort(game, arcade_scores.get(game, []) + [row])[:ARCADE_KEEP]
@@ -3460,16 +3473,22 @@ def cabinet():
           const installed = window.matchMedia("(display-mode: standalone)").matches ||
                             window.navigator.standalone === true;
 
-          // Кнопку показываем всегда, кроме этого случая. Раньше она ждала
+          // Только на телефоне и планшете. На настольном браузере поставить
+          // сайт тоже можно, но смысла в этом нет: то же самое окно и та же
+          // вкладка — кнопка там только мозолит глаза.
+          const handheld = window.matchMedia("(pointer: coarse)").matches &&
+                           "ontouchstart" in window && navigator.maxTouchPoints > 0;
+
+          // Кнопку показываем всегда, кроме этих случаев. Раньше она ждала
           // beforeinstallprompt, а он молчит, если приложение уже поставлено
           // или браузер решил, что показывать рано, — и кнопка исчезала
           // насовсем без единого объяснения.
-          if (button && !installed) button.hidden = false;
+          if (button && !installed && handheld) button.hidden = false;
 
           window.addEventListener("beforeinstallprompt", e => {
             e.preventDefault();
             prompt = e;
-            if (button) button.hidden = false;
+            if (button && handheld) button.hidden = false;
           });
           window.addEventListener("appinstalled", () => { if (button) button.hidden = true; });
 
@@ -4153,6 +4172,29 @@ _GAME_ICONS = {
         "h": ("#8a5a2b", None), "f": ("#e3ac7d", None), "F": ("#231610", "px-blink"),
         "b": ("#2f6ee0", None), "B": ("#5f9bff", None),
         "s": ("#cbd6e4", "px-sword"), "d": ("#3a4658", None),
+    }),
+    # Серверная стойка — значок личного кабинета: там как раз про сервера,
+    # а мигающие лампы делают кнопку живой без единой буквы.
+    "rack": _pixel_svg([
+        "..hhhhhhhhhh..",
+        ".hccccccccccg.",
+        ".hcSSSSSSSSch.",
+        ".hcSGr...vScg.",
+        ".hcSSSSSSSSch.",
+        ".hcSSSSSSSSch.",
+        ".hcSGy...vScg.",
+        ".hcSSSSSSSSch.",
+        ".hcSSSSSSSSch.",
+        ".hcSGr...vScg.",
+        ".hcSSSSSSSSch.",
+        ".hccccccccccg.",
+        "..hhhhhhhhhh..",
+        "..h........h..",
+    ], {
+        "h": ("#48566b", None), "c": ("#232a35", None), "g": ("#161c25", None),
+        "S": ("#2f3846", None), "G": ("#63f5ad", "px-blink"),
+        "r": ("#ff3b53", "px-blink"), "y": ("#ffd84a", "px-blink"),
+        "v": ("#5a6577", None),
     }),
     # 3. Геймпад с моргающим индикатором.
     # Полоска светодиода стоит на столбцах 5–8: центр значка — 6.5, и раньше
@@ -5798,22 +5840,6 @@ def home():
 
         [hidden] { display: none !important; }
 
-        .secret-trigger {
-          position: fixed;
-          z-index: 50;
-          right: 0;
-          bottom: 0;
-          width: 64px;
-          height: 64px;
-          padding: 0;
-          opacity: 0;
-          border: 0;
-          background: transparent;
-          cursor: default;
-        }
-
-        .secret-trigger:focus-visible { opacity: .14; outline: 1px solid #2de2ff; }
-
         /* ── Полка с кнопками аркады ────────────────────────────────────── */
         .arcade-bar {
           width: min(1380px, calc(100% - 40px));
@@ -5865,6 +5891,7 @@ def home():
         .pick:active { transform: translateY(-1px) scale(.97); }
 
         .pick--cabinet { --pc: #2de2ff; }
+        .pick--rack    { --pc: #2de2ff; }
         .pick--hero    { --pc: #5f9bff; }
         .pick--pad     { --pc: #63f5ad; }
         .pick--invader { --pc: #63f5ad; }
@@ -5889,6 +5916,10 @@ def home():
         @keyframes pxSlot { 0%, 62%, 100% { transform: translateY(0); } 74% { transform: translateY(10%); } }
         .pick--pad .pick-art svg { animation: pxTilt 3s ease-in-out infinite; }
         @keyframes pxTilt { 0%, 100% { transform: rotate(-4deg); } 50% { transform: rotate(4deg); } }
+        /* У стойки лампы моргают вразнобой: одинаковый такт выглядит мёртво. */
+        .pick--rack .pick-art svg [fill="#63f5ad"] { animation-duration: 1.7s; }
+        .pick--rack .pick-art svg [fill="#ffd84a"] { animation-duration: 3.1s; }
+        .pick--rack .pick-art svg [fill="#ff3b53"] { animation-duration: 2.3s; }
 
         @media (prefers-reduced-motion: reduce) {
           .pick-art svg, .pick-art .px-blink, .pick--cabinet .px-screen { animation: none; }
@@ -6017,12 +6048,19 @@ def home():
           </div>
         </nav>
 
-        <!-- Аркада: шесть вариантов одной кнопки, чтобы выбрать понравившийся.
-             Лишние потом просто удалить из списка ниже. -->
-        <section class="arcade-bar" aria-label="Игры">
-          <div class="arcade-bar-line"><span>ARCADE</span></div>
+        <!-- Полка с двумя кнопками: стойка ведёт в кабинет, геймпад — в игры.
+             Обе без единой буквы: подпись даёт aria-label и всплывающая
+             подсказка, а глазу хватает пиксельного значка. -->
+        <section class="arcade-bar" aria-label="Пульт">
+          <div class="arcade-bar-line"><span>ПУЛЬТ</span></div>
           <div class="arcade-picks">
-            <button class="pick pick--pad" type="button" data-games aria-label="Открыть игры">
+            <button class="pick pick--rack" type="button" id="cabinet-pick"
+                    title="Личный кабинет" aria-label="Открыть личный кабинет">
+              <span class="pick-art">__ICON_RACK__</span>
+              <span class="pick-glow"></span>
+            </button>
+            <button class="pick pick--pad" type="button" data-games
+                    title="Игры" aria-label="Открыть игры">
               <span class="pick-art">__ICON_PAD__</span>
               <span class="pick-glow"></span>
             </button>
@@ -6031,7 +6069,6 @@ def home():
 
         <footer><span>© 2026 vitazgio.ru · Основан 2:12 04.05.2026</span></footer>
       </main>
-      <button id="secret-trigger" class="secret-trigger" type="button" aria-label="Открыть личный кабинет"></button>
       <div id="auth-modal" class="auth-modal" hidden>
         <div class="auth-backdrop" data-auth-close></div>
         <section class="auth-panel" role="dialog" aria-modal="true" aria-labelledby="auth-title">
@@ -6086,7 +6123,7 @@ def home():
         })();
 
         (() => {
-          const trigger = document.getElementById("secret-trigger");
+          const trigger = document.getElementById("cabinet-pick");
           const modal = document.getElementById("auth-modal");
           const form = document.getElementById("auth-form");
           const password = document.getElementById("auth-password");
