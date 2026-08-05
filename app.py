@@ -3272,18 +3272,38 @@ def cabinet():
           const button = document.getElementById("install");
           let prompt = null;
           if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
+
+          // Уже открыто как приложение — предлагать установку незачем.
+          const installed = window.matchMedia("(display-mode: standalone)").matches ||
+                            window.navigator.standalone === true;
+
+          // Кнопку показываем всегда, кроме этого случая. Раньше она ждала
+          // beforeinstallprompt, а он молчит, если приложение уже поставлено
+          // или браузер решил, что показывать рано, — и кнопка исчезала
+          // насовсем без единого объяснения.
+          if (button && !installed) button.hidden = false;
+
           window.addEventListener("beforeinstallprompt", e => {
             e.preventDefault();
             prompt = e;
             if (button) button.hidden = false;
           });
           window.addEventListener("appinstalled", () => { if (button) button.hidden = true; });
+
           if (button) button.addEventListener("click", async () => {
-            if (!prompt) return;
-            prompt.prompt();
-            await prompt.userChoice;
-            prompt = null;
-            button.hidden = true;
+            if (prompt) {
+              prompt.prompt();
+              await prompt.userChoice;
+              prompt = null;
+              button.hidden = true;
+              return;
+            }
+            // Своего окна установки нет — подсказываем, где оно у браузера.
+            const ios = /iPhone|iPad|iPod/.test(navigator.userAgent);
+            alert(ios
+              ? "Поделиться → «На экран Домой»."
+              : "Меню браузера (⋮) → «Установить приложение» или «Добавить на главный экран».\\n\\n" +
+                "Если пункта нет — приложение уже установлено, проверьте рабочий стол.");
           });
         }
 
@@ -3796,17 +3816,53 @@ def manifest():
 
 @app.get("/sw.js")
 def service_worker():
-    """Перехватывает отправку «Поделиться» и складывает файлы в кэш браузера,
-    откуда страница дропа их забирает и грузит обычным путём — с прогрессом
-    и куками. Отправлять сразу отсюда нельзя: POST из системного меню
-    приходит без сессионной куки."""
+    """Делает три вещи: принимает «Поделиться», держит офлайн-страницу с игрой
+    и следит, чтобы установленное приложение показывало свежий сайт.
+
+    Стратегия намеренно «сначала сеть»: страницы никогда не берутся из кэша,
+    пока сеть жива, поэтому любая правка на сервере видна в приложении сразу,
+    без переустановки. Из кэша достаётся только запасная страница — и только
+    когда сети нет вовсе."""
     return Response(
         """
-        self.addEventListener("install", () => self.skipWaiting());
-        self.addEventListener("activate", event => event.waitUntil(self.clients.claim()));
+        // Версию поднимаем при изменениях: старые кэши сносятся при активации.
+        const CACHE = "vitazgio-offline-v1";
+        const OFFLINE = "/static/offline.html";
+
+        self.addEventListener("install", event => {
+          event.waitUntil(
+            caches.open(CACHE).then(c => c.add(new Request(OFFLINE, { cache: "reload" })))
+                  .catch(() => {})
+          );
+          self.skipWaiting();
+        });
+
+        self.addEventListener("activate", event => {
+          event.waitUntil((async () => {
+            const names = await caches.keys();
+            await Promise.all(names.map(n => {
+              if (n !== CACHE && n !== "share-inbox") return caches.delete(n);
+            }));
+            await self.clients.claim();
+          })());
+        });
 
         self.addEventListener("fetch", event => {
           const url = new URL(event.request.url);
+
+          // Переходы по страницам: всегда идём в сеть, а без неё показываем лису.
+          if (event.request.mode === "navigate" && event.request.method === "GET") {
+            event.respondWith((async () => {
+              try {
+                return await fetch(event.request);
+              } catch (e) {
+                const cached = await caches.match(OFFLINE);
+                return cached || new Response("Нет связи", { status: 503 });
+              }
+            })());
+            return;
+          }
+
           if (event.request.method !== "POST" || url.pathname !== "/share-target") return;
 
           event.respondWith((async () => {
@@ -5813,7 +5869,13 @@ def home():
           });
         })();
 
-        // ── Игры: кнопка-невидимка слева внизу и код Konami ──
+        // Service worker регистрируем и здесь: приложение стартует с главной,
+        // и без него запасная страница с лисой в офлайне просто не покажется.
+        if ("serviceWorker" in navigator) {
+          navigator.serviceWorker.register("/sw.js").catch(() => {});
+        }
+
+        // ── Игры: кнопки на полке ARCADE и код Konami ──
         // Сама аркада живёт в /static/games/ и подгружается только по требованию:
         // на обычном заходе на витрину эти килобайты никто не качает.
         (() => {

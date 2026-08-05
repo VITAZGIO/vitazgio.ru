@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0d1321">
+  <title>Нет связи · vitazgio.ru</title>
+  <style>
+    /* Страница обязана быть полностью самодостаточной: её показывают, когда
+       сети нет вовсе, поэтому ни одного внешнего файла, шрифта или картинки. */
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0; display: flex; flex-direction: column; align-items: center;
+      justify-content: center; gap: 14px; padding: 20px;
+      color: #e9f3ff; font-family: "Cascadia Code", Consolas, ui-monospace, monospace;
+      background: radial-gradient(circle at 50% 12%, #1b2740, #0a0e17 62%);
+      -webkit-user-select: none; user-select: none; touch-action: manipulation;
+    }
+    h1 { margin: 0; font-size: clamp(1.1rem, 4vw, 1.6rem); letter-spacing: .04em; }
+    h1 b { color: #ff8a3d; }
+    .sub { margin: 0; color: #7c8aa3; font-size: .76rem; letter-spacing: .06em; text-align: center; }
+    .frame {
+      position: relative; width: min(760px, 100%);
+      border: 1px solid rgba(255,255,255,.1); border-radius: 12px; overflow: hidden;
+      background: #0b1018; box-shadow: 0 20px 60px rgba(0,0,0,.55);
+    }
+    canvas { width: 100%; height: auto; display: block; touch-action: none; }
+    .hint { color: #55637a; font-size: .68rem; letter-spacing: .1em; text-align: center; }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+    button {
+      padding: 11px 18px; color: #04121c; font: 800 .74rem "Cascadia Code", Consolas, monospace;
+      letter-spacing: .08em; text-transform: uppercase; border: 0; border-radius: 8px;
+      background: linear-gradient(90deg, #2de2ff, #7df9ff); cursor: pointer;
+    }
+    button.ghost { color: #bfe6f5; background: transparent; border: 1px solid rgba(45,226,255,.3); }
+    .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+           background: #ff6b81; margin-right: 8px; animation: pulse 1.6s ease-in-out infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+  </style>
+</head>
+<body>
+  <h1><span class="dot"></span>Нет связи с <b>vitazgio.ru</b></h1>
+  <p class="sub">Пока сеть возвращается — держи лису. Прыгай через камни и кусты.</p>
+
+  <div class="frame"><canvas id="game" width="760" height="240"></canvas></div>
+
+  <div class="hint" id="hint">ПРОБЕЛ ИЛИ ТЫК ПО ЭКРАНУ — ПРЫЖОК · ВНИЗ — ПРИГНУТЬСЯ</div>
+  <div class="row">
+    <button id="retry" type="button">Проверить связь</button>
+    <button id="restart" class="ghost" type="button">Начать заново</button>
+  </div>
+
+<script>
+(function () {
+  "use strict";
+  var canvas = document.getElementById("game");
+  var ctx = canvas.getContext("2d");
+  var W = canvas.width, H = canvas.height;
+  var GROUND = H - 42;
+
+  var best = 0;
+  try { best = parseInt(localStorage.getItem("vitaz-fox-best") || "0", 10) || 0; } catch (e) {}
+
+  var fox, obstacles, clouds, speed, score, over, started, groundShift, raf, last;
+
+  function reset() {
+    fox = { x: 78, y: GROUND, vy: 0, onGround: true, duck: false, run: 0, blink: 0 };
+    obstacles = [];
+    clouds = [{ x: 200, y: 50, s: 1 }, { x: 520, y: 78, s: .7 }];
+    speed = 6.2;
+    score = 0;
+    over = false;
+    started = false;
+    groundShift = 0;
+    last = 0;
+  }
+
+  /* ── Лиса ───────────────────────────────────────────────────────────────
+     Рисуется кодом: тело, хвост, лапы и морда. Бег — качание лап и хвоста
+     по фазе, прыжок — отдельная поза. */
+  function drawFox(t) {
+    var duck = fox.duck && fox.onGround;
+    var bodyH = duck ? 20 : 30;
+    var y = fox.y - bodyH;
+    var phase = fox.onGround ? Math.sin(fox.run * 0.5) : 0;
+
+    ctx.save();
+    ctx.translate(fox.x, y);
+    if (duck) ctx.translate(0, 8);
+
+    // хвост — пышный, качается в противофазе лапам
+    ctx.save();
+    ctx.translate(-6, bodyH * 0.42);
+    ctx.rotate(-0.5 + phase * 0.18);
+    var tail = ctx.createLinearGradient(0, 0, -26, 0);
+    tail.addColorStop(0, "#e2762a");
+    tail.addColorStop(1, "#ffd9b8");
+    ctx.fillStyle = tail;
+    ctx.beginPath();
+    ctx.moveTo(0, -5);
+    ctx.quadraticCurveTo(-22, -16, -30, -2);
+    ctx.quadraticCurveTo(-22, 8, 0, 6);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+
+    // лапы
+    ctx.strokeStyle = "#2a1a12";
+    ctx.lineWidth = 4;
+    ctx.lineCap = "round";
+    [[-1, 6], [1, 20]].forEach(function (pair) {
+      var dir = pair[0], px = pair[1];
+      ctx.beginPath();
+      ctx.moveTo(px, bodyH - 4);
+      ctx.lineTo(px + dir * phase * 7, bodyH + 9);
+      ctx.stroke();
+    });
+
+    // тело
+    ctx.fillStyle = "#ef8130";
+    ctx.beginPath();
+    ctx.moveTo(-4, bodyH * 0.2);
+    ctx.quadraticCurveTo(-2, bodyH, 14, bodyH);
+    ctx.lineTo(26, bodyH);
+    ctx.quadraticCurveTo(34, bodyH * 0.7, 32, bodyH * 0.25);
+    ctx.quadraticCurveTo(20, -2, -4, bodyH * 0.2);
+    ctx.closePath();
+    ctx.fill();
+    // светлое брюхо
+    ctx.fillStyle = "#ffe3c8";
+    ctx.beginPath();
+    ctx.ellipse(16, bodyH - 6, 11, 5, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // голова
+    var hx = 30, hy = bodyH * 0.2;
+    ctx.fillStyle = "#ef8130";
+    ctx.beginPath();
+    ctx.moveTo(hx - 6, hy + 10);
+    ctx.quadraticCurveTo(hx - 4, hy - 6, hx + 8, hy - 4);
+    ctx.quadraticCurveTo(hx + 20, hy + 1, hx + 20, hy + 7);
+    ctx.quadraticCurveTo(hx + 8, hy + 14, hx - 6, hy + 10);
+    ctx.closePath();
+    ctx.fill();
+    // уши
+    ctx.beginPath();
+    ctx.moveTo(hx - 2, hy - 2);
+    ctx.lineTo(hx + 1, hy - 14);
+    ctx.lineTo(hx + 9, hy - 4);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = "#2a1a12";
+    ctx.beginPath();
+    ctx.moveTo(hx + 1, hy - 5);
+    ctx.lineTo(hx + 2, hy - 11);
+    ctx.lineTo(hx + 6, hy - 5);
+    ctx.closePath();
+    ctx.fill();
+    // морда и нос
+    ctx.fillStyle = "#ffe3c8";
+    ctx.beginPath();
+    ctx.ellipse(hx + 15, hy + 8, 6, 3.4, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#231610";
+    ctx.beginPath();
+    ctx.arc(hx + 20, hy + 7, 2.2, 0, Math.PI * 2);
+    ctx.fill();
+    // глаз — иногда моргает
+    if (fox.blink < 6) {
+      ctx.beginPath();
+      ctx.arc(hx + 9, hy + 3, 2, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      ctx.fillRect(hx + 7, hy + 3, 4, 1.4);
+    }
+    ctx.restore();
+  }
+
+  function drawObstacle(o) {
+    ctx.save();
+    ctx.translate(o.x, GROUND);
+    if (o.kind === "bird") {
+      ctx.translate(0, -o.h);
+      ctx.fillStyle = "#8fa5b8";
+      var flap = Math.sin(score * 0.4) * 6;
+      ctx.beginPath();
+      ctx.moveTo(-12, 0); ctx.lineTo(0, -4 - flap); ctx.lineTo(12, 0);
+      ctx.lineTo(0, 4); ctx.closePath();
+      ctx.fill();
+    } else if (o.kind === "rock") {
+      ctx.fillStyle = "#5c6675";
+      ctx.beginPath();
+      ctx.moveTo(-o.w / 2, 0);
+      ctx.lineTo(-o.w / 3, -o.h);
+      ctx.lineTo(o.w / 4, -o.h * 0.8);
+      ctx.lineTo(o.w / 2, 0);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,.12)";
+      ctx.fillRect(-o.w / 3, -o.h, 4, o.h * 0.7);
+    } else {
+      ctx.fillStyle = "#2f7d4f";
+      for (var i = -1; i <= 1; i++) {
+        ctx.beginPath();
+        ctx.ellipse(i * (o.w / 3.2), -o.h * (i === 0 ? 0.62 : 0.42),
+                    o.w / 3.4, o.h * (i === 0 ? 0.62 : 0.42), 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.fillStyle = "#245f3c";
+      ctx.fillRect(-2, -o.h * 0.4, 4, o.h * 0.4);
+    }
+    ctx.restore();
+  }
+
+  function spawn() {
+    var roll = Math.random();
+    if (roll < 0.18 && score > 260) {
+      obstacles.push({ kind: "bird", x: W + 40, w: 26, h: 54 + Math.random() * 26 });
+    } else if (roll < 0.55) {
+      obstacles.push({ kind: "rock", x: W + 40, w: 22 + Math.random() * 14, h: 20 + Math.random() * 14 });
+    } else {
+      obstacles.push({ kind: "bush", x: W + 40, w: 26 + Math.random() * 20, h: 26 + Math.random() * 16 });
+    }
+  }
+
+  function foxBox() {
+    var duck = fox.duck && fox.onGround;
+    return { x: fox.x - 4, y: fox.y - (duck ? 20 : 30), w: 40, h: duck ? 20 : 30 };
+  }
+
+  function hit(o) {
+    var b = foxBox();
+    var ox = o.x - o.w / 2, oy = GROUND - o.h;
+    if (o.kind === "bird") oy = GROUND - o.h;
+    var oh = o.kind === "bird" ? 16 : o.h;
+    return b.x < ox + o.w && b.x + b.w > ox && b.y < oy + oh && b.y + b.h > oy;
+  }
+
+  function jump() {
+    if (over) { reset(); started = true; return; }
+    started = true;
+    if (fox.onGround) { fox.vy = -12.4; fox.onGround = false; }
+  }
+
+  function update(dt) {
+    if (!started || over) return;
+    var k = dt / 16.7;
+    score += 0.28 * k;
+    speed = 6.2 + Math.min(7, score / 90);
+
+    fox.vy += 0.62 * k;
+    fox.y += fox.vy * k;
+    if (fox.y >= GROUND) { fox.y = GROUND; fox.vy = 0; fox.onGround = true; }
+    if (fox.duck && !fox.onGround) fox.vy += 0.5 * k;   // приседая, падаем быстрее
+    fox.run += (fox.onGround ? speed * 0.16 : 0) * k;
+    fox.blink = (fox.blink + k * 0.6) % 90;
+
+    groundShift = (groundShift + speed * k) % 40;
+
+    if (!obstacles.length || obstacles[obstacles.length - 1].x < W - (150 + Math.random() * 240)) {
+      spawn();
+    }
+    for (var i = obstacles.length - 1; i >= 0; i--) {
+      obstacles[i].x -= speed * k;
+      if (obstacles[i].x < -60) { obstacles.splice(i, 1); continue; }
+      if (hit(obstacles[i])) {
+        over = true;
+        if (score > best) {
+          best = Math.floor(score);
+          try { localStorage.setItem("vitaz-fox-best", String(best)); } catch (e) {}
+        }
+        try { if (navigator.vibrate) navigator.vibrate([60, 40, 120]); } catch (e) {}
+      }
+    }
+    clouds.forEach(function (c) {
+      c.x -= speed * 0.16 * c.s * k;
+      if (c.x < -80) { c.x = W + 60; c.y = 30 + Math.random() * 60; }
+    });
+  }
+
+  function draw() {
+    ctx.fillStyle = "#0b1018";
+    ctx.fillRect(0, 0, W, H);
+
+    // далёкие холмы
+    ctx.fillStyle = "#141d2b";
+    ctx.beginPath();
+    ctx.moveTo(0, GROUND);
+    for (var x = 0; x <= W; x += 40) {
+      ctx.lineTo(x, GROUND - 26 - Math.sin((x + groundShift * 0.3) / 90) * 14);
+    }
+    ctx.lineTo(W, GROUND); ctx.closePath(); ctx.fill();
+
+    clouds.forEach(function (c) {
+      ctx.fillStyle = "rgba(255,255,255,.06)";
+      ctx.beginPath();
+      ctx.ellipse(c.x, c.y, 30 * c.s, 9 * c.s, 0, 0, Math.PI * 2);
+      ctx.ellipse(c.x + 18 * c.s, c.y + 3 * c.s, 20 * c.s, 7 * c.s, 0, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    // земля
+    ctx.strokeStyle = "#33405a";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(0, GROUND + 1); ctx.lineTo(W, GROUND + 1);
+    ctx.stroke();
+    ctx.strokeStyle = "#1e2839";
+    for (var g = -40; g < W; g += 40) {
+      ctx.beginPath();
+      ctx.moveTo(g + groundShift, GROUND + 12);
+      ctx.lineTo(g + groundShift + 16, GROUND + 12);
+      ctx.stroke();
+    }
+
+    obstacles.forEach(drawObstacle);
+    drawFox();
+
+    // счёт
+    ctx.fillStyle = "#7c8aa3";
+    ctx.font = 'bold 14px "Cascadia Code", Consolas, monospace';
+    ctx.textAlign = "right";
+    ctx.fillText("РЕКОРД " + best + "   ОЧКИ " + Math.floor(score), W - 14, 26);
+
+    if (!started) {
+      ctx.textAlign = "center";
+      ctx.fillStyle = "#e9f3ff";
+      ctx.font = 'bold 17px "Cascadia Code", Consolas, monospace';
+      ctx.fillText("ТЫК ИЛИ ПРОБЕЛ — ПОБЕЖАЛИ", W / 2, H / 2 - 26);
+    }
+    if (over) {
+      ctx.fillStyle = "rgba(8,12,20,.78)";
+      ctx.fillRect(0, 0, W, H);
+      ctx.textAlign = "center";
+      ctx.fillStyle = "#ff8a3d";
+      ctx.font = 'bold 22px "Cascadia Code", Consolas, monospace';
+      ctx.fillText("ЛИСА УСТАЛА", W / 2, H / 2 - 8);
+      ctx.fillStyle = "#e9f3ff";
+      ctx.font = 'bold 14px "Cascadia Code", Consolas, monospace';
+      ctx.fillText("Очки: " + Math.floor(score) + "   ·   Рекорд: " + best, W / 2, H / 2 + 18);
+      ctx.fillStyle = "#7c8aa3";
+      ctx.font = '12px "Cascadia Code", Consolas, monospace';
+      ctx.fillText("тык или пробел — заново", W / 2, H / 2 + 42);
+    }
+  }
+
+  function loop(now) {
+    raf = requestAnimationFrame(loop);
+    var dt = Math.min(50, now - last || 16);
+    last = now;
+    update(dt);
+    draw();
+  }
+
+  document.addEventListener("keydown", function (e) {
+    if (e.code === "Space" || e.code === "ArrowUp" || e.key === " ") { jump(); e.preventDefault(); }
+    if (e.code === "ArrowDown") { fox.duck = true; e.preventDefault(); }
+  });
+  document.addEventListener("keyup", function (e) {
+    if (e.code === "ArrowDown") fox.duck = false;
+  });
+  canvas.addEventListener("touchstart", function (e) { jump(); e.preventDefault(); }, { passive: false });
+  canvas.addEventListener("mousedown", function () { jump(); });
+
+  document.getElementById("restart").addEventListener("click", function () { reset(); started = true; });
+  document.getElementById("retry").addEventListener("click", function () {
+    location.replace("/");
+  });
+
+  // Как только сеть вернулась — уводим обратно на сайт сами.
+  window.addEventListener("online", function () {
+    document.getElementById("hint").textContent = "СВЯЗЬ ВЕРНУЛАСЬ — ВОЗВРАЩАЕМСЯ…";
+    setTimeout(function () { location.replace("/"); }, 900);
+  });
+
+  reset();
+  raf = requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
