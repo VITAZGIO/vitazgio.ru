@@ -2118,11 +2118,6 @@ def cabinet():
         /* Верхний блок: метрики во всю ширину */
         .dash { padding: 18px 20px 16px; border: 1px solid rgba(45,226,255,.16); background: rgba(10,17,30,.72); }
         .dash-title { margin-bottom: 14px; color: #8f99ab; font: 700 .76rem "Cascadia Code", Consolas, monospace; letter-spacing: .1em; text-transform: uppercase; }
-        .uptime-strip { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin-top: 16px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,.07); }
-        .uptime-cap { color: #8f99ab; font-size: .72rem; letter-spacing: .08em; text-transform: uppercase; }
-        .uptime-clock { display: flex; align-items: baseline; gap: 3px; }
-        .uptime-clock b { color: #2de2ff; font: 800 1.5rem "Cascadia Code", Consolas, monospace; letter-spacing: -.03em; }
-        .uptime-clock i { margin-right: 9px; color: #55607a; font-style: normal; font-size: .7rem; }
 
         /* Панель с логотипом. Модификатор --right зеркалит: логотип справа. */
         .panel { display: block; margin-top: 14px; color: inherit; text-decoration: none;
@@ -2220,15 +2215,6 @@ def cabinet():
           <section class="dash">
             <div class="dash-title">Метрики машин</div>
             <div class="metrics-grid" id="metrics-grid"><p class="widget-empty">Загрузка…</p></div>
-            <div class="uptime-strip">
-              <span class="uptime-cap">Сервер жив уже</span>
-              <span class="uptime-clock">
-                <b id="up-d">…</b><i>д</i>
-                <b id="up-h">…</b><i>ч</i>
-                <b id="up-m">…</b><i>м</i>
-                <b id="up-s">…</b><i>с</i>
-              </span>
-            </div>
           </section>
 
           <!-- NetBird — логотип слева -->
@@ -3596,29 +3582,9 @@ def cabinet():
           if (grid) { render(); timer = setInterval(render, 32000); }
         }
 
-        // ── Аптайм ──
-        {
-          const dEl = document.getElementById("up-d");
-          const hEl = document.getElementById("up-h");
-          const mEl = document.getElementById("up-m");
-          const sEl = document.getElementById("up-s");
-          const pad = n => String(n).padStart(2, "0");
-          let base = null, startTs = null;
-          const tick = () => {
-            if (base === null) return;
-            const total = base + Math.floor((Date.now() - startTs) / 1000);
-            dEl.textContent = Math.floor(total / 86400);
-            hEl.textContent = pad(Math.floor((total % 86400) / 3600));
-            mEl.textContent = pad(Math.floor((total % 3600) / 60));
-            sEl.textContent = pad(total % 60);
-          };
-          fetch("/api/uptime", { credentials: "same-origin" })
-            .then(r => r.json()).then(d => {
-              if (d.seconds == null) { dEl.closest(".uptime-clock").textContent = "нет данных"; return; }
-              base = d.seconds; startTs = Date.now();
-              tick(); setInterval(tick, 1000);
-            }).catch(() => { if (dEl) dEl.closest(".uptime-clock").textContent = "нет данных"; });
-        }
+        // Отдельной строки с аптаймом больше нет: у каждой из четырёх машин
+        // время работы и так подписано в своей карточке. /api/uptime жив —
+        // он ещё пригодится, просто на витрине его никто не показывает.
 
         // ── Журнал входов ──
         {
@@ -3871,6 +3837,134 @@ def service_worker():
         """,
         mimetype="application/javascript",
     )
+
+
+# ---- Пиксельные значки для кнопок игр ---------------------------------------
+# Спрайт описан строками: символ — цвет из палитры, точка — прозрачно.
+# Собираем из них SVG с прямоугольниками 1x1: масштабируется без размытия,
+# весит копейки и не требует ни одной картинки.
+
+def _pixel_svg(rows, palette):
+    width = max(len(row) for row in rows)
+    parts = []
+    for y, row in enumerate(rows):
+        x = 0
+        while x < len(row):
+            char = row[x]
+            if char == ".":
+                x += 1
+                continue
+            # Соседние клетки одного цвета склеиваем в один прямоугольник —
+            # иначе на спрайт уходит под сотню тегов.
+            run = 1
+            while x + run < len(row) and row[x + run] == char:
+                run += 1
+            color, cls = palette[char]
+            klass = f' class="{cls}"' if cls else ""
+            parts.append(f'<rect x="{x}" y="{y}" width="{run}" height="1" fill="{color}"{klass}/>')
+            x += run
+    return (f'<svg viewBox="0 0 {width} {len(rows)}" shape-rendering="crispEdges" '
+            f'aria-hidden="true">{"".join(parts)}</svg>')
+
+
+_GAME_ICONS = {
+    # 1. Аркадный автомат: экран мигает, на нём бегут пиксели
+    "cabinet": _pixel_svg([
+        "..hhhhhhhh..",
+        ".hSSSSSSSSh.",
+        ".hSggggggSh.",
+        ".hSg.pp.gSh.",
+        ".hSgpppppgSh",
+        ".hSg.pp.gSh.",
+        ".hSSSSSSSSh.",
+        ".hhhhhhhhhh.",
+        ".hbbbbbbbbh.",
+        ".hbRbb..Ybh.",
+        ".hbbbbbbbbh.",
+        ".hhhhhhhhhh.",
+        "..h......h..",
+        ".hhh....hhh.",
+    ], {
+        "h": ("#48566b", None), "S": ("#151a22", None), "g": ("#0b2231", "px-screen"),
+        "p": ("#2de2ff", "px-screen"), "b": ("#232a35", None),
+        "R": ("#ff3b53", "px-blink"), "Y": ("#ffd84a", None),
+    }),
+    # 2. Пиксельный герой с мечом
+    "hero": _pixel_svg([
+        "...hhhh...",
+        "..hffffh..",
+        "..fFffFf..",
+        "..ffffff..",
+        ".sbbBBbb..",
+        ".sbBBBBb..",
+        ".s.bbbb...",
+        "...bb.bb..",
+        "...dd.dd..",
+        "...dd.dd..",
+        "..ddd.ddd.",
+        "..........",
+    ], {
+        "h": ("#8a5a2b", None), "f": ("#e3ac7d", None), "F": ("#231610", "px-blink"),
+        "b": ("#2f6ee0", None), "B": ("#5f9bff", None),
+        "s": ("#cbd6e4", "px-sword"), "d": ("#3a4658", None),
+    }),
+    # 3. Геймпад с моргающим индикатором
+    "pad": _pixel_svg([
+        "..BBBBBBBBBB..",
+        ".BBBBBBBBBBBB.",
+        "BB.w.BBBB.r.BB",
+        "B.www.BB.rrrBB",
+        "BB.w.BBBB.r.BB",
+        "BBBBLLLLBBBBBB",
+        ".BBBBBBBBBBBB.",
+        "..BBB....BBB..",
+    ], {
+        "B": ("#3d4757", None), "w": ("#cdd8e6", None), "r": ("#ff5a6e", None),
+        "L": ("#63f5ad", "px-blink"),
+    }),
+    # 4. Космический захватчик
+    "invader": _pixel_svg([
+        "..g.....g..",
+        "...g...g...",
+        "..ggggggg..",
+        ".gg.ggg.gg.",
+        "ggggggggggg",
+        "g.ggggggg.g",
+        "g.g.....g.g",
+        "...gg.gg...",
+    ], {"g": ("#63f5ad", "px-invader")}),
+    # 5. Монета «брось жетон»
+    "coin": _pixel_svg([
+        "...cccc...",
+        ".ccyyyycc.",
+        ".cyy..yyc.",
+        "cyy.yy.yyc",
+        "cy.yyyy.yc",
+        "cy.yyyy.yc",
+        "cyy.yy.yyc",
+        ".cyy..yyc.",
+        ".ccyyyycc.",
+        "...cccc...",
+    ], {"c": ("#b8860b", None), "y": ("#ffd84a", "px-shine")}),
+    # 6. Картридж
+    "cart": _pixel_svg([
+        "pppppppppppp",
+        "p.llllllll.p",
+        "p.l......l.p",
+        "p.l.LLLL.l.p",
+        "p.l.L..L.l.p",
+        "p.l.LLLL.l.p",
+        "p.l......l.p",
+        "p.llllllll.p",
+        "pppppppppppp",
+        ".pppppppppp.",
+        ".gggggggggg.",
+        "..g.g.g.g...",
+    ], {
+        "p": ("#6b3fa0", None), "l": ("#432769", None),
+        "L": ("#ff3fa4", "px-blink"), "g": ("#d8b23a", None),
+    }),
+}
 
 
 @app.get("/favicon.ico")
@@ -5053,7 +5147,7 @@ def drop_page():
 
 @app.route("/")
 def home():
-    return """
+    html = """
     <!DOCTYPE html>
     <html lang="ru">
     <head>
@@ -5362,22 +5456,85 @@ def home():
 
         .secret-trigger:focus-visible { opacity: .14; outline: 1px solid #2de2ff; }
 
-        /* Зеркало кнопки кабинета, только в левом углу и про игры. */
-        .games-trigger {
-          position: fixed;
-          z-index: 50;
-          left: 0;
-          bottom: 0;
-          width: 64px;
-          height: 64px;
-          padding: 0;
-          opacity: 0;
-          border: 0;
-          background: transparent;
-          cursor: default;
+        /* ── Полка с кнопками аркады ────────────────────────────────────── */
+        .arcade-bar {
+          width: min(1380px, calc(100% - 40px));
+          margin: clamp(26px, 4vw, 44px) auto 0;
         }
+        .arcade-bar-line {
+          display: flex; align-items: center; gap: 14px;
+          color: #6b7590; font: 700 .68rem "Cascadia Code", Consolas, monospace;
+          letter-spacing: .32em;
+        }
+        .arcade-bar-line::before, .arcade-bar-line::after {
+          content: ""; flex: 1; height: 1px;
+          background: linear-gradient(90deg, transparent, rgba(255,255,255,.14), transparent);
+        }
+        .arcade-picks {
+          display: grid; gap: 14px; margin-top: 16px;
+          grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+        }
+        .pick {
+          --pc: #2de2ff;
+          position: relative; display: grid; place-items: center;
+          aspect-ratio: 1 / 1; padding: 14px; cursor: pointer; overflow: hidden;
+          border: 1px solid rgba(255,255,255,.1); border-radius: 14px;
+          background:
+            repeating-linear-gradient(45deg, rgba(255,255,255,.015) 0 8px, transparent 8px 16px),
+            linear-gradient(165deg, rgba(26,34,50,.95), rgba(9,13,20,.96));
+          transition: transform .2s cubic-bezier(.2,.9,.3,1.3), border-color .2s, box-shadow .2s;
+        }
+        .pick-art { position: relative; z-index: 2; width: 68%; display: block; }
+        .pick-art svg { width: 100%; height: auto; display: block;
+                        filter: drop-shadow(0 3px 6px rgba(0,0,0,.6)); }
+        /* мягкое пятно света под персонажем, разгорается при наведении */
+        .pick-glow {
+          position: absolute; z-index: 1; inset: auto 0 -40% 0; height: 80%;
+          background: radial-gradient(ellipse at 50% 100%, var(--pc), transparent 68%);
+          opacity: .1; transition: opacity .25s;
+        }
+        .pick::after {
+          content: ""; position: absolute; inset: 0; z-index: 3; pointer-events: none;
+          background: repeating-linear-gradient(180deg, rgba(0,0,0,.16) 0 2px, transparent 2px 4px);
+          opacity: .35;
+        }
+        .pick:hover, .pick:focus-visible {
+          transform: translateY(-5px);
+          border-color: var(--pc); outline: none;
+          box-shadow: 0 0 0 1px var(--pc), 0 16px 34px rgba(0,0,0,.5);
+        }
+        .pick:hover .pick-glow, .pick:focus-visible .pick-glow { opacity: .4; }
+        .pick:active { transform: translateY(-1px) scale(.97); }
 
-        .games-trigger:focus-visible { opacity: .14; outline: 1px solid #ff3fa4; }
+        .pick--cabinet { --pc: #2de2ff; }
+        .pick--hero    { --pc: #5f9bff; }
+        .pick--pad     { --pc: #63f5ad; }
+        .pick--invader { --pc: #63f5ad; }
+        .pick--coin    { --pc: #ffd84a; }
+        .pick--cart    { --pc: #ff3fa4; }
+
+        /* Каждый персонаж живёт по-своему: у автомата мерцает экран, у героя
+           блестит меч, захватчик приплясывает, монета крутится. */
+        .pick-art .px-blink { animation: pxBlink 2.2s steps(1) infinite; }
+        @keyframes pxBlink { 0%, 82% { opacity: 1; } 86%, 100% { opacity: .25; } }
+        .pick--cabinet .px-screen { animation: pxFlicker 3.4s ease-in-out infinite; }
+        @keyframes pxFlicker { 0%, 100% { opacity: 1; } 47% { opacity: .72; } 51% { opacity: 1; } }
+        .pick--hero .pick-art svg { animation: pxHop 1.9s ease-in-out infinite; }
+        @keyframes pxHop { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6%); } }
+        .pick--hero .px-sword { animation: pxShine 2.6s ease-in-out infinite; }
+        @keyframes pxShine { 0%, 70%, 100% { fill: #cbd6e4; } 80% { fill: #ffffff; } }
+        .pick--invader .pick-art svg { animation: pxMarch 1.1s steps(2) infinite; }
+        @keyframes pxMarch { 0% { transform: translateX(-6%); } 50% { transform: translateX(6%); } }
+        .pick--coin .pick-art svg { animation: pxSpin 2.8s ease-in-out infinite; }
+        @keyframes pxSpin { 0%, 100% { transform: scaleX(1); } 50% { transform: scaleX(.18); } }
+        .pick--cart .pick-art svg { animation: pxSlot 3.2s ease-in-out infinite; }
+        @keyframes pxSlot { 0%, 62%, 100% { transform: translateY(0); } 74% { transform: translateY(10%); } }
+        .pick--pad .pick-art svg { animation: pxTilt 3s ease-in-out infinite; }
+        @keyframes pxTilt { 0%, 100% { transform: rotate(-4deg); } 50% { transform: rotate(4deg); } }
+
+        @media (prefers-reduced-motion: reduce) {
+          .pick-art svg, .pick-art .px-blink, .pick--cabinet .px-screen { animation: none; }
+        }
 
         .auth-modal {
           position: fixed;
@@ -5502,10 +5659,41 @@ def home():
           </div>
         </nav>
 
+        <!-- Аркада: шесть вариантов одной кнопки, чтобы выбрать понравившийся.
+             Лишние потом просто удалить из списка ниже. -->
+        <section class="arcade-bar" aria-label="Игры">
+          <div class="arcade-bar-line"><span>ARCADE</span></div>
+          <div class="arcade-picks">
+            <button class="pick pick--cabinet" type="button" data-games aria-label="Открыть игры">
+              <span class="pick-art">__ICON_CABINET__</span>
+              <span class="pick-glow"></span>
+            </button>
+            <button class="pick pick--hero" type="button" data-games aria-label="Открыть игры">
+              <span class="pick-art">__ICON_HERO__</span>
+              <span class="pick-glow"></span>
+            </button>
+            <button class="pick pick--pad" type="button" data-games aria-label="Открыть игры">
+              <span class="pick-art">__ICON_PAD__</span>
+              <span class="pick-glow"></span>
+            </button>
+            <button class="pick pick--invader" type="button" data-games aria-label="Открыть игры">
+              <span class="pick-art">__ICON_INVADER__</span>
+              <span class="pick-glow"></span>
+            </button>
+            <button class="pick pick--coin" type="button" data-games aria-label="Открыть игры">
+              <span class="pick-art">__ICON_COIN__</span>
+              <span class="pick-glow"></span>
+            </button>
+            <button class="pick pick--cart" type="button" data-games aria-label="Открыть игры">
+              <span class="pick-art">__ICON_CART__</span>
+              <span class="pick-glow"></span>
+            </button>
+          </div>
+        </section>
+
         <footer><span>© 2026 vitazgio.ru · Основан 2:12 04.05.2026</span></footer>
       </main>
       <button id="secret-trigger" class="secret-trigger" type="button" aria-label="Открыть личный кабинет"></button>
-      <button id="games-trigger" class="games-trigger" type="button" aria-label="Открыть игры"></button>
       <div id="auth-modal" class="auth-modal" hidden>
         <div class="auth-backdrop" data-auth-close></div>
         <section class="auth-panel" role="dialog" aria-modal="true" aria-labelledby="auth-title">
@@ -5640,8 +5828,9 @@ def home():
             document.head.appendChild(pending);
           };
 
-          const trigger = document.getElementById("games-trigger");
-          if (trigger) trigger.addEventListener("click", () => openArcade());
+          document.querySelectorAll("[data-games]").forEach(btn => {
+            btn.addEventListener("click", () => openArcade());
+          });
 
           // Пасхалка осталась прежней, только теперь ведёт сразу в змейку.
           const SEQ = ["ArrowUp","ArrowUp","ArrowDown","ArrowDown","ArrowLeft","ArrowRight","ArrowLeft","ArrowRight","b","a"];
@@ -5655,6 +5844,9 @@ def home():
     </body>
     </html>
     """
+    for name, svg in _GAME_ICONS.items():
+        html = html.replace("__ICON_%s__" % name.upper(), svg)
+    return html
 
 
 if __name__ == "__main__":

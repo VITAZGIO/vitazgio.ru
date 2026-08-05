@@ -892,7 +892,7 @@
     var tip = document.createElement("div");
     tip.style.cssText = "color:#4a6379;font-size:.64rem;letter-spacing:.08em;text-align:center;flex:none";
     tip.textContent = api.touch
-      ? "ПАЛЕЦ ПО ЭКРАНУ — ОБЗОР И ВЫСТРЕЛ · КРЕСТОВИНА — ИДТИ И ПОВОРАЧИВАТЬ"
+      ? "РУЧКА — ИДТИ И ПОВОРАЧИВАТЬ · ПАЛЕЦ ПО ЭКРАНУ — ОБЗОР И ВЫСТРЕЛ"
       : "WASD — движение · МЫШЬ или ← → — обзор · CTRL/ЛКМ — огонь · E — двери · " +
         "1-3 — оружие · TAB — карта · клик по экрану захватывает мышь";
     wrap.append(canvas, tip);
@@ -1085,6 +1085,7 @@
 
     /* ── Ввод ──────────────────────────────────────────────────────────── */
     var keys = {};
+    var stick = { x: 0, y: 0 };   // наклон ручки, -1..1
     var mouseLocked = false;
     var mouseDX = 0, firing = false;
 
@@ -1173,6 +1174,7 @@
       state.fireCooldown = w.cooldown;
       state.weaponAnim = 1;
       state.muzzle = 1;
+      api.buzz(state.weapon === "shotgun" ? 26 : 12);
       if (state.weapon === "shotgun") snd.shotgun();
       else if (state.weapon === "chaingun") snd.chaingun();
       else snd.pistol();
@@ -1242,6 +1244,7 @@
     function explodeBarrel(barrel) {
       barrel.alive = false;
       barrel.boomTime = 1;
+      api.buzz([40, 30, 60]);
       snd.boom();
       state.entities.forEach(function (e) {
         if (e === barrel) return;
@@ -1259,6 +1262,7 @@
 
     function hurtPlayer(amount) {
       if (state.dead) return;
+      api.buzz(30);
       var absorbed = Math.min(state.armor, Math.floor(amount / 3));
       state.armor -= absorbed;
       state.player.health -= (amount - absorbed);
@@ -1269,6 +1273,7 @@
       if (state.player.health <= 0) {
         state.player.health = 0;
         state.dead = true;
+        api.buzz([90, 60, 200]);
         api.audio.tone(90, 1.1, { type: "sawtooth", volume: 0.2, slideTo: 30 });
       }
     }
@@ -1304,26 +1309,37 @@
       if (state.dead || state.won) return;
 
       /* движение игрока */
+      // Поворот: клавиши, мышь и наклон ручки вбок — всё в одну величину.
       var turn = 0;
-      if (keys.ArrowLeft || keys.q) turn -= 2.6 * sec;
-      if (keys.ArrowRight) turn += 2.6 * sec;
-      p.dir += turn + mouseDX;
+      if (keys.ArrowLeft || keys.q) turn -= 1;
+      if (keys.ArrowRight) turn += 1;
+      turn += stick.x;
+      p.dir += turn * 2.6 * sec + mouseDX;
       mouseDX = 0;
+
+      // Ход вперёд-назад и приставной шаг. Ручка даёт плавную величину,
+      // клавиши — единицу; берём то, что больше по модулю.
+      var forward = 0, strafe = 0;
+      if (keys.w || keys.ArrowUp) forward += 1;
+      if (keys.s || keys.ArrowDown) forward -= 1;
+      if (Math.abs(stick.y) > Math.abs(forward)) forward = -stick.y;
+      if (keys.a) strafe -= 1;
+      if (keys.d) strafe += 1;
 
       var run = keys.Shift ? 1.7 : 1;
       var speed = 3.1 * run * sec;
-      var fx = 0, fy = 0;
-      if (keys.w || keys.ArrowUp) { fx += Math.cos(p.dir); fy += Math.sin(p.dir); }
-      if (keys.s || keys.ArrowDown) { fx -= Math.cos(p.dir); fy -= Math.sin(p.dir); }
-      if (keys.a) { fx += Math.cos(p.dir - Math.PI / 2); fy += Math.sin(p.dir - Math.PI / 2); }
-      if (keys.d) { fx += Math.cos(p.dir + Math.PI / 2); fy += Math.sin(p.dir + Math.PI / 2); }
+      var fx = Math.cos(p.dir) * forward + Math.cos(p.dir + Math.PI / 2) * strafe;
+      var fy = Math.sin(p.dir) * forward + Math.sin(p.dir + Math.PI / 2) * strafe;
       var len = Math.hypot(fx, fy);
-      if (len > 0) {
-        fx = fx / len * speed; fy = fy / len * speed;
+      if (len > 0.02) {
+        // Нормируем только если ручку отклонили до упора: полунаклон должен
+        // давать полшага, иначе аналоговая ручка ничем не лучше крестовины.
+        var scale = speed * Math.min(1, len) / len;
+        fx *= scale; fy *= scale;
         // по осям раздельно, чтобы вдоль стены можно было скользить
         if (!isWall(p.x + fx + Math.sign(fx) * 0.18, p.y)) p.x += fx;
         if (!isWall(p.x, p.y + fy + Math.sign(fy) * 0.18)) p.y += fy;
-        state.bob += speed * 3.4;
+        state.bob += Math.hypot(fx, fy) * 3.4;
       } else {
         state.bob += sec * 1.2;
       }
@@ -2100,19 +2116,11 @@
       canvas.addEventListener("touchend", onTouchEnd);
       canvas.addEventListener("touchcancel", onTouchEnd);
 
-      var holdKey = function (name) {
-        return {
-          down: function () { keys[name] = true; },
-          up: function () { keys[name] = false; },
-        };
-      };
-
       api.deck({
-        pad: {
-          // Влево-вправо крутят, а не приставляют шаг: на телефоне так можно
-          // разворачиваться одним большим пальцем, не отрывая второй от огня.
-          up: holdKey("w"), down: holdKey("s"),
-          left: holdKey("ArrowLeft"), right: holdKey("ArrowRight"),
+        // Ручка вместо крестовины — как на корпусе автомата: вперёд-назад
+        // ходьба, вбок разворот, и всё это плавно, а не четырьмя ступенями.
+        stick: {
+          move: function (x, y) { stick.x = x; stick.y = y; },
         },
         actions: [
           { icon: "door", aria: "открыть дверь", color: "#ffd84a", down: tryUse },
@@ -2172,7 +2180,7 @@
     tagline: "Шутер на рейкастинге: два уровня, ключи и двери, бесы с огнём, зомби с винтовками, " +
       "взрывающиеся бочки и три ствола. Текстуры и спрайты нарисованы кодом.",
     keys: "WASD · мышь — обзор · Ctrl — огонь · E — двери · Tab — карта",
-    keysTouch: "Палец по экрану — обзор и выстрел · крестовина — идти",
+    keysTouch: "Ручка — движение · палец по экрану — обзор и выстрел",
     accent: "#ff3b30",
     thumb: thumb,
     start: start,

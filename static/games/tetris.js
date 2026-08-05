@@ -197,7 +197,10 @@
         y: 0,
         lastKick: 0, lastWasRotate: false,
       };
-      if (collides(p, 0, 0, 0)) { over = true; api.best("tetris", score); flash("КОНЕЦ ИГРЫ"); }
+      if (collides(p, 0, 0, 0)) {
+        over = true; api.buzz([80, 60, 180]);
+        api.best("tetris", score); flash("КОНЕЦ ИГРЫ");
+      }
       piece = p;
       holdUsed = false;
       lockTimer = 0; lockResets = 0;
@@ -327,9 +330,11 @@
       if (name) flash(name + (combo > 0 ? "  ×" + (combo + 1) : ""));
 
       if (cleared === 4) {
+        api.buzz([50, 40, 50, 40, 90]);
         api.audio.tone(520, 0.3, { type: "sawtooth", volume: 0.14, slideTo: 1040 });
         api.audio.noise(0.3, { volume: 0.12, freq: 2400, freqTo: 400 });
       } else if (cleared > 0) {
+        api.buzz(14 + cleared * 8);
         api.audio.tone(400 + cleared * 90, 0.14, { type: "square", volume: 0.11 });
       }
       api.best("tetris", score);
@@ -362,6 +367,7 @@
       while (!collides(piece, 0, dy + 1, 0)) dy++;
       piece.y += dy;
       score += dy * 2;
+      api.buzz(10);
       piece.lastWasRotate = false;
       api.audio.noise(0.09, { volume: 0.13, freq: 900, freqTo: 160 });
       lockPiece();

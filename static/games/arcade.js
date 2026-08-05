@@ -38,6 +38,19 @@ window.VitazArcade = (function () {
             ("ontouchstart" in window) || navigator.maxTouchPoints > 0;
   } catch (e) { TOUCH = false; }
 
+  // Настоящие события касаний. Именно по ним решаем, показывать ли панель:
+  // ноутбук с мышью её видеть не должен, даже если система рапортует иначе.
+  var HAS_TOUCH_EVENTS = ("ontouchstart" in window) && navigator.maxTouchPoints > 0;
+  TOUCH = TOUCH && HAS_TOUCH_EVENTS;
+
+  // Короткая отдача в руку. Есть не везде (iOS её не даёт вовсе), поэтому
+  // вызов обёрнут и при отказе молча ничего не делает.
+  var buzzEnabled = true;
+  function buzz(pattern) {
+    if (!buzzEnabled) return;
+    try { if (navigator.vibrate) navigator.vibrate(pattern); } catch (e) {}
+  }
+
   /* ── Значки ──────────────────────────────────────────────────────────────
      Рисуем векторами, а не символами шрифта: «↻» и «▲» в разных системах
      выглядят по-разному, а половина телефонов подставляет вместо них эмодзи. */
@@ -226,6 +239,12 @@ window.VitazArcade = (function () {
       "transform:translateX(-140%)}",
       ".acard.sel::after{animation:cardSheen 2.6s ease-in-out infinite}",
       "@keyframes cardSheen{0%{transform:translateX(-140%)}55%,100%{transform:translateX(360%)}}",
+      /* появление меню: карточки выезжают по очереди, оболочка проявляется */
+      "#arcade{animation:arcadeIn .28s ease-out}",
+      "@keyframes arcadeIn{from{opacity:0;transform:scale(1.03)}to{opacity:1;transform:none}}",
+      ".acard{animation:cardIn .42s cubic-bezier(.2,.9,.3,1.25) backwards}",
+      "@keyframes cardIn{from{opacity:0;transform:translateY(26px) scale(.94)}",
+      "to{opacity:1;transform:none}}",
       ".acard canvas{width:100%;height:auto;display:block;background:#05070d;border:1px solid rgba(255,255,255,.06)}",
       ".acard h3{margin:0;font-size:1.05rem;letter-spacing:.04em;color:var(--ac)}",
       ".acard p{margin:0;color:#8fa5b8;font-size:.74rem;line-height:1.5}",
@@ -267,6 +286,33 @@ window.VitazArcade = (function () {
       "justify-content:flex-end;flex:1}",
 
       /* крестовина — цельная деталь, кнопки лежат прозрачными накладками */
+      /* аналоговая ручка: основание с насечкой и шляпка, которая ходит за пальцем */
+      ".deck-stick{position:relative;width:150px;height:150px;flex:none;border-radius:50%;",
+      "background:",
+      "repeating-conic-gradient(from 0deg,rgba(255,255,255,.04) 0 6deg,transparent 6deg 12deg),",
+      "radial-gradient(circle at 50% 42%,#39424e,#161a20 72%);",
+      "box-shadow:inset 0 6px 14px rgba(0,0,0,.7),inset 0 -2px 0 rgba(255,255,255,.06),",
+      "0 4px 0 rgba(0,0,0,.5),0 8px 16px rgba(0,0,0,.45)}",
+      ".stick-ring{position:absolute;inset:14px;border-radius:50%;pointer-events:none;",
+      "border:1px dashed rgba(45,226,255,.22)}",
+      ".stick-knob{position:absolute;left:50%;top:50%;width:64px;height:64px;margin:-32px 0 0 -32px;",
+      "border-radius:50%;pointer-events:none;transition:transform .07s ease-out;",
+      "background:radial-gradient(circle at 36% 28%,#8fa6bd,#3c4653 52%,#1b2027 100%);",
+      "border:2px solid rgba(0,0,0,.55);",
+      "box-shadow:0 5px 10px rgba(0,0,0,.55),inset 0 -4px 8px rgba(0,0,0,.4),",
+      "inset 0 3px 6px rgba(255,255,255,.3)}",
+      ".deck-stick.on .stick-knob{transition:none;",
+      "box-shadow:0 3px 7px rgba(0,0,0,.6),inset 0 -3px 7px rgba(0,0,0,.45),",
+      "inset 0 2px 5px rgba(255,255,255,.35),0 0 0 2px rgba(45,226,255,.35)}",
+      /* раскладка «крестовина по центру, мелочь по краям» — для змейки */
+      ".deck-main.center{justify-content:center;gap:14px}",
+      ".deck-side{display:flex;flex-direction:column;gap:8px;flex:none}",
+      ".deck-side .dbtn{min-width:60px;min-height:42px;font-size:.58rem}",
+      ".deck-pad.big{width:190px;height:190px}",
+      "@media (max-width:430px){.deck-stick{width:132px;height:132px}",
+      ".stick-knob{width:56px;height:56px;margin:-28px 0 0 -28px}",
+      ".deck-pad.big{width:168px;height:168px}",
+      ".deck-side .dbtn{min-width:54px;min-height:38px}}",
       ".deck-pad{position:relative;width:148px;height:148px;flex:none}",
       ".deck-pad::before{content:'';position:absolute;inset:0;",
       "background:linear-gradient(160deg,#464f5b,#262d36 46%,#171c22);",
@@ -386,6 +432,10 @@ window.VitazArcade = (function () {
       deckInner = document.createElement("div");
       deckInner.id = "deck-inner";
       deckEl.appendChild(deckInner);
+      deckEl.addEventListener("touchstart", onDeckTouchStart, { passive: false });
+      deckEl.addEventListener("touchmove", onDeckTouchMove, { passive: false });
+      deckEl.addEventListener("touchend", onDeckTouchEnd);
+      deckEl.addEventListener("touchcancel", onDeckTouchEnd);
       [["left:7px;top:9px"], ["right:7px;top:9px"],
        ["left:7px;bottom:9px"], ["right:7px;bottom:9px"]].forEach(function (pos) {
         var screw = document.createElement("div");
@@ -433,7 +483,7 @@ window.VitazArcade = (function () {
       if (held) return;
       held = true;
       b.classList.add("on");
-      try { if (navigator.vibrate) navigator.vibrate(8); } catch (err) {}
+      buzz(cfg.buzz || 9);
       if (cfg.down) cfg.down();
       // Кнопки без удержания (поворот, сброс) повторяются пока держат палец.
       if (cfg.repeat) {
@@ -454,15 +504,133 @@ window.VitazArcade = (function () {
       if (cfg.up) cfg.up();
     }
 
-    b.addEventListener("pointerdown", function (e) {
-      try { b.setPointerCapture(e.pointerId); } catch (err) {}
-      press(e);
-    });
-    b.addEventListener("pointerup", release);
-    b.addEventListener("pointercancel", release);
-    b.addEventListener("lostpointercapture", release);
+    b._press = press;
+    b._release = release;
+    b._held = function () { return held; };
+
+    // На устройствах с настоящими касаниями всем управляет слой ниже: он
+    // отслеживает каждый палец сам. Указательные события там не вешаем —
+    // браузер отменяет их при малейшем сдвиге пальца, и кнопка «отлипала»
+    // прямо во время удержания, из-за чего персонаж вставал на месте.
+    if (!HAS_TOUCH_EVENTS) {
+      b.addEventListener("pointerdown", function (e) {
+        try { b.setPointerCapture(e.pointerId); } catch (err) {}
+        press(e);
+      });
+      b.addEventListener("pointerup", release);
+      b.addEventListener("pointercancel", release);
+      b.addEventListener("lostpointercapture", release);
+    }
     b.addEventListener("contextmenu", function (e) { e.preventDefault(); });
     return b;
+  }
+
+  /* ── Аналоговый джойстик ──────────────────────────────────────────────
+     Как ручка на корпусе автомата: наклон в любую сторону, а не четыре
+     фиксированных направления. Возвращает игре пару -1..1. */
+  function makeStick(cfg) {
+    var base = document.createElement("div");
+    base.className = "deck-stick";
+    base.innerHTML = '<div class="stick-ring"></div><div class="stick-knob"></div>';
+    var knob = base.querySelector(".stick-knob");
+
+    base._stickMove = function (dx, dy, radius) {
+      var len = Math.hypot(dx, dy);
+      if (len > radius) { dx = dx / len * radius; dy = dy / len * radius; }
+      knob.style.transform = "translate(" + dx + "px," + dy + "px)";
+      base.classList.add("on");
+      if (cfg.move) cfg.move(dx / radius, dy / radius);
+    };
+    base._stickEnd = function () {
+      knob.style.transform = "";
+      base.classList.remove("on");
+      if (cfg.move) cfg.move(0, 0);
+    };
+    return base;
+  }
+
+  /* ── Слой касаний ─────────────────────────────────────────────────────
+     Каждый палец ведём отдельно и на каждом движении заново смотрим, над
+     чем он находится. Отсюда сразу три полезных свойства: удержание не
+     срывается от дрожи руки, палец можно сдвинуть с кнопки на соседнюю,
+     и несколько кнопок жмутся одновременно. */
+  var touchOwners = {};       // id пальца -> элемент управления
+
+  function controlAt(x, y) {
+    var el = document.elementFromPoint(x, y);
+    while (el && el !== deckEl) {
+      if (el.classList && (el.classList.contains("dbtn") ||
+                           el.classList.contains("deck-stick"))) return el;
+      el = el.parentElement;
+    }
+    return null;
+  }
+
+  function releaseControl(el) {
+    if (!el) return;
+    if (el._release) el._release();
+    else if (el._stickEnd) el._stickEnd();
+  }
+
+  function pressControl(el, touch) {
+    if (!el) return;
+    if (el._stickMove) {
+      var rect = el.getBoundingClientRect();
+      el._stickMove(touch.clientX - (rect.left + rect.width / 2),
+                    touch.clientY - (rect.top + rect.height / 2), rect.width / 2);
+      buzz(6);
+    } else if (el._press) {
+      el._press();
+    }
+  }
+
+  function onDeckTouchStart(e) {
+    for (var i = 0; i < e.changedTouches.length; i++) {
+      var t = e.changedTouches[i];
+      var el = controlAt(t.clientX, t.clientY);
+      if (!el) continue;
+      touchOwners[t.identifier] = el;
+      pressControl(el, t);
+    }
+    if (Object.keys(touchOwners).length) e.preventDefault();
+  }
+
+  function onDeckTouchMove(e) {
+    for (var i = 0; i < e.changedTouches.length; i++) {
+      var t = e.changedTouches[i];
+      var owner = touchOwners[t.identifier];
+      if (!owner) continue;
+      if (owner._stickMove) {                      // джойстик ведём за пальцем
+        var rect = owner.getBoundingClientRect();
+        owner._stickMove(t.clientX - (rect.left + rect.width / 2),
+                         t.clientY - (rect.top + rect.height / 2), rect.width / 2);
+        continue;
+      }
+      var now = controlAt(t.clientX, t.clientY);
+      if (now === owner) continue;
+      // Соскользнули с кнопки: отпускаем прежнюю, жмём новую.
+      releaseControl(owner);
+      if (now && now._press) { touchOwners[t.identifier] = now; pressControl(now, t); }
+      else delete touchOwners[t.identifier];
+    }
+    if (Object.keys(touchOwners).length) e.preventDefault();
+  }
+
+  function onDeckTouchEnd(e) {
+    for (var i = 0; i < e.changedTouches.length; i++) {
+      var t = e.changedTouches[i];
+      var owner = touchOwners[t.identifier];
+      if (!owner) continue;
+      releaseControl(owner);
+      delete touchOwners[t.identifier];
+    }
+  }
+
+  function releaseAllControls() {
+    Object.keys(touchOwners).forEach(function (id) {
+      releaseControl(touchOwners[id]);
+      delete touchOwners[id];
+    });
   }
 
   function systemRow(inGame) {
@@ -493,6 +661,7 @@ window.VitazArcade = (function () {
      Каждая кнопка: { label, color, down, up, round, big, wide, repeat } */
   function deck(spec) {
     if (!deckInner) return;
+    releaseAllControls();
     deckInner.innerHTML = "";
     spec = spec || {};
 
@@ -505,13 +674,27 @@ window.VitazArcade = (function () {
       deckInner.appendChild(extraRow);
     }
 
-    if (spec.pad || (spec.actions && spec.actions.length)) {
+    if (spec.pad || spec.stick || spec.side || (spec.actions && spec.actions.length)) {
       var main = document.createElement("div");
       main.className = "deck-main";
 
+      if (spec.stick) {
+        main.appendChild(makeStick(spec.stick));
+      }
+
+      if (spec.side && spec.side.length) main.classList.add("center");
+      if (spec.side) {
+        var leftCol = document.createElement("div");
+        leftCol.className = "deck-side";
+        spec.side.slice(0, Math.ceil(spec.side.length / 2)).forEach(function (cfg) {
+          leftCol.appendChild(makeButton(cfg));
+        });
+        main.appendChild(leftCol);
+      }
+
       if (spec.pad) {
         var pad = document.createElement("div");
-        pad.className = "deck-pad";
+        pad.className = "deck-pad" + (spec.padBig ? " big" : "");
         var names = { up: "вверх", left: "влево", right: "вправо", down: "вниз" };
         ["up", "left", "right", "down"].forEach(function (dir) {
           if (!spec.pad[dir]) return;
@@ -524,6 +707,15 @@ window.VitazArcade = (function () {
           pad.appendChild(btn);
         });
         main.appendChild(pad);
+      }
+
+      if (spec.side) {
+        var rightCol = document.createElement("div");
+        rightCol.className = "deck-side";
+        spec.side.slice(Math.ceil(spec.side.length / 2)).forEach(function (cfg) {
+          rightCol.appendChild(makeButton(cfg));
+        });
+        main.appendChild(rightCol);
       }
 
       var actions = document.createElement("div");
@@ -540,6 +732,7 @@ window.VitazArcade = (function () {
 
   function menuDeck() {
     if (!deckInner) return;
+    releaseAllControls();
     deckInner.innerHTML = "";
     deckInner.appendChild(systemRow(false));
   }
@@ -590,6 +783,7 @@ window.VitazArcade = (function () {
       var card = document.createElement("div");
       card.className = "acard" + (index === selected ? " sel" : "");
       card.style.setProperty("--ac", game.accent);
+      card.style.animationDelay = (index * 90) + "ms";
       card.innerHTML =
         '<canvas width="320" height="160"></canvas>' +
         '<h3>' + game.title + '</h3>' +
@@ -633,6 +827,7 @@ window.VitazArcade = (function () {
       font: FONT,
       touch: TOUCH,
       deck: deck,
+      buzz: buzz,
     }) || { destroy: function () {} };
     // Игра могла не описать панель — тогда пусть будет хотя бы системный ряд.
     if (deckInner && !deckInner.children.length) menuDeck();
@@ -670,6 +865,6 @@ window.VitazArcade = (function () {
 
   return {
     open: open, close: close, register: register,
-    audio: audio, best: best, touch: TOUCH,
+    audio: audio, best: best, touch: TOUCH, buzz: buzz,
   };
 })();

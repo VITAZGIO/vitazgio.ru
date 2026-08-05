@@ -118,6 +118,7 @@
         if (snake[i].x === head.x && snake[i].y === head.y) {
           alive = false;
           shake = 14;
+          api.buzz([70, 50, 160]);
           api.audio.noise(0.35, { volume: 0.25, freq: 700, freqTo: 90, decay: 1.6 });
           api.audio.tone(180, 0.5, { type: "sawtooth", slideTo: 40, volume: 0.14 });
           api.best("snake", score);
@@ -135,6 +136,7 @@
             life: 1,
           });
         }
+        api.buzz(12);
         api.audio.tone(520 + Math.min(600, score * 4), 0.09, { type: "square", volume: 0.13 });
         placeFood();
       } else {
@@ -319,10 +321,13 @@
         left: function () { turn(-1, 0); },
         right: function () { turn(1, 0); },
       },
-      actions: [
-        { icon: "pause", aria: "пауза", color: "#ffb35c",
+      // Крестовина крупная и по центру — в змейке кроме неё ничего не нужно,
+      // а пауза с рестартом уходят мелочью по краям, чтобы не мешались.
+      padBig: true,
+      side: [
+        { icon: "pause", aria: "пауза",
           down: function () { if (alive) { paused = !paused; hud_(); } } },
-        { icon: "replay", aria: "заново", color: "#63f5ad", big: true,
+        { icon: "replay", aria: "заново",
           down: function () { reset(); hud_(); } },
       ],
     });
