@@ -333,7 +333,8 @@ window.VitazArcade = (function () {
     return loaded[src];
   }
 
-  var MODULES = ["snake", "tetris", "doom", "roulette", "typing"];
+  var MODULES = ["snake", "tetris", "tanks", "arkanoid", "wolf", "doom",
+                 "roulette", "typing-texts", "typing"];
 
   function loadAll() {
     return Promise.all(MODULES.map(function (name) {
@@ -370,6 +371,8 @@ window.VitazArcade = (function () {
       /* На телефоне экран прижат к верху, как в автомате: сверху картинка,
          снизу панель. Кнопки в шапке там прячем — они есть на панели. */
       "#arcade.touch #arcade-stage{align-items:flex-start}",
+      "#arcade.touch .game-root::before{content:'';flex:1 1 0;min-height:0}",
+      "#arcade.touch .game-root::after{content:'';flex:2 1 0;min-height:0}",
       "#arcade.touch #arcade-bar .arcade-btn{display:none}",
       "#arcade.touch #arcade-bar{justify-content:center;padding:6px 10px}",
       /* Меню — сам себе прокрутка. Раньше сетка карточек центрировалась через
@@ -1135,8 +1138,17 @@ window.VitazArcade = (function () {
     var root = document.createElement("div");
     // Запрет жестов держим на корне игры, а не на всей оболочке: иначе
     // вместе с ним отключается и прокрутка меню.
-    root.style.cssText = "position:absolute;inset:0;display:flex;justify-content:center;" +
-      "touch-action:none;padding:6px;align-items:" + (TOUCH ? "flex-start" : "center");
+    // На телефоне игру больше не прижимаем к потолку. Свободное место (то, что
+    // осталось от панели управления) делим один к двум: одна часть сверху, две
+    // снизу — картинка встаёт чуть выше середины, как раз под большой палец.
+    // Распорки живут в ::before/::after и берут только СВОБОДНОЕ место: если
+    // игра и так во весь экран, они схлопываются в ноль и ничего не жмут.
+    root.className = "game-root";
+    root.style.cssText = TOUCH
+      ? "position:absolute;inset:0;display:flex;flex-direction:column;" +
+        "align-items:center;justify-content:flex-start;touch-action:none;padding:6px"
+      : "position:absolute;inset:0;display:flex;justify-content:center;" +
+        "align-items:center;touch-action:none;padding:6px";
     stage.appendChild(root);
     running = game.start(root, {
       audio: audio,

@@ -712,6 +712,12 @@ ARCADE_GAMES = {
                  "lo": 40, "hi": 7_200},
     "roulette": {"title": "Рулетка", "order": "max", "unit": "score", "epoch": 1,
                  "lo": 1, "hi": 100_000},
+    "tanks":    {"title": "Танчики", "order": "max", "unit": "score", "epoch": 1,
+                 "lo": 100, "hi": 500_000},
+    "arkanoid": {"title": "Арканоид", "order": "max", "unit": "score", "epoch": 1,
+                 "lo": 50, "hi": 500_000},
+    "wolf":     {"title": "Ну, погоди!", "order": "max", "unit": "score", "epoch": 1,
+                 "lo": 1, "hi": 100_000},
     # Печать меряется чистой скоростью: знаков в минуту за вычетом опечаток.
     # Мировые рекорды слепой печати — около 900 зн/мин, потолок с запасом.
     "typing":   {"title": "Печать",  "order": "max", "unit": "cpm",   "epoch": 1,

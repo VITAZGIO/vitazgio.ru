@@ -31,17 +31,17 @@
 
   /* Ставки. pays — настоящий коэффициент, hit — попадание. */
   var BETS = [
-    { id: "red",   label: "КРАСНОЕ", color: "#c8322f", pays: 1,
+    { id: "red",   label: "КРАСНОЕ", color: "#c8322f", pays: 1,  odds: 18,
       hit: function (n) { return colorOf(n) === "red"; } },
-    { id: "black", label: "ЧЁРНОЕ",  color: "#2b3239", pays: 1,
+    { id: "black", label: "ЧЁРНОЕ",  color: "#2b3239", pays: 1,  odds: 18,
       hit: function (n) { return colorOf(n) === "black"; } },
-    { id: "even",  label: "ЧЁТ",     color: "#3b6ea5", pays: 1,
+    { id: "even",  label: "ЧЁТ",     color: "#3b6ea5", pays: 1,  odds: 18,
       hit: function (n) { return n !== 0 && n % 2 === 0; } },
-    { id: "odd",   label: "НЕЧЕТ",   color: "#3b6ea5", pays: 1,
+    { id: "odd",   label: "НЕЧЕТ",   color: "#3b6ea5", pays: 1,  odds: 18,
       hit: function (n) { return n % 2 === 1; } },
-    { id: "zero",  label: "ЗЕРО",    color: "#2fbf6a", pays: 35,
+    { id: "zero",  label: "ЗЕРО",    color: "#2fbf6a", pays: 35, odds: 1,
       hit: function (n) { return n === 0; } },
-    { id: "num",   label: "ЧИСЛО",   color: "#ffd84a", pays: 35, pick: true,
+    { id: "num",   label: "ЧИСЛО",   color: "#ffd84a", pays: 35, odds: 1, pick: true,
       hit: function (n, pick) { return n === pick; } },
   ];
 
@@ -138,8 +138,8 @@
     var tip = document.createElement("div");
     tip.style.cssText = "color:#4a6379;font-size:.66rem;letter-spacing:.1em;flex:none;text-align:center";
     tip.textContent = api.touch
-      ? "КРЕСТОВИНА — ВЫБОР СТАВКИ · КРАСНАЯ КНОПКА — КРУТИТЬ"
-      : "СТРЕЛКИ — ВЫБОР СТАВКИ · ПРОБЕЛ ИЛИ ENTER — КРУТИТЬ";
+      ? "ВВЕРХ-ВНИЗ — НА ЧТО СТАВИШЬ · ВЛЕВО-ВПРАВО — НОМЕР · КРАСНАЯ — КРУТИТЬ"
+      : "СТРЕЛКИ ВВЕРХ-ВНИЗ — НА ЧТО СТАВИШЬ · ВЛЕВО-ВПРАВО — НОМЕР · ПРОБЕЛ — КРУТИТЬ";
     wrap.append(canvas, tip);
     root.appendChild(wrap);
 
@@ -147,6 +147,7 @@
     var raf = 0, running = true;
 
     var bet = 0, pick = 7;          // выбранная ставка и номер для ставки «число»
+    var spins = 0;                  // сколько раз уже крутили: правила показываем до первого
     var streak = 0, points = 0;
     var history = [];               // последние выпавшие числа
     var phase = "idle";             // idle | spin | result
@@ -171,6 +172,7 @@
     function spin() {
       if (phase === "spin") return;
       phase = "spin";
+      spins++;                       // с первой прокруткой правила уходят
       result = pickResult();
       var index = WHEEL.indexOf(result);
       var step = Math.PI * 2 / WHEEL.length;
@@ -265,6 +267,7 @@
       ctx.beginPath(); ctx.arc(bx, by, 10, 0, 7); ctx.fill();
 
       drawPanel();
+      drawRules();
     }
 
     function drawPanel() {
@@ -285,7 +288,7 @@
 
       BETS.forEach(function (b, i) {
         var on = i === bet;
-        y += 27;
+        y += 31;
         if (on) {
           ctx.fillStyle = "rgba(255,216,74,.16)";
           ctx.fillRect(x - 8, y - 19, W - x - 8, 26);
@@ -294,11 +297,19 @@
         ctx.fillRect(x, y - 14, 13, 13);
         ctx.fillStyle = on ? "#ffd84a" : "#8fa5b8";
         ctx.font = 'bold 16px "Cascadia Code", Consolas, monospace';
-        ctx.fillText(b.label + (b.pick ? " " + pick : ""), x + 21, y);
+        // У ставки «число» рисуем стрелки вокруг номера: иначе неоткуда
+        // догадаться, что его вообще можно менять.
+        ctx.fillText(b.pick ? b.label + (on ? "  \u25c4 " + pick + " \u25ba" : "  " + pick)
+                            : b.label, x + 21, y);
+        ctx.textAlign = "right";
         ctx.fillStyle = on ? "#c9a24a" : "#46606f";
         ctx.font = 'bold 13px "Cascadia Code", Consolas, monospace';
-        ctx.textAlign = "right";
         ctx.fillText("x" + b.pays, W - 26, y);
+        // Шанс словами — тогда видно, что коэффициент не с потолка:
+        // редкое событие платит больше ровно во столько же раз.
+        ctx.fillStyle = on ? "#7f8ea0" : "#38505e";
+        ctx.font = 'bold 11px "Cascadia Code", Consolas, monospace';
+        ctx.fillText(b.odds + " из 37", W - 26, y + 12);
         ctx.textAlign = "left";
       });
 
@@ -376,6 +387,42 @@
       }
     }
 
+    /* Пока не крутили ни разу, поверх колеса висит короткое объяснение.
+       После первой прокрутки исчезает навсегда и больше не мешает. */
+    function drawRules() {
+      if (spins > 0 || phase !== "idle") return;
+      var bw = 322, bh = 176;
+      ctx.fillStyle = "rgba(4,10,8,.92)";
+      ctx.fillRect(CX - bw / 2, CY - bh / 2, bw, bh);
+      ctx.strokeStyle = "rgba(201,162,74,.55)";
+      ctx.lineWidth = 2;
+      ctx.strokeRect(CX - bw / 2 + 1, CY - bh / 2 + 1, bw - 2, bh - 2);
+
+      ctx.textAlign = "center";
+      ctx.fillStyle = "#ffd84a";
+      ctx.font = 'bold 16px "Cascadia Code", Consolas, monospace';
+      ctx.fillText("КАК ЭТО РАБОТАЕТ", CX, CY - bh / 2 + 28);
+
+      ctx.textAlign = "left";
+      ctx.font = 'bold 12px "Cascadia Code", Consolas, monospace';
+      var lines = [
+        ["#8fa5b8", "В колесе 37 лунок: 0 и числа 1-36."],
+        ["#8fa5b8", "Слева выбери, на что ставишь, и крути."],
+        ["#63f5ad", "Угадал - очки по коэффициенту, серия +1."],
+        ["#ff6b9d", "Ошибся - серия обрывается и уходит"],
+        ["#ff6b9d", "в таблицу рекордов."],
+        ["#c9a24a", "Чем реже событие, тем больше платит:"],
+        ["#c9a24a", "цвет x1 (18 из 37), число x35 (1 из 37)."],
+      ];
+      var ly = CY - bh / 2 + 52;
+      lines.forEach(function (l) {
+        ctx.fillStyle = l[0];
+        ctx.fillText(l[1], CX - bw / 2 + 16, ly);
+        ly += 17;
+      });
+      ctx.textAlign = "left";
+    }
+
     /* ── Ход времени ──────────────────────────────────────────────────── */
     function tick(dt) {
       if (phase === "spin") {
@@ -449,9 +496,9 @@
   window.VitazArcade.register({
     id: "roulette",
     title: "РУЛЕТКА",
-    tagline: "Европейское колесо с одним зеро. Денег нет — есть серия: угадал " +
+    tagline: "Европейское колесо с одним зеро, 37 лунок. Денег и фишек нет — есть серия: угадал " +
              "цвет или число, очки капнули по настоящему коэффициенту; промахнулся — всё сначала.",
-    keys: "Стрелки вверх-вниз — ставка · влево-вправо — номер · пробел — крутить",
+    keys: "Вверх-вниз — на что ставишь · влево-вправо — номер · пробел — крутить",
     keysTouch: "Крестовина — ставка и номер · круглая кнопка — крутить",
     accent: "#c9a24a",
     thumb: thumb,

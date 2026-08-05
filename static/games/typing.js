@@ -69,124 +69,10 @@
   ];
 
   /* ── Тексты ──────────────────────────────────────────────────────────────
-     rank: true — текст длинный, результат по нему уходит в общий рейтинг.
-     Разминки в рейтинг не идут: на двадцати символах любая скорость случайна. */
-  var TEXTS = {
-    ru: [
-      { title: "Разминка · основной ряд",
-        body: "фыва олдж фыва олдж ффф ыыы ввв ааа ооо ллл ддд жжж " +
-              "фыв олд ава ало дом лов вол лад вода лоза жаба фара" },
-      { title: "Разминка · верхний ряд",
-        body: "йцук енгш щзхъ ййй ццц ууу ккк еее ннн ггг шшш " +
-              "куку неуч цунк щенок гуще шёпот зной ключ шкура" },
-      { title: "Разминка · нижний ряд",
-        body: "ячсм итьб ююю яяя ччч ссс ммм иии ттт ььь ббб " +
-              "мясо часы сито тьма быт мичман смятие часть" },
-      { title: "Разминка · цифры и знаки",
-        body: "1234 5678 90-= 12 34 56 78 90 ; % : ? * ( ) " +
-              "1 января, 2 февраля; 3 марта: 4 апреля? 5 мая!" },
-
-      { title: "Пушкин · У лукоморья",
-        body: "У лукоморья дуб зелёный; златая цепь на дубе том: " +
-              "и днём и ночью кот учёный всё ходит по цепи кругом; " +
-              "идёт направо - песнь заводит, налево - сказку говорит." },
-      { title: "Пушкин · Евгений Онегин", rank: true,
-        body: "Мой дядя самых честных правил, когда не в шутку занемог, " +
-              "он уважать себя заставил и лучше выдумать не мог. " +
-              "Его пример другим наука; но, боже мой, какая скука " +
-              "с больным сидеть и день и ночь, не отходя ни шагу прочь! " +
-              "Какое низкое коварство полуживого забавлять, ему подушки поправлять, " +
-              "печально подносить лекарство, вздыхать и думать про себя: " +
-              "когда же чёрт возьмёт тебя!" },
-
-      { title: "Серверная", rank: true,
-        body: "В серверной всегда одна и та же погода. Гудят вентиляторы, " +
-              "мигают зелёные лампы, и по стойке ползёт тёплый воздух. " +
-              "Здесь не бывает вечера: свет одинаковый и в полдень, и в три " +
-              "часа ночи. Человек, который сюда заходит, первым делом смотрит " +
-              "не на экран, а на ряд индикаторов - по ним видно всё сразу. " +
-              "Зелёный значит, что можно идти пить чай. Жёлтый значит, что чай " +
-              "придётся пить быстро. Красный значит, что чая сегодня не будет. " +
-              "Опытный человек умеет отличать шум исправной машины от шума " +
-              "машины, которая держится из последних сил. Это как со старым " +
-              "автомобилем: сначала ты слышишь новый стук, а потом уже " +
-              "понимаешь, что он значит." },
-
-      { title: "Ночной поезд", rank: true,
-        body: "Поезд шёл всю ночь, и всю ночь за окном тянулась одна и та же " +
-              "чернота, изредка проколотая жёлтым огоньком. Иногда огоньков " +
-              "становилось много, они выстраивались в улицу, и было понятно, " +
-              "что это город; потом улица обрывалась, и снова начиналось поле. " +
-              "В вагоне пахло чаем и разогретым металлом. Кто-то не спал и " +
-              "переворачивал страницу раз в две минуты - страница шуршала " +
-              "громче, чем колёса. На верхней полке спал человек, который " +
-              "садился ещё днём и с тех пор ни разу не проснулся. Проводница " +
-              "прошла по коридору, придерживая стаканы, и стаканы всё равно " +
-              "звякнули. К утру чернота за окном стала синей, потом серой, " +
-              "и в ней проявились деревья - сначала как пятна, потом как " +
-              "деревья. Стало видно, что всю ночь рядом с поездом шёл лес." },
-
-      { title: "Кот и распорядок", rank: true,
-        body: "У кота был твёрдый распорядок дня, и человек в этом распорядке " +
-              "занимал скромное место. В шесть утра кот проверял, жив ли " +
-              "человек, и делал это громко. В семь он спал на клавиатуре, " +
-              "потому что клавиатура тёплая и потому что человек тогда " +
-              "перестаёт смотреть в экран. В полдень кот сидел на подоконнике " +
-              "и следил за птицами с видом инспектора, который всё записывает. " +
-              "Вечером наступало главное: кот ложился ровно посередине " +
-              "прохода, там, где ходят чаще всего, и лежал с достоинством. " +
-              "Обойти его было можно, но каждый раз получалось, что это " +
-              "человек уступил дорогу, а не кот выбрал неудачное место. " +
-              "Ночью кот работал: бегал по коридору, ронял мелкие предметы " +
-              "и проверял, все ли двери закрыты. К утру отчёт был готов, " +
-              "и всё начиналось сначала." },
-    ],
-
-    en: [
-      { title: "Warm-up · home row",
-        body: "asdf jkl; asdf jkl; aaa sss ddd fff jjj kkk lll " +
-              "dad sad lad fall glass flask salad" },
-      { title: "Warm-up · pangrams",
-        body: "the quick brown fox jumps over the lazy dog. " +
-              "pack my box with five dozen liquor jugs. " +
-              "how vexingly quick daft zebras jump!" },
-
-      { title: "Carroll · Alice in Wonderland", rank: true,
-        body: "Alice was beginning to get very tired of sitting by her sister " +
-              "on the bank, and of having nothing to do: once or twice she had " +
-              "peeped into the book her sister was reading, but it had no " +
-              "pictures or conversations in it, and what is the use of a book, " +
-              "thought Alice, without pictures or conversations?" },
-
-      { title: "The workshop", rank: true,
-        body: "The workshop smelled of oil and warm dust. Along the far wall " +
-              "stood a row of drawers, each one labelled in handwriting that " +
-              "had faded to the colour of weak tea. Nobody remembered who had " +
-              "written the labels, and nobody dared to change them, because " +
-              "the old man could find any screw in the building in under ten " +
-              "seconds and nobody wanted to be the one who broke that. " +
-              "He worked slowly, which is a different thing from working " +
-              "badly. He would pick up a part, turn it over twice, and put it " +
-              "down again in a place that looked random and never was. " +
-              "When something finally clicked into position, he did not smile; " +
-              "he simply reached for the next part, as if the machine had " +
-              "agreed with him all along and the matter had never been " +
-              "in doubt." },
-
-      { title: "The lighthouse", rank: true,
-        body: "From the cliff the sea looked patient, which is the most " +
-              "dishonest thing about it. All afternoon the water moved in long " +
-              "slow lines, and the gulls hung above the rocks without seeming " +
-              "to work at all. Then the wind turned, and within an hour the " +
-              "same water was throwing itself at the stones hard enough to " +
-              "shake the handrail. The keeper had seen it a thousand times " +
-              "and still stopped to watch. He said the trick was never to " +
-              "trust a calm sea in the middle of the day, and never to trust " +
-              "yourself for knowing better. The light came on at dusk, swung " +
-              "once around the bay, and went on doing it whether anyone was " +
-              "out there or not." },
-    ],
-  };
+     Лежат в typing-texts.js — там их много и туда же удобно дописывать новые.
+     Из всех текстов с пометкой rank собирается пул предложений для вечного
+     режима, так что каждый добавленный абзац сам попадает и туда. */
+  function bank() { return window.VitazTypingTexts || { ru: [], en: [] }; }
 
   /* Приводим текст к тому, что реально набирается с клавиатуры: длинные тире,
      «ёлочки» и многоточие одной клавишей не наберёшь. */
@@ -196,6 +82,45 @@
             .replace(/[‘’]/g, "'")
             .replace(/…/g, "...")
             .replace(/ /g, " ");
+  }
+
+  /* Режем текст на предложения: точка, восклицательный или вопросительный
+     знак, за которым идёт пробел или конец. Регулярку с ретроспективой
+     сознательно не берём — она есть не во всех движках. */
+  function splitSentences(str) {
+    var out = [], cur = "", i;
+    for (i = 0; i < str.length; i++) {
+      cur += str.charAt(i);
+      if (".!?".indexOf(str.charAt(i)) >= 0 &&
+          (i + 1 >= str.length || str.charAt(i + 1) === " ")) {
+        if (cur.trim()) out.push(cur.trim());
+        cur = "";
+        i++;                                  // пробел за знаком проглатываем
+      }
+    }
+    if (cur.trim()) out.push(cur.trim());
+    return out;
+  }
+
+  /* Все предложения из рейтинговых текстов языка — сырьё вечного режима. */
+  function sentencePool(lang) {
+    var out = [];
+    (bank()[lang] || []).forEach(function (t) {
+      if (!t.rank) return;
+      splitSentences(normalize(t.body)).forEach(function (one) {
+        if (one.length >= 24 && one.length <= 210) out.push(one);
+      });
+    });
+    return out;
+  }
+
+  function shuffled(list) {
+    var a = list.slice(), i, j, t;
+    for (i = a.length - 1; i > 0; i--) {
+      j = Math.floor(Math.random() * (i + 1));
+      t = a[i]; a[i] = a[j]; a[j] = t;
+    }
+    return a;
   }
 
   /* ── Превью на карточке ─────────────────────────────────────────────── */
@@ -228,13 +153,17 @@
   /* ── Игра ────────────────────────────────────────────────────────────── */
   function start(root, api) {
     var lang = "ru";
-    var textIndex = 4;
+    var textIndex = 8;
     var showKb = true;
     var shiftOn = false;
 
-    var text = "", pos = 0, errors = 0, strokes = 0;
+    // pos — место в текущем буфере, done — сколько знаков набрано всего.
+    // В вечном режиме буфер подрезается спереди, и pos откатывается назад,
+    // а done продолжает расти: по нему и считается скорость.
+    var text = "", pos = 0, done = 0, errors = 0, strokes = 0;
     var startedAt = 0, finishedAt = 0, wrongAt = -1;
     var timer = 0;
+    var endless = false, pool = [], poolAt = 0;
 
     var css = document.createElement("style");
     css.textContent = [
@@ -266,6 +195,8 @@
       /* клавиатура */
       ".tp-kb{flex:none;display:flex;flex-direction:column;gap:3px;align-items:center;",
       "padding:8px;border:1px solid rgba(255,255,255,.07);background:rgba(10,14,22,.7)}",
+      /* без этого галка не работала: display:flex перебивает атрибут hidden */
+      ".tp-kb[hidden]{display:none}",
       ".tp-kr{display:flex;gap:3px;width:100%;justify-content:center}",
       ".tp-key{--kc:#8fa5b8;position:relative;display:grid;place-items:center;",
       "height:clamp(22px,4.4vw,38px);border-radius:4px;font:700 clamp(9px,1.5vw,13px) " + api.font + ";",
@@ -299,6 +230,7 @@
         '<select data-pick></select>' +
         '<label><input type="checkbox" data-kb checked>клавиатура</label>' +
         '<button type="button" data-again>Заново</button>' +
+        '<button type="button" data-stop hidden>Стоп и в рейтинг</button>' +
       '</div>' +
       '<div class="tp-stats">' +
         '<span>ВРЕМЯ <b data-t>0:00</b></span>' +
@@ -319,6 +251,7 @@
     var elDone = wrap.querySelector(".tp-done");
     var elWarn = wrap.querySelector(".tp-warn");
     var elPick = wrap.querySelector("[data-pick]");
+    var elStop = wrap.querySelector("[data-stop]");
     var elKbBox = wrap.querySelector("[data-kb]");
     var stats = {
       t: wrap.querySelector("[data-t]"), cpm: wrap.querySelector("[data-cpm]"),
@@ -415,11 +348,36 @@
 
     /* ── Текст ───────────────────────────────────────────────────────── */
     function fillPicker() {
-      elPick.innerHTML = TEXTS[lang].map(function (t, i) {
-        return '<option value="' + i + '">' + escapeHtml(t.title) +
-               (t.rank ? " ★" : "") + "</option>";
-      }).join("");
-      elPick.value = String(textIndex);
+      var list = bank()[lang] || [];
+      elPick.innerHTML =
+        '<option value="endless">∞ Вечный режим - случайные предложения</option>' +
+        list.map(function (t, i) {
+          return '<option value="' + i + '">' + escapeHtml(t.title) +
+                 (t.rank ? " ★" : "") + "</option>";
+        }).join("");
+      elPick.value = endless ? "endless" : String(textIndex);
+    }
+
+    /* Дописываем в конец буфера случайные предложения, пока впереди не
+       наберётся приличный запас. Пул перетасован, и когда кончается —
+       тасуется заново: так одно и то же не лезет подряд. */
+    function refill() {
+      while (text.length - pos < 500) {
+        if (poolAt >= pool.length) { pool = shuffled(pool); poolAt = 0; }
+        if (!pool.length) return;
+        text += (text ? " " : "") + pool[poolAt++];
+      }
+    }
+
+    /* Набранное давно уже не нужно ни глазу, ни разметке. Оставляем немного
+       позади курсора для контекста, остальное отрезаем — иначе за полчаса
+       печати в разметке накопятся десятки тысяч элементов. */
+    function trimBuffer() {
+      if (!endless || pos < 900) return;
+      var cut = pos - 180;
+      text = text.slice(cut);
+      pos -= cut;
+      if (wrongAt >= 0) wrongAt -= cut;
     }
 
     function paintText() {
@@ -444,9 +402,8 @@
       var mins = secs / 60;
       stats.t.textContent = Math.floor(secs / 60) + ":" +
         (Math.floor(secs % 60) < 10 ? "0" : "") + Math.floor(secs % 60);
-      var cpm = mins > 0 ? Math.round(pos / mins) : 0;
-      stats.cpm.textContent = cpm;
-      stats.net.textContent = mins > 0 ? Math.max(0, Math.round((pos - errors) / mins)) : 0;
+      stats.cpm.textContent = mins > 0 ? Math.round(done / mins) : 0;
+      stats.net.textContent = mins > 0 ? Math.max(0, Math.round((done - errors) / mins)) : 0;
       stats.err.textContent = errors;
       stats.acc.textContent = strokes ? Math.round((strokes - errors) / strokes * 100) : 100;
     }
@@ -454,15 +411,24 @@
     function netCpm() {
       if (!startedAt || !finishedAt) return 0;
       var mins = (finishedAt - startedAt) / 60000;
-      return mins > 0 ? Math.max(0, Math.round((pos - errors) / mins)) : 0;
+      return mins > 0 ? Math.max(0, Math.round((done - errors) / mins)) : 0;
     }
 
     function reset() {
-      var item = TEXTS[lang][textIndex] || TEXTS[lang][0];
-      text = normalize(item.body);
-      pos = 0; errors = 0; strokes = 0;
+      pos = 0; done = 0; errors = 0; strokes = 0;
       startedAt = 0; finishedAt = 0; wrongAt = -1;
       shiftOn = false;
+      if (endless) {
+        pool = shuffled(sentencePool(lang));
+        poolAt = 0;
+        text = "";
+        refill();
+      } else {
+        var list = bank()[lang] || [];
+        var item = list[textIndex] || list[0] || { body: "" };
+        text = normalize(item.body);
+      }
+      elStop.hidden = !endless;
       elDone.hidden = true;
       elWarn.hidden = true;
       buildKeyboard();
@@ -472,9 +438,13 @@
     }
 
     function finish() {
+      if (finishedAt || !startedAt) return;
       finishedAt = performance.now();
       paintStats();
-      var item = TEXTS[lang][textIndex] || {};
+      var list = bank()[lang] || [];
+      // В вечном режиме рейтинг открывается после трёхсот знаков: на меньшем
+      // отрезке цифра держится на удаче, а не на навыке.
+      var item = endless ? { rank: done >= 300 } : (list[textIndex] || {});
       var speed = netCpm();
       api.audio.tone(660, 0.12, { type: "square", volume: 0.12 });
       setTimeout(function () { api.audio.tone(990, 0.2, { type: "square", volume: 0.1 }); }, 130);
@@ -483,12 +453,14 @@
       var acc = strokes ? Math.round((strokes - errors) / strokes * 100) : 100;
       elDone.hidden = false;
       elDone.innerHTML =
-        "<s>ГОТОВО - " + speed + " зн/мин чистыми</s>" +
-        "знаков: " + text.length + " &middot; ошибок: " + errors +
+        "<s>" + (endless ? "ОСТАНОВЛЕНО - " : "ГОТОВО - ") + speed + " зн/мин чистыми</s>" +
+        "знаков: " + done + " &middot; ошибок: " + errors +
         " &middot; точность: " + acc + "%<br>" +
         (item.rank
           ? "результат уходит в общий рейтинг"
-          : "разминка в рейтинг не идёт - выбери текст со звёздочкой");
+          : (endless
+              ? "для рейтинга в вечном режиме нужно набрать хотя бы 300 знаков"
+              : "разминка в рейтинг не идёт - выбери текст со звёздочкой"));
       if (item.rank && speed > 0 && api.record) {
         api.best("typing", speed);
         api.record("typing", speed);
@@ -497,14 +469,16 @@
 
     /* Один введённый символ. Пока не попал - текст стоит на месте. */
     function type(ch) {
-      if (!ch || pos >= text.length) return;
+      if (!ch || finishedAt || pos >= text.length) return;
       if (!startedAt) startedAt = performance.now();
       strokes++;
-      if (ch === text[pos]) {
+      if (ch === text.charAt(pos)) {
         pos++;
+        done++;
         wrongAt = -1;
         api.audio.tone(1100, 0.02, { type: "square", volume: 0.04 });
-        if (pos >= text.length) { paintText(); paintKeyboard(); finish(); return; }
+        if (endless) { trimBuffer(); refill(); }
+        else if (pos >= text.length) { paintText(); paintKeyboard(); finish(); return; }
       } else {
         errors++;
         wrongAt = pos;
@@ -543,7 +517,7 @@
     wrap.querySelectorAll("[data-lang]").forEach(function (b) {
       b.addEventListener("click", function () {
         lang = b.dataset.lang;
-        textIndex = lang === "ru" ? 4 : 1;
+        textIndex = lang === "ru" ? 8 : 1;
         wrap.querySelectorAll("[data-lang]").forEach(function (o) {
           o.classList.toggle("on", o.dataset.lang === lang);
         });
@@ -554,8 +528,12 @@
     wrap.querySelector('[data-lang="ru"]').classList.add("on");
 
     elPick.addEventListener("change", function () {
-      textIndex = parseInt(elPick.value, 10) || 0;
+      endless = elPick.value === "endless";
+      if (!endless) textIndex = parseInt(elPick.value, 10) || 0;
       reset();
+    });
+    elStop.addEventListener("click", function () {
+      if (startedAt && !finishedAt) finish(); else reset();
     });
     elKbBox.addEventListener("change", function () {
       showKb = elKbBox.checked;
