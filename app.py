@@ -679,6 +679,107 @@ def netbird_ping_loop():
 threading.Thread(target=netbird_ping_loop, daemon=True).start()
 
 
+# ---- Рекорды аркады --------------------------------------------------------
+# Лежат на сервере, а не в localStorage: браузер чистят, телефон меняют, а
+# таблица должна пережить и то, и другое, и перезагрузку сервера.
+#
+# Аркада открыта без пароля — значит, результат может прислать кто угодно.
+# Проверить «честно ли набрано» из браузера нельзя в принципе, поэтому здесь
+# только санитария: потолок значения, ограничение частоты и длины имени.
+# Удаление же закрыто суточным паролем — это единственное действие, где
+# ошибиться нельзя.
+ARCADE_SCORES_PATH = os.path.join(DATA_DIR, "arcade_scores.json")
+ARCADE_TOP = 3               # столько мест показываем
+ARCADE_KEEP = 10             # столько храним: снёс хама — поднялся следующий
+ARCADE_NAME_MAX = 12
+ARCADE_VALUE_MAX = 10_000_000
+ARCADE_SUBMIT_WINDOW = 300
+ARCADE_SUBMIT_MAX = 40       # результатов с одного адреса за пять минут
+
+# epoch поднимается, когда правила меняются так, что старые рекорды больше
+# не сравнимы с новыми, — например, в DOOM добавили уровень и время
+# прохождения выросло у всех. Записи прошлой эпохи отваливаются сами при
+# первой же загрузке файла.
+ARCADE_GAMES = {
+    "snake":    {"title": "Змейка",  "order": "max", "unit": "score", "epoch": 1},
+    "tetris":   {"title": "Тетрис",  "order": "max", "unit": "score", "epoch": 1},
+    "doom":     {"title": "DOOM",    "order": "min", "unit": "time",  "epoch": 1},
+    "roulette": {"title": "Рулетка", "order": "max", "unit": "score", "epoch": 1},
+}
+
+arcade_scores: dict = {}
+arcade_lock = threading.Lock()
+arcade_submit_attempts = defaultdict(deque)
+arcade_submit_lock = threading.Lock()
+
+# Управляющие символы, нулевой ширины и переключатели направления письма:
+# ими можно нарисовать ник, который ломает таблицу или притворяется чужим.
+ARCADE_NAME_BAD = re.compile("[\x00-\x1f\x7f\u200b-\u200f\u2028-\u202e\u2066-\u2069]")
+
+
+def _arcade_clean_name(raw):
+    """Ник в таблицу. Пустой или из одних пробелов — значит подписываться
+    не захотели: в аркадах такого зовут NoName, так и запишем."""
+    name = ARCADE_NAME_BAD.sub("", raw if isinstance(raw, str) else "")
+    name = re.sub(r"\s+", " ", name).strip()
+    return name[:ARCADE_NAME_MAX] or "NoName"
+
+
+def _arcade_sort(game, rows):
+    reverse = ARCADE_GAMES[game]["order"] == "max"
+    # При равном результате выше тот, кто добрался до него раньше.
+    return sorted(rows, key=lambda r: (-r["value"] if reverse else r["value"],
+                                       r.get("at", 0)))
+
+
+def _arcade_save():
+    """Вызывать под arcade_lock."""
+    try:
+        tmp = ARCADE_SCORES_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(arcade_scores, fh, ensure_ascii=False)
+        os.replace(tmp, ARCADE_SCORES_PATH)
+    except OSError:
+        pass
+
+
+def _arcade_load():
+    try:
+        with open(ARCADE_SCORES_PATH, encoding="utf-8") as fh:
+            stored = json.load(fh)
+    except (OSError, ValueError):
+        stored = {}
+    for game, meta in ARCADE_GAMES.items():
+        rows = stored.get(game) or []
+        if not isinstance(rows, list):
+            rows = []
+        clean = []
+        for row in rows:
+            try:
+                if int(row.get("epoch", 0)) != meta["epoch"]:
+                    continue        # рекорд по старым правилам — не сравним
+                clean.append({
+                    "id": str(row["id"]),
+                    "name": _arcade_clean_name(row.get("name")),
+                    "value": int(row["value"]),
+                    "at": float(row.get("at", 0)),
+                    "epoch": meta["epoch"],
+                })
+            except (KeyError, TypeError, ValueError):
+                continue
+        arcade_scores[game] = _arcade_sort(game, clean)[:ARCADE_KEEP]
+
+
+def _arcade_public():
+    """Вызывать под arcade_lock."""
+    return {game: [{"id": r["id"], "name": r["name"], "value": r["value"], "at": r["at"]}
+                   for r in rows[:ARCADE_TOP]]
+            for game, rows in arcade_scores.items()}
+
+
+_arcade_load()
+
+
 LOGIN_LOG_PATH = os.path.join(DATA_DIR, "login_log.json")
 
 
@@ -1347,6 +1448,87 @@ def login_log_api():
     with login_log_lock:
         _login_log_trim()
         return jsonify(list(reversed(login_log)))
+
+
+# ---- Рекорды аркады: без пароля, аркада ведь тоже открыта -------------------
+@app.get("/api/arcade/scores")
+def arcade_scores_api():
+    with arcade_lock:
+        return jsonify(
+            scores=_arcade_public(),
+            games={g: {"title": m["title"], "order": m["order"], "unit": m["unit"]}
+                   for g, m in ARCADE_GAMES.items()},
+        )
+
+
+@app.post("/api/arcade/scores")
+def arcade_score_add():
+    client = _client_ip()
+    if _rate_blocked(arcade_submit_attempts, arcade_submit_lock, client,
+                     ARCADE_SUBMIT_WINDOW, ARCADE_SUBMIT_MAX):
+        return jsonify(error="Слишком часто. Попробуйте позже."), 429
+    _rate_hit(arcade_submit_attempts, arcade_submit_lock, client)
+
+    payload = request.get_json(silent=True) or {}
+    game = payload.get("game")
+    if game not in ARCADE_GAMES:
+        return jsonify(error="Неизвестная игра."), 400
+    try:
+        value = int(payload.get("value"))
+    except (TypeError, ValueError):
+        return jsonify(error="Плохой результат."), 400
+    if not 0 <= value <= ARCADE_VALUE_MAX:
+        return jsonify(error="Плохой результат."), 400
+
+    row = {
+        "id": secrets.token_urlsafe(6),
+        "name": _arcade_clean_name(payload.get("name")),
+        "value": value,
+        "at": time.time(),
+        "epoch": ARCADE_GAMES[game]["epoch"],
+    }
+    with arcade_lock:
+        rows = _arcade_sort(game, arcade_scores.get(game, []) + [row])[:ARCADE_KEEP]
+        arcade_scores[game] = rows
+        _arcade_save()
+        place = next((i for i, r in enumerate(rows) if r["id"] == row["id"]), None)
+        return jsonify(
+            # place — место в таблице (0 — первое) или null, если не пролез
+            place=place if place is not None and place < ARCADE_TOP else None,
+            scores=_arcade_public(),
+        )
+
+
+@app.post("/api/arcade/scores/delete")
+def arcade_score_delete():
+    """Чистка таблицы от неприличных ников. Пускаем по тому же суточному
+    паролю, что и в консоль, — заводить ради этого отдельный секрет незачем."""
+    client = _client_ip()
+    if _rate_blocked(console_login_attempts, console_login_attempts_lock, client,
+                     CONSOLE_LOGIN_WINDOW_SECONDS, CONSOLE_LOGIN_MAX_ATTEMPTS):
+        _log_login("лимит попыток (рекорды)", kind="block")
+        return jsonify(error="Слишком много попыток. Попробуйте через 5 минут."), 429
+
+    payload = request.get_json(silent=True) or {}
+    password = payload.get("password", "")
+    if not SSH_GATE_PASSWORD_PREFIX or not isinstance(password, str) or \
+            not hmac.compare_digest(password.encode(), console_password_today().encode()):
+        _rate_hit(console_login_attempts, console_login_attempts_lock, client)
+        _log_login("неверный суточный пароль (рекорды)", kind="fail")
+        return jsonify(error="Неверный суточный пароль."), 401
+    _rate_clear(console_login_attempts, console_login_attempts_lock, client)
+
+    game = payload.get("game")
+    if game not in ARCADE_GAMES:
+        return jsonify(error="Неизвестная игра."), 400
+    target = str(payload.get("id", ""))
+    with arcade_lock:
+        rows = arcade_scores.get(game, [])
+        kept = [r for r in rows if r["id"] != target]
+        if len(kept) != len(rows):
+            arcade_scores[game] = kept
+            _arcade_save()
+        return jsonify(scores=_arcade_public())
 
 
 @app.get("/api/music")

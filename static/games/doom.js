@@ -765,6 +765,10 @@
      X выход   . пол
      Вещи: p игрок  i бес  z зомби  h аптечка  a патроны  s дробовик
            e гильзы  v броня  r/b/y ключи  o бочка                        */
+  // ВАЖНО: рекорд здесь — время всего прохождения. Добавили или переделали
+  // уровень — поднимите ARCADE_GAMES["doom"]["epoch"] в app.py, иначе новые
+  // результаты будут висеть в таблице рядом со старыми, набранными на другой
+  // длине забега. Смена эпохи стирает прежние записи сама.
   var LEVELS = [
     {
       name: "ЗОНА 1 · АНГАР",
@@ -905,6 +909,9 @@
 
     var state = null;
     var raf = 0, lastTime = 0, running = true;
+    // Рекорд в DOOM — время всего прохождения, поэтому секундомер живёт
+    // отдельно от state: тот пересоздаётся на каждом уровне.
+    var runTime = 0;
 
     /* ── Загрузка уровня ──────────────────────────────────────────────── */
     function loadLevel(index) {
@@ -1290,6 +1297,7 @@
     /* ── Обновление мира ──────────────────────────────────────────────── */
     function update(dt) {
       state.time += dt;
+      if (!state.dead && !state.won) runTime += dt;
       var p = state.player;
       var sec = dt / 1000;
 
@@ -1521,12 +1529,15 @@
       } else {
         state.won = true;
         snd.exit();
-        api.best("doom", state.kills);
+        var seconds = Math.max(1, Math.round(runTime / 1000));
+        api.best("doom-kills", state.kills);
+        if (api.record) api.record("doom", seconds);
       }
     }
 
     function restart() {
       state = null;
+      runTime = 0;
       loadLevel(0);
     }
 
@@ -1713,15 +1724,20 @@
 
     /* ══ Оружие в руках ═════════════════════════════════════════════════ */
     function drawWeapon() {
-      var bobX = Math.sin(state.bob * 0.5) * 5;
-      var bobY = Math.abs(Math.cos(state.bob * 0.5)) * 4;
-      var recoil = state.weaponAnim > 0 ? state.weaponAnim * 12 : 0;
-      var raise = state.weaponAnim < 0 ? -state.weaponAnim * 60 : 0;
+      // Ствол рисуется в пикселях, а картинка на телефоне ниже настольной
+      // (176 против 200) — без пересчёта дробовик занимал больше половины
+      // обзора. Держим его в одной и той же доле экрана.
+      var gs = VIEW_H / 200;
+      var bobX = Math.sin(state.bob * 0.5) * 5 * gs;
+      var bobY = Math.abs(Math.cos(state.bob * 0.5)) * 4 * gs;
+      var recoil = state.weaponAnim > 0 ? state.weaponAnim * 12 * gs : 0;
+      var raise = state.weaponAnim < 0 ? -state.weaponAnim * 60 * gs : 0;
       var cx = VIEW_W / 2 + bobX;
       var baseY = VIEW_H + bobY + recoil + raise;
 
       ctx.save();
       ctx.translate(cx, baseY);
+      ctx.scale(gs, gs);
 
       // Рука в перчатке — общая для всех стволов.
       function glove(gx, gy, gw, gh) {
@@ -1757,69 +1773,72 @@
         glove(-26, -30, 20, 30);
         glove(6, -30, 20, 30);
       } else if (state.weapon === "shotgun") {
-        // стволы
+        // Ствол виден коротким огрызком: боец держит дробовик у пояса, а не
+        // тычет им в небо. Раньше стволы уходили на 104 пикселя вверх и
+        // перекрывали половину коридора.
         ctx.fillStyle = "#1b1f24";
-        ctx.fillRect(-11, -104, 22, 46);
+        ctx.fillRect(-11, -82, 22, 26);
         ctx.fillStyle = "#333a43";             // блик по левой кромке
-        ctx.fillRect(-11, -104, 4, 46);
+        ctx.fillRect(-11, -82, 4, 26);
         ctx.fillStyle = "#0d1014";
-        ctx.fillRect(-11, -104, 22, 4);        // срез дула
+        ctx.fillRect(-11, -82, 22, 4);         // срез дула
         ctx.fillStyle = "#454e59";
-        ctx.fillRect(-2, -102, 4, 3);          // мушка
+        ctx.fillRect(-2, -80, 4, 3);           // мушка
         // цевьё
         ctx.fillStyle = "#53341d";
-        ctx.fillRect(-15, -66, 30, 22);
+        ctx.fillRect(-15, -58, 30, 22);
         ctx.fillStyle = "#6d4524";
-        ctx.fillRect(-15, -66, 30, 5);
+        ctx.fillRect(-15, -58, 30, 5);
         ctx.fillStyle = "rgba(0,0,0,.3)";
-        for (var rib = 0; rib < 4; rib++) ctx.fillRect(-15, -60 + rib * 5, 30, 2);
+        for (var rib = 0; rib < 3; rib++) ctx.fillRect(-15, -51 + rib * 5, 30, 2);
         // ствольная коробка
         ctx.fillStyle = "#2b3239";
-        ctx.fillRect(-17, -46, 34, 26);
+        ctx.fillRect(-17, -38, 34, 24);
         ctx.fillStyle = "#454e59";
-        ctx.fillRect(-17, -46, 34, 4);
+        ctx.fillRect(-17, -38, 34, 4);
         ctx.fillStyle = "#12151a";
-        ctx.fillRect(-13, -30, 12, 10);        // окно выброса
+        ctx.fillRect(-13, -24, 12, 9);         // окно выброса
         // приклад уходит вниз-вправо
         ctx.fillStyle = "#3a2418";
-        ctx.fillRect(-4, -22, 26, 24);
+        ctx.fillRect(-4, -16, 26, 20);
         // руки: передняя на цевье, задняя на рукояти
-        glove(-30, -64, 18, 26);
-        glove(12, -26, 20, 28);
+        glove(-29, -56, 18, 24);
+        glove(11, -20, 20, 24);
       } else {
-        // вращающийся блок стволов
+        // вращающийся блок стволов — тоже укорочен под высоту дробовика
         for (var b = -2; b <= 2; b++) {
           var depth = Math.abs(b);
           ctx.fillStyle = depth === 0 ? "#3f4852" : (depth === 1 ? "#2f363f" : "#242a31");
-          ctx.fillRect(b * 8 - 4, -100 + depth * 6, 8, 52 - depth * 5);
+          ctx.fillRect(b * 8 - 4, -80 + depth * 5, 8, 42 - depth * 4);
           ctx.fillStyle = "#0f1216";
-          ctx.fillRect(b * 8 - 4, -100 + depth * 6, 8, 4);
+          ctx.fillRect(b * 8 - 4, -80 + depth * 5, 8, 4);
         }
         // кожух и коробка
         ctx.fillStyle = "#1a1e23";
-        ctx.fillRect(-22, -52, 44, 14);
+        ctx.fillRect(-22, -44, 44, 13);
         ctx.fillStyle = "#4a545f";
-        ctx.fillRect(-22, -52, 44, 4);
+        ctx.fillRect(-22, -44, 44, 4);
         ctx.fillStyle = "#2b3239";
-        ctx.fillRect(-18, -38, 36, 26);
+        ctx.fillRect(-18, -32, 36, 24);
         ctx.fillStyle = "#454e59";
-        ctx.fillRect(-18, -38, 36, 4);
+        ctx.fillRect(-18, -32, 36, 4);
         // лента с патронами свисает вбок
         ctx.fillStyle = "#8a6a2a";
-        ctx.fillRect(14, -16, 20, 8);
+        ctx.fillRect(14, -12, 20, 8);
         ctx.fillStyle = "#c8a03a";
-        for (var c = 0; c < 5; c++) ctx.fillRect(15 + c * 4, -15, 3, 6);
-        glove(-32, -36, 18, 30);
-        glove(10, -30, 20, 30);
+        for (var c = 0; c < 5; c++) ctx.fillRect(15 + c * 4, -11, 3, 6);
+        glove(-31, -30, 18, 27);
+        glove(10, -25, 20, 27);
       }
 
       if (state.muzzle > 0.25) {
-        var grad = ctx.createRadialGradient(0, -62, 2, 0, -62, 34);
+        var flashY = state.weapon === "pistol" ? -76 : -80;
+        var grad = ctx.createRadialGradient(0, flashY, 2, 0, flashY, 30);
         grad.addColorStop(0, "rgba(255,250,200," + state.muzzle + ")");
         grad.addColorStop(0.45, "rgba(255,170,40," + state.muzzle * 0.7 + ")");
         grad.addColorStop(1, "rgba(255,80,0,0)");
         ctx.fillStyle = grad;
-        ctx.beginPath(); ctx.arc(0, -62, 34, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(0, flashY, 30, 0, Math.PI * 2); ctx.fill();
       }
       ctx.restore();
     }
@@ -2072,7 +2091,10 @@
         ctx.fillText(state.won ? "ЗОНА ЗАЧИЩЕНА" : "ВЫ ПОГИБЛИ", SCREEN_W / 2, SCREEN_H / 2 - 8);
         ctx.fillStyle = "#dfeffa";
         ctx.font = 'bold 11px "Cascadia Code", Consolas, monospace';
-        ctx.fillText("Убито: " + state.kills + " / " + state.totalMonsters,
+        var secs = Math.round(runTime / 1000);
+        ctx.fillText("Убито: " + state.kills + " / " + state.totalMonsters +
+                     (state.won ? "    Время: " + Math.floor(secs / 60) + ":" +
+                      (secs % 60 < 10 ? "0" : "") + (secs % 60) : ""),
                      SCREEN_W / 2, SCREEN_H / 2 + 14);
         ctx.fillStyle = "#8fa5b8";
         ctx.fillText("ENTER — сначала    ESCAPE — в меню", SCREEN_W / 2, SCREEN_H / 2 + 34);

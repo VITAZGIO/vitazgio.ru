@@ -200,6 +200,7 @@
       if (collides(p, 0, 0, 0)) {
         over = true; api.buzz([80, 60, 180]);
         api.best("tetris", score); flash("КОНЕЦ ИГРЫ");
+        if (api.record) api.record("tetris", score);
       }
       piece = p;
       holdUsed = false;
@@ -655,9 +656,11 @@
         down: padButton("softdrop"),
       },
       actions: [
-        { icon: "ccw", aria: "поворот против часовой", color: "#2de2ff",
+        // Повороты — самое частое действие после сдвига, поэтому кнопки
+        // крупные: мелкие круглые попадались через раз.
+        { icon: "ccw", aria: "поворот против часовой", color: "#2de2ff", mid: true,
           down: function () { actionDown("ccw"); } },
-        { icon: "cw", aria: "поворот по часовой", color: "#2de2ff",
+        { icon: "cw", aria: "поворот по часовой", color: "#2de2ff", mid: true,
           down: function () { actionDown("cw"); } },
         { icon: "drop", aria: "сбросить", color: "#ff3fa4", big: true,
           down: function () { actionDown("drop"); } },

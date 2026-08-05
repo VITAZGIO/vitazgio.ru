@@ -122,6 +122,7 @@
           api.audio.noise(0.35, { volume: 0.25, freq: 700, freqTo: 90, decay: 1.6 });
           api.audio.tone(180, 0.5, { type: "sawtooth", slideTo: 40, volume: 0.14 });
           api.best("snake", score);
+          if (api.record) api.record("snake", score);
           return;
         }
       }

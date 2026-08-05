@@ -172,6 +172,153 @@ window.VitazArcade = (function () {
     } catch (e) { return value || 0; }
   }
 
+  /* ── Таблица рекордов на сервере ─────────────────────────────────────────
+     localStorage переживает ровно до чистки браузера, а таблица должна жить
+     дольше телефона. Поэтому счёт уезжает на сервер; api.best() остаётся для
+     «своего» рекорда, который показывается прямо в игре без сети. */
+  var board = { scores: {}, games: {}, loaded: false, admin: "" };
+
+  function boardLoad() {
+    return fetch("/api/arcade/scores", { credentials: "same-origin" })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        if (!data) return board;
+        board.scores = data.scores || {};
+        board.games = data.games || {};
+        board.loaded = true;
+        return board;
+      })
+      .catch(function () { return board; });   // нет сети — просто нет таблицы
+  }
+
+  function boardTop(game) { return board.scores[game] || []; }
+
+  // Место, на которое встал бы результат: 0 — первое, -1 — мимо таблицы.
+  function boardPlace(game, value) {
+    var meta = board.games[game];
+    var rows = boardTop(game);
+    var better = meta && meta.order === "min"
+      ? function (a, b) { return a < b; }
+      : function (a, b) { return a > b; };
+    for (var i = 0; i < rows.length; i++) {
+      if (better(value, rows[i].value)) return i;
+    }
+    return rows.length < 3 ? rows.length : -1;
+  }
+
+  function formatValue(game, value) {
+    var meta = board.games[game];
+    if (!meta || meta.unit !== "time") return String(value);
+    var m = Math.floor(value / 60), s = value % 60;
+    return m + ":" + (s < 10 ? "0" : "") + s;
+  }
+
+  function rememberedName() {
+    try { return localStorage.getItem("vitaz-arcade-name") || ""; } catch (e) { return ""; }
+  }
+
+  /* Окошко с одним полем. Возвращает промис: строка или null, если отказались.
+     Окна выстраиваются в очередь: если позвать ask() дважды подряд, второе
+     дождётся первого. Иначе они ложатся друг на друга и верхнее перехватывает
+     нажатия — кнопки нижнего перестают работать вовсе. */
+  var askChain = Promise.resolve();
+
+  function ask(opts) {
+    askChain = askChain.then(function () { return askNow(opts); },
+                             function () { return askNow(opts); });
+    return askChain;
+  }
+
+  function askNow(opts) {
+    return new Promise(function (resolve) {
+      if (!overlay) { resolve(null); return; }
+      var box = document.createElement("div");
+      box.id = "arcade-ask";
+      box.innerHTML =
+        '<div class="box">' +
+          '<h3>' + opts.title + '</h3>' +
+          '<p>' + opts.text + '</p>' +
+          '<input type="' + (opts.password ? "password" : "text") + '" ' +
+            'maxlength="' + (opts.max || 12) + '" autocomplete="off" ' +
+            'spellcheck="false" value="' + (opts.value || "").replace(/"/g, "&quot;") + '">' +
+          '<div class="row">' +
+            '<button class="arcade-btn" data-ok type="button">' + opts.ok + '</button>' +
+            '<button class="arcade-btn" data-no type="button">' + opts.no + '</button>' +
+          '</div>' +
+          '<p class="err"></p>' +
+        '</div>';
+      overlay.appendChild(box);
+      var input = box.querySelector("input");
+      var err = box.querySelector(".err");
+      // Панель кнопок под клавиатурой только мешает — прячем на время диалога.
+      if (deckEl) deckEl.style.display = "none";
+
+      function finish(value) {
+        if (deckEl) deckEl.style.display = "";
+        box.remove();
+        resolve(value);
+      }
+      box.querySelector("[data-ok]").addEventListener("click", function () {
+        if (opts.check) {
+          err.textContent = "…";
+          opts.check(input.value).then(function (ok) {
+            if (ok) finish(input.value);
+            else { err.textContent = opts.bad || "Не подошло."; input.select(); }
+          });
+          return;
+        }
+        finish(input.value);
+      });
+      box.querySelector("[data-no]").addEventListener("click", function () { finish(null); });
+      input.addEventListener("keydown", function (e) {
+        e.stopPropagation();                       // Escape в оболочке закрывает аркаду
+        if (e.key === "Enter") box.querySelector("[data-ok]").click();
+      });
+      setTimeout(function () { input.focus(); input.select(); }, 30);
+    });
+  }
+
+  /* Игра закончилась — решаем, попал ли результат в таблицу.
+     В тройку — спрашиваем имя, ниже — тихо кладём в запас под тем же ником:
+     если призёра снесут за похабщину, следующему есть чем подняться. */
+  function record(game, value) {
+    value = Math.max(0, Math.round(value || 0));
+    var ready = board.loaded ? Promise.resolve(board) : boardLoad();
+    return ready.then(function () {
+      if (!board.loaded) return null;              // сети нет — не морочим голову
+      var place = boardPlace(game, value);
+      if (place < 0) return null;
+      if (place >= 3) return submitScore(game, value, rememberedName());
+      var meta = board.games[game] || {};
+      return ask({
+        title: place === 0 ? "НОВЫЙ РЕКОРД!" : "ТЫ В ТРОЙКЕ!",
+        text: (meta.title || game) + " · " + formatValue(game, value) +
+              " — это " + (place + 1) + " место. Подпишись, и результат останется в таблице.",
+        value: rememberedName(),
+        max: 12, ok: "Записать", no: "Без имени",
+      }).then(function (name) {
+        if (name && name.trim()) {
+          try { localStorage.setItem("vitaz-arcade-name", name.trim()); } catch (e) {}
+        }
+        return submitScore(game, value, name || "");
+      });
+    });
+  }
+
+  function submitScore(game, value, name) {
+    return fetch("/api/arcade/scores", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ game: game, value: value, name: name || "" }),
+    }).then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        if (data && data.scores) board.scores = data.scores;
+        return data;
+      })
+      .catch(function () { return null; });
+  }
+
   /* ── Загрузка модулей игр по требованию ──────────────────────────────── */
   function loadScript(src) {
     if (loaded[src]) return loaded[src];
@@ -185,7 +332,7 @@ window.VitazArcade = (function () {
     return loaded[src];
   }
 
-  var MODULES = ["snake", "tetris", "doom"];
+  var MODULES = ["snake", "tetris", "doom", "roulette"];
 
   function loadAll() {
     return Promise.all(MODULES.map(function (name) {
@@ -199,9 +346,12 @@ window.VitazArcade = (function () {
     var style = document.createElement("style");
     style.id = "arcade-style";
     style.textContent = [
+      /* touch-action здесь намеренно НЕ none: запрет на предке гасит и прокрутку
+         внутри меню, а список игр листать пальцем надо. Игры и панель кнопок
+         выставляют себе none сами. */
       "#arcade{position:fixed;inset:0;z-index:9999;background:#04060b;color:#dfeffa;",
       "font-family:" + FONT + ";display:flex;flex-direction:column;overflow:hidden;",
-      "touch-action:none;-webkit-user-select:none;user-select:none;",
+      "-webkit-user-select:none;user-select:none;",
       "-webkit-tap-highlight-color:transparent}",
       "#arcade::after{content:'';position:absolute;inset:0;pointer-events:none;z-index:5;opacity:.35;",
       "background:repeating-linear-gradient(180deg,rgba(0,0,0,.45) 0 1px,transparent 1px 3px)}",
@@ -221,9 +371,18 @@ window.VitazArcade = (function () {
       "#arcade.touch #arcade-stage{align-items:flex-start}",
       "#arcade.touch #arcade-bar .arcade-btn{display:none}",
       "#arcade.touch #arcade-bar{justify-content:center;padding:6px 10px}",
-      "#arcade-menu{display:grid;gap:clamp(12px,2.4vw,26px);padding:clamp(12px,3vw,30px);width:100%;",
-      "max-width:1180px;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));align-content:center;",
-      "max-height:100%;overflow-y:auto}",
+      /* Меню — сам себе прокрутка. Раньше сетка карточек центрировалась через
+         align-content:center прямо в прокручиваемом блоке: когда карточки не
+         влезали, они вылезали в обе стороны, и верхние уезжали ВЫШЕ нулевой
+         прокрутки — доскроллить до них было нельзя. Теперь центрирование
+         «safe»: как только содержимое перестаёт влезать, оно прижимается
+         к началу и целиком доступно. */
+      "#arcade-menu{position:absolute;inset:0;overflow-y:auto;overscroll-behavior:contain;",
+      "-webkit-overflow-scrolling:touch;touch-action:pan-y;display:flex;flex-direction:column;",
+      "align-items:center;justify-content:flex-start;justify-content:safe center;",
+      "gap:clamp(10px,2vw,18px);padding:clamp(12px,3vw,30px)}",
+      "#arcade-grid{display:grid;gap:clamp(12px,2.4vw,26px);width:100%;max-width:1180px;",
+      "grid-template-columns:repeat(auto-fit,minmax(250px,1fr))}",
       ".acard{position:relative;display:flex;flex-direction:column;gap:10px;padding:16px;cursor:pointer;",
       "overflow:hidden;border:1px solid rgba(255,255,255,.09);",
       "background:repeating-linear-gradient(135deg,rgba(255,255,255,.014) 0 6px,transparent 6px 12px),",
@@ -251,6 +410,53 @@ window.VitazArcade = (function () {
       ".acard .keys{color:#4a6379;font-size:.66rem;letter-spacing:.06em}",
       ".acard .go{margin-top:auto;padding-top:8px;color:var(--ac);font-size:.7rem;letter-spacing:.14em;text-transform:uppercase}",
       "#arcade-loading{color:#4a6379;font-size:.8rem;letter-spacing:.12em}",
+
+      /* ── Доска рекордов над списком игр ──
+         Табло старого автомата: рамка, тусклые призраки чужих результатов. */
+      "#arcade-board{width:100%;max-width:1180px;position:relative;padding:12px 14px 13px;",
+      "border:1px solid rgba(45,226,255,.22);",
+      "background:linear-gradient(180deg,rgba(12,20,33,.92),rgba(6,10,17,.94))}",
+      "#arcade-board .bhead{display:flex;align-items:center;gap:10px;margin-bottom:10px}",
+      "#arcade-board .bhead b{font-size:.7rem;letter-spacing:.22em;color:#7fd6ea;font-weight:700}",
+      "#arcade-board .bhead i{flex:1;height:1px;background:linear-gradient(90deg,",
+      "rgba(45,226,255,.35),transparent)}",
+      "#arcade-board .badmin{font-size:.6rem;letter-spacing:.14em;color:#ff3fa4;font-style:normal}",
+      "#arcade-board .bcols{display:grid;gap:10px;",
+      "grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}",
+      ".bcol{min-width:0}",
+      ".bcol h4{margin:0 0 5px;font-size:.64rem;letter-spacing:.16em;color:var(--ac,#8fa5b8);",
+      "text-transform:uppercase;font-weight:700}",
+      ".brow{display:flex;align-items:center;gap:7px;font-size:.7rem;line-height:1.75;color:#a9c2d4}",
+      ".brow .pos{width:13px;flex:none;color:#4a6379}",
+      ".brow.p1 .pos{color:#ffd84a}.brow.p2 .pos{color:#c8d6e2}.brow.p3 .pos{color:#c9843f}",
+      ".brow .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
+      ".brow .vl{flex:none;color:#eaf6ff;font-variant-numeric:tabular-nums}",
+      ".brow.mine .nm{color:#63f5ad}",
+      ".brow .del{flex:none;width:19px;height:19px;display:grid;place-items:center;padding:0;",
+      "border:1px solid rgba(255,63,164,.45);background:rgba(255,63,164,.12);color:#ff8ac4;",
+      "font-size:.72rem;line-height:1;cursor:pointer;border-radius:3px}",
+      ".brow .del:hover{background:rgba(255,63,164,.3);color:#fff}",
+      ".bcol .empty{color:#3d5265;font-size:.66rem;letter-spacing:.06em}",
+      /* Невидимая кнопка в правом верхнем углу — вход в режим чистки. */
+      "#arcade-mod{position:absolute;top:0;right:0;width:52px;height:46px;padding:0;border:0;",
+      "background:transparent;cursor:default;-webkit-tap-highlight-color:transparent}",
+      "#arcade.modon #arcade-board{border-color:rgba(255,63,164,.45)}",
+
+      /* ── Окошко: ввод имени и суточный пароль ── */
+      "#arcade-ask{position:absolute;inset:0;z-index:20;display:grid;place-items:center;",
+      "background:rgba(3,6,11,.82);padding:18px;animation:arcadeIn .18s ease-out}",
+      "#arcade-ask .box{width:min(340px,100%);padding:18px;border:1px solid rgba(45,226,255,.3);",
+      "background:linear-gradient(160deg,rgba(18,26,40,.98),rgba(8,12,20,.99));",
+      "box-shadow:0 24px 60px rgba(0,0,0,.6)}",
+      "#arcade-ask h3{margin:0 0 4px;font-size:.92rem;letter-spacing:.1em;color:#ffd84a}",
+      "#arcade-ask p{margin:0 0 12px;font-size:.72rem;line-height:1.55;color:#8fa5b8}",
+      "#arcade-ask input{width:100%;box-sizing:border-box;padding:10px 12px;margin-bottom:12px;",
+      "color:#eaf6ff;font:700 .86rem " + FONT + ";letter-spacing:.06em;",
+      "border:1px solid rgba(45,226,255,.35);background:rgba(4,8,14,.9);border-radius:0}",
+      "#arcade-ask input:focus{outline:none;border-color:#2de2ff;box-shadow:0 0 0 1px #2de2ff}",
+      "#arcade-ask .row{display:flex;gap:8px}",
+      "#arcade-ask .row .arcade-btn{flex:1}",
+      "#arcade-ask .err{margin:9px 0 0;color:#ff6b9d;font-size:.68rem;min-height:1em}",
 
       /* ── Панель управления: корпус игрового автомата ──
          Шлифованный металл собран из повторяющихся градиентов, а не картинки:
@@ -360,6 +566,10 @@ window.VitazArcade = (function () {
       "box-shadow:0 1px 0 rgba(0,0,0,.5),inset 0 4px 10px rgba(0,0,0,.45)}",
       ".dbtn.round.big{width:84px;height:84px;font-size:.66rem}",
       ".dbtn.round.big svg{width:44%;height:44%}",
+      /* Средний размер: крупнее обычной круглой, но три штуки в ряд ещё
+         помещаются рядом с крестовиной. */
+      ".dbtn.round.mid{width:76px;height:76px;font-size:.62rem}",
+      ".dbtn.round.mid svg{width:46%;height:46%}",
 
       ".dbtn.wide{min-width:78px;padding:0 13px;height:40px;min-height:40px;font-size:.62rem;",
       "background:linear-gradient(180deg,#3c444f,#20262d);",
@@ -382,7 +592,15 @@ window.VitazArcade = (function () {
          на вторую строку и панель разъезжается. */
       "@media (max-width:430px){.deck-pad{width:130px;height:130px}",
       ".dbtn.round{width:58px;height:58px}.dbtn.round.big{width:74px;height:74px}",
+      ".dbtn.round.mid{width:66px;height:66px}",
       ".deck-actions{gap:9px}.deck-main{gap:9px}}",
+      /* Совсем узкие экраны: три круглых кнопки рядом с крестовиной иначе
+         переносятся на вторую строку и панель разъезжается. */
+      "@media (max-width:380px){.deck-pad{width:118px;height:118px}",
+      ".deck-pad.big{width:150px;height:150px}",
+      ".dbtn.round{width:52px;height:52px}.dbtn.round.mid{width:58px;height:58px}",
+      ".dbtn.round.big{width:64px;height:64px}",
+      ".deck-actions{gap:7px}.deck-main{gap:7px}}",
       "@media (max-width:560px){#arcade-bar{padding:8px 10px;gap:8px}",
       "#arcade-bar .hint{display:none}",
       "#arcade-menu{grid-template-columns:1fr;gap:10px;padding:10px}",
@@ -461,6 +679,7 @@ window.VitazArcade = (function () {
     var b = document.createElement("button");
     b.type = "button";
     b.className = "dbtn" + (cfg.round ? " round" : "") + (cfg.big ? " big" : "") +
+                  (cfg.mid ? " mid" : "") +
                   (cfg.wide ? " wide" : "") + (cfg.arrow ? " arrow" : "") +
                   (cfg.className ? " " + cfg.className : "");
     if (cfg.color) b.style.setProperty("--bc", cfg.color);
@@ -768,16 +987,112 @@ window.VitazArcade = (function () {
     if (menuTimer) { cancelAnimationFrame(menuTimer); menuTimer = 0; }
   }
 
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+
+  /* Доска рекордов над списком игр. Перерисовывается целиком — строк тут
+     дюжина, экономить не на чем. */
+  function paintBoard() {
+    if (!overlay) return;
+    var host = overlay.querySelector("#arcade-board");
+    if (!host) return;
+    var mine = rememberedName();
+
+    var cols = games.map(function (game) {
+      var rows = boardTop(game.id);
+      var body = rows.length
+        ? rows.map(function (r, i) {
+            return '<div class="brow p' + (i + 1) +
+              (mine && r.name === mine ? " mine" : "") + '">' +
+              '<span class="pos">' + (i + 1) + '</span>' +
+              '<span class="nm">' + escapeHtml(r.name) + '</span>' +
+              '<span class="vl">' + escapeHtml(formatValue(game.id, r.value)) + '</span>' +
+              (board.admin ? '<button class="del" type="button" data-game="' + game.id +
+                '" data-id="' + escapeHtml(r.id) + '" aria-label="Удалить">×</button>' : "") +
+              '</div>';
+          }).join("")
+        : '<div class="empty">пусто — займи место</div>';
+      return '<div class="bcol" style="--ac:' + game.accent + '">' +
+        '<h4>' + escapeHtml(game.title) + '</h4>' + body + '</div>';
+    }).join("");
+
+    host.innerHTML =
+      '<div class="bhead"><b>РЕКОРДЫ</b><i></i>' +
+        (board.admin ? '<span class="badmin">режим чистки</span>' : "") +
+      '</div><div class="bcols">' + cols + '</div>' +
+      '<button id="arcade-mod" type="button" tabindex="-1" aria-hidden="true"></button>';
+
+    host.querySelector("#arcade-mod").addEventListener("click", openModTools);
+    Array.prototype.forEach.call(host.querySelectorAll(".del"), function (btn) {
+      btn.addEventListener("click", function () {
+        dropScore(btn.dataset.game, btn.dataset.id);
+      });
+    });
+  }
+
+  /* Невидимая кнопка справа сверху: спрашивает суточный пароль и включает
+     режим чистки — по кнопке у каждой строки таблицы. */
+  function openModTools() {
+    if (board.admin) {                     // повторное нажатие — выйти обратно
+      board.admin = "";
+      overlay.classList.remove("modon");
+      paintBoard();
+      return;
+    }
+    ask({
+      title: "ЧИСТКА ТАБЛИЦЫ", password: true, max: 40,
+      text: "Суточный пароль. После него у каждой записи появится крестик — " +
+            "снести можно те, где вместо имени похабщина.",
+      ok: "Войти", no: "Отмена", bad: "Пароль не подошёл.",
+      check: function (value) {
+        // Проверяем не на слово, а делом: сервер всё равно требует пароль
+        // при каждом удалении, поэтому здесь достаточно пустого запроса.
+        return fetch("/api/arcade/scores/delete", {
+          method: "POST", credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ game: games[0].id, id: "", password: value }),
+        }).then(function (r) { return r.ok; }).catch(function () { return false; });
+      },
+    }).then(function (value) {
+      if (!value) return;
+      board.admin = value;
+      overlay.classList.add("modon");
+      paintBoard();
+    });
+  }
+
+  function dropScore(game, id) {
+    if (!board.admin) return;
+    fetch("/api/arcade/scores/delete", {
+      method: "POST", credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ game: game, id: id, password: board.admin }),
+    }).then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        if (data && data.scores) board.scores = data.scores;
+        else { board.admin = ""; overlay.classList.remove("modon"); }
+        paintBoard();
+      })
+      .catch(function () {});
+  }
+
   function showMenu() {
     if (running) {
       try { running.destroy(); } catch (e) { /* игра уже могла прибраться сама */ }
       running = null;
     }
     overlay.querySelector("#arcade-back").hidden = true;
-    stage.innerHTML = '<div id="arcade-menu"></div>';
+    stage.innerHTML = '<div id="arcade-menu">' +
+      '<div id="arcade-board"></div><div id="arcade-grid"></div></div>';
     menuDeck();
-    var menu = stage.querySelector("#arcade-menu");
+    var menu = stage.querySelector("#arcade-grid");
     var previews = [];
+
+    paintBoard();
+    if (!board.loaded) boardLoad().then(paintBoard);
 
     games.forEach(function (game, index) {
       var card = document.createElement("div");
@@ -817,12 +1132,16 @@ window.VitazArcade = (function () {
     if (deckInner) deckInner.innerHTML = "";
     overlay.querySelector("#arcade-back").hidden = false;
     var root = document.createElement("div");
+    // Запрет жестов держим на корне игры, а не на всей оболочке: иначе
+    // вместе с ним отключается и прокрутка меню.
     root.style.cssText = "position:absolute;inset:0;display:flex;justify-content:center;" +
-      "padding:6px;align-items:" + (TOUCH ? "flex-start" : "center");
+      "touch-action:none;padding:6px;align-items:" + (TOUCH ? "flex-start" : "center");
     stage.appendChild(root);
     running = game.start(root, {
       audio: audio,
       best: best,
+      record: record,          // рекорд на сервер, с вопросом об имени
+      top: boardTop,
       exit: showMenu,
       font: FONT,
       touch: TOUCH,
@@ -865,6 +1184,6 @@ window.VitazArcade = (function () {
 
   return {
     open: open, close: close, register: register,
-    audio: audio, best: best, touch: TOUCH, buzz: buzz,
+    audio: audio, best: best, record: record, touch: TOUCH, buzz: buzz,
   };
 })();
