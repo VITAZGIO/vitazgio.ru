@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import io
 import json
+import math
 import os
 import platform
 import re
@@ -4035,12 +4036,20 @@ _GAME_ICONS = {
 # ---- Иконка приложения: монограмма VG ---------------------------------------
 # Левая палочка V упирается в общую стойку, она же служит левым боком G,
 # а сама G нарисована квадратной спиралью. Координаты в поле 100x100.
-_MONOGRAM = [
-    [(12, 16), (44, 80)],                                          # V
-    # Язычок G укорочен до 80% (было до x=66): длинный подходил слишком близко
-    # к общей стойке, и знак начинал читаться как цифра 6.
-    [(86, 16), (50, 16), (44, 80), (86, 80), (86, 50), (70, 50)],  # G
-]
+#
+# Знак рисуется не линиями со скруглёнными торцами, а сплошными фигурами:
+# стыки острые (miter), торцы отрезаны плоско. Косая палочка V получает
+# горизонтальные срезы — выходит параллелограмм с острыми углами, а у G все
+# концы обрублены поперёк, то есть тупые, под 90 градусов.
+_MONOGRAM_V = [(12, 16), (44, 80)]                       # диагональ V
+_MONOGRAM_G_TOP = [(86, 16), (50, 16), (44, 80)]         # верхняя перекладина и стойка
+# Язычок G укорочен до 80% (было до x=66): длинный подходил слишком близко
+# к общей стойке, и знак начинал читаться как цифра 6.
+_MONOGRAM_G_BOWL = [(44, 80), (86, 80), (86, 50), (70, 50)]
+# G разрезана на две фигуры нарочно: если вести её одной ломаной, стык стойки
+# с нижней перекладиной даёт острый угол, который вылезает левее диагонали V
+# маленьким язычком. Так низ слева целиком принадлежит V и сходится в остриё,
+# а обрубленные торцы G прячутся внутри знака.
 _MONOGRAM_SCALE = 0.62      # знак занимает ~62% поля, вокруг остаётся воздух
 _MONOGRAM_STROKE = 11
 _MONOGRAM_INK = "#2de2ff"
@@ -4048,13 +4057,56 @@ _MONOGRAM_BG = "#0d1321"
 
 # Поднимать при смене рисунка: попадает и в имя файла на диске, и в адрес
 # в манифесте — иначе браузер продолжит показывать иконку из кэша.
-ICON_VERSION = "vg2"
+ICON_VERSION = "vg3"
+
+
+def _line_cross(p, pd, q, qd):
+    """Пересечение прямых, заданных точкой и направлением."""
+    den = pd[0] * qd[1] - pd[1] * qd[0]
+    if abs(den) < 1e-9:     # параллельны — такого в знаке нет, но пусть не падает
+        return p
+    t = ((q[0] - p[0]) * qd[1] - (q[1] - p[1]) * qd[0]) / den
+    return (p[0] + pd[0] * t, p[1] + pd[1] * t)
+
+
+def _stroke_polygon(points, half, cap_start=None, cap_end=None):
+    """Осевая линия -> контур полосы шириной 2*half.
+
+    Углы считаются как miter: обе стороны продолжаются до пересечения, так что
+    стык остаётся острым. cap_* — прямая среза торца в виде (точка, направление);
+    None означает обычный срез поперёк линии через её конец."""
+    dirs = []
+    for i in range(len(points) - 1):
+        dx = points[i + 1][0] - points[i][0]
+        dy = points[i + 1][1] - points[i][1]
+        length = math.hypot(dx, dy) or 1.0
+        dirs.append((dx / length, dy / length))
+
+    last = len(dirs) - 1
+    cut_start = cap_start or (points[0], (-dirs[0][1], dirs[0][0]))
+    cut_end = cap_end or (points[-1], (-dirs[last][1], dirs[last][0]))
+
+    sides = []
+    for sign in (1, -1):
+        def shifted(seg, idx):
+            dx, dy = dirs[seg]
+            return (points[idx][0] - dy * half * sign,
+                    points[idx][1] + dx * half * sign)
+
+        edge = [_line_cross(shifted(0, 0), dirs[0], *cut_start)]
+        for i in range(1, len(points) - 1):
+            edge.append(_line_cross(shifted(i - 1, i), dirs[i - 1],
+                                    shifted(i, i), dirs[i]))
+        edge.append(_line_cross(shifted(last, last + 1), dirs[last], *cut_end))
+        sides.append(edge)
+
+    return sides[0] + sides[1][::-1]
 
 
 def _render_monogram(size, ink=_MONOGRAM_INK, bg=_MONOGRAM_BG):
     from PIL import Image, ImageDraw
 
-    # Рисуем вчетверо крупнее и уменьшаем: у PIL линии без сглаживания,
+    # Рисуем вчетверо крупнее и уменьшаем: у PIL заливка без сглаживания,
     # и на косой палочке V иначе видна лесенка.
     ss = 4
     big = size * ss
@@ -4063,19 +4115,24 @@ def _render_monogram(size, ink=_MONOGRAM_INK, bg=_MONOGRAM_BG):
 
     scale = big / 100.0
     shift = 50 - 50 * _MONOGRAM_SCALE
-    width = max(1, round(_MONOGRAM_STROKE * _MONOGRAM_SCALE * scale))
-    radius = width / 2
+    half = _MONOGRAM_STROKE / 2.0
 
-    def point(x, y):
-        return ((shift + x * _MONOGRAM_SCALE) * scale,
-                (shift + y * _MONOGRAM_SCALE) * scale)
+    def place(p):
+        return ((shift + p[0] * _MONOGRAM_SCALE) * scale,
+                (shift + p[1] * _MONOGRAM_SCALE) * scale)
 
-    for path in _MONOGRAM:
-        points = [point(*p) for p in path]
-        draw.line(points, fill=ink, width=width, joint="curve")
-        # Круглые торцы и стыки: PIL их не делает, дорисовываем кружками.
-        for x, y in points:
-            draw.ellipse([x - radius, y - radius, x + radius, y + radius], fill=ink)
+    # Косую палочку V режем не поперёк, а по верхней и нижней границе знака:
+    # тогда её торцы встают вровень с перекладинами G, а углы выходят острыми.
+    top, bottom = 16 - half, 80 + half
+    shapes = [
+        _stroke_polygon(_MONOGRAM_V, half,
+                        cap_start=((0, top), (1, 0)),
+                        cap_end=((0, bottom), (1, 0))),
+        _stroke_polygon(_MONOGRAM_G_TOP, half),
+        _stroke_polygon(_MONOGRAM_G_BOWL, half),
+    ]
+    for poly in shapes:
+        draw.polygon([place(p) for p in poly], fill=ink)
 
     return image.resize((size, size), Image.LANCZOS)
 
