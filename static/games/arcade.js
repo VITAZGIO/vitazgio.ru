@@ -334,7 +334,7 @@ window.VitazArcade = (function () {
   }
 
   var MODULES = ["snake", "tetris", "tanks", "arkanoid", "wolf", "doom",
-                 "roulette", "typing-texts", "typing"];
+                 "chess", "roulette", "typing-texts", "typing"];
 
   function loadAll() {
     return Promise.all(MODULES.map(function (name) {

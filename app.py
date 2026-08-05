@@ -708,7 +708,8 @@ ARCADE_GAMES = {
                  "lo": 10, "hi": 20_000},
     "tetris":   {"title": "Тетрис",  "order": "max", "unit": "score", "epoch": 1,
                  "lo": 10, "hi": 2_000_000},
-    "doom":     {"title": "DOOM",    "order": "min", "unit": "time",  "epoch": 1,
+    # epoch 2: уровней стало пять вместо двух, старые времена несравнимы
+    "doom":     {"title": "DOOM",    "order": "min", "unit": "time",  "epoch": 2,
                  "lo": 40, "hi": 7_200},
     "roulette": {"title": "Рулетка", "order": "max", "unit": "score", "epoch": 1,
                  "lo": 1, "hi": 100_000},
@@ -718,6 +719,9 @@ ARCADE_GAMES = {
                  "lo": 50, "hi": 500_000},
     "wolf":     {"title": "Ну, погоди!", "order": "max", "unit": "score", "epoch": 1,
                  "lo": 1, "hi": 100_000},
+    # У шахмат в рейтинге серия побед подряд, и только на сложном уровне.
+    "chess":    {"title": "Шахматы", "order": "max", "unit": "score", "epoch": 1,
+                 "lo": 1, "hi": 1_000},
     # Печать меряется чистой скоростью: знаков в минуту за вычетом опечаток.
     # Мировые рекорды слепой печати — около 900 зн/мин, потолок с запасом.
     "typing":   {"title": "Печать",  "order": "max", "unit": "cpm",   "epoch": 1,
