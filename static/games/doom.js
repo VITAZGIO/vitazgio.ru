@@ -1029,9 +1029,18 @@
       return row[gx];
     }
     function isWall(x, y) {
-      var c = cellAt(x, y);
-      if (!c) return true;
-      if (c.door) return c.open < 0.85;
+      // cellAt() отдаёт null и за краем карты, и на пустой клетке — то есть на
+      // обычном полу. Раньше здесь оба случая считались стеной, и пройти было
+      // нельзя вообще никуда: игрок топтался на месте, монстры не могли сойти
+      // с точки, а проверка видимости всегда отвечала «не вижу», из-за чего
+      // они и не просыпались. Рендер при этом работал — он ходит по сетке сам.
+      var gy = Math.floor(y), gx = Math.floor(x);
+      if (gy < 0 || gy >= state.grid.length) return true;
+      var row = state.grid[gy];
+      if (gx < 0 || gx >= row.length) return true;
+      var cell = row[gx];
+      if (!cell) return false;                    // пусто — значит пол
+      if (cell.door) return cell.open < 0.85;     // открытую дверь проходим
       return true;
     }
 
