@@ -16,9 +16,11 @@
   var VIEW_W, VIEW_H, BAR_H, SCREEN_W, SCREEN_H;
 
   function setResolution(touch) {
-    VIEW_W = touch ? 280 : 400;
-    VIEW_H = touch ? 140 : 200;
-    BAR_H = touch ? 42 : 56;
+    // Пропорции ближе к настольным: на телефоне экран узкий и высокий,
+    // и слишком низкая картинка оставляла половину места пустой.
+    VIEW_W = touch ? 300 : 400;
+    VIEW_H = touch ? 176 : 200;
+    BAR_H = touch ? 44 : 56;
     SCREEN_W = VIEW_W;
     SCREEN_H = VIEW_H + BAR_H;
   }
@@ -890,7 +892,7 @@
     var tip = document.createElement("div");
     tip.style.cssText = "color:#4a6379;font-size:.64rem;letter-spacing:.08em;text-align:center;flex:none";
     tip.textContent = api.touch
-      ? "ВЕДИ ПАЛЬЦЕМ ПО ЭКРАНУ — ОСМОТРЕТЬСЯ · КРЕСТОВИНА — ИДТИ"
+      ? "ПАЛЕЦ ПО ЭКРАНУ — ОБЗОР И ВЫСТРЕЛ · КРЕСТОВИНА — ИДТИ И ПОВОРАЧИВАТЬ"
       : "WASD — движение · МЫШЬ или ← → — обзор · CTRL/ЛКМ — огонь · E — двери · " +
         "1-3 — оружие · TAB — карта · клик по экрану захватывает мышь";
     wrap.append(canvas, tip);
@@ -2107,28 +2109,26 @@
 
       api.deck({
         pad: {
+          // Влево-вправо крутят, а не приставляют шаг: на телефоне так можно
+          // разворачиваться одним большим пальцем, не отрывая второй от огня.
           up: holdKey("w"), down: holdKey("s"),
-          left: holdKey("a"), right: holdKey("d"),
+          left: holdKey("ArrowLeft"), right: holdKey("ArrowRight"),
         },
         actions: [
-          { label: "ДВЕРЬ", color: "#ffd84a", down: tryUse },
-          { label: "ОГОНЬ", color: "#ff3b30", big: true,
+          { icon: "door", aria: "открыть дверь", color: "#ffd84a", down: tryUse },
+          { icon: "fire", aria: "огонь", color: "#ff3b30", big: true,
             down: function () { firing = true; }, up: function () { firing = false; } },
         ],
         extra: [
-          { label: "СТВОЛ", down: function () {
+          { icon: "gun", label: "Ствол", down: function () {
             // Перебираем только то, что уже подобрано.
             var order = ["pistol", "shotgun", "chaingun"];
             var have = order.filter(function (n) { return state.weapons[n]; });
             var next = have[(have.indexOf(state.weapon) + 1) % have.length];
             switchWeapon(next);
           } },
-          { label: "КАРТА", down: function () { state.showMap = !state.showMap; } },
-          { label: "◀", down: function () { keys.ArrowLeft = true; },
-            up: function () { keys.ArrowLeft = false; } },
-          { label: "▶", down: function () { keys.ArrowRight = true; },
-            up: function () { keys.ArrowRight = false; } },
-          { label: "ЗАНОВО", down: restart },
+          { icon: "map", label: "Карта", down: function () { state.showMap = !state.showMap; } },
+          { icon: "replay", label: "Заново", down: restart },
         ],
       });
     }
@@ -2172,6 +2172,7 @@
     tagline: "Шутер на рейкастинге: два уровня, ключи и двери, бесы с огнём, зомби с винтовками, " +
       "взрывающиеся бочки и три ствола. Текстуры и спрайты нарисованы кодом.",
     keys: "WASD · мышь — обзор · Ctrl — огонь · E — двери · Tab — карта",
+    keysTouch: "Палец по экрану — обзор и выстрел · крестовина — идти",
     accent: "#ff3b30",
     thumb: thumb,
     start: start,

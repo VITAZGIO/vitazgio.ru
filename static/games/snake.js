@@ -320,9 +320,9 @@
         right: function () { turn(1, 0); },
       },
       actions: [
-        { label: "ПАУЗА", color: "#ffb35c",
+        { icon: "pause", aria: "пауза", color: "#ffb35c",
           down: function () { if (alive) { paused = !paused; hud_(); } } },
-        { label: "ЗАНОВО", color: "#63f5ad", big: true,
+        { icon: "replay", aria: "заново", color: "#63f5ad", big: true,
           down: function () { reset(); hud_(); } },
       ],
     });
@@ -345,6 +345,7 @@
     title: "ЗМЕЙКА",
     tagline: "Классика без стен: поле закольцовано, скорость растёт с каждой съеденной точкой.",
     keys: "Стрелки / WASD · пробел — пауза",
+    keysTouch: "Крестовина · пауза и рестарт на панели",
     accent: "#2de2ff",
     thumb: thumb,
     start: start,

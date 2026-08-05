@@ -641,19 +641,25 @@
 
     api.deck({
       pad: {
+        // Вверх — поворот, как на приставках: иначе верхний луч крестовины
+        // пустует, а самое частое действие уезжает на дальнюю кнопку.
+        up: { down: function () { actionDown("cw"); } },
         left: padButton("left"),
         right: padButton("right"),
         down: padButton("softdrop"),
       },
       actions: [
-        { label: "◀ ПОВ", color: "#2de2ff", down: function () { actionDown("ccw"); } },
-        { label: "ПОВ ▶", color: "#2de2ff", down: function () { actionDown("cw"); } },
-        { label: "СБРОС", color: "#ff3fa4", big: true, down: function () { actionDown("drop"); } },
+        { icon: "ccw", aria: "поворот против часовой", color: "#2de2ff",
+          down: function () { actionDown("ccw"); } },
+        { icon: "cw", aria: "поворот по часовой", color: "#2de2ff",
+          down: function () { actionDown("cw"); } },
+        { icon: "drop", aria: "сбросить", color: "#ff3fa4", big: true,
+          down: function () { actionDown("drop"); } },
       ],
       extra: [
-        { label: "КАРМАН", down: function () { actionDown("hold"); } },
-        { label: "ПАУЗА", down: function () { actionDown("pause"); } },
-        { label: "ЗАНОВО", down: function () { reset(); } },
+        { icon: "hold", label: "Карман", down: function () { actionDown("hold"); } },
+        { icon: "pause", label: "Пауза", down: function () { actionDown("pause"); } },
+        { icon: "replay", label: "Заново", down: function () { reset(); } },
       ],
     });
 
@@ -677,6 +683,7 @@
     title: "ТЕТРИС",
     tagline: "Правила современного тетриса: мешок из семи фигур, отталкивание от стен, карман, тень и T-спины.",
     keys: "← → ↓ · ↑/X поворот · пробел — сброс · C — карман",
+    keysTouch: "Крестовина: вверх — поворот · круглые — поворот и сброс",
     accent: "#ffd422",
     thumb: thumb,
     start: start,
