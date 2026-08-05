@@ -3964,14 +3964,16 @@ _GAME_ICONS = {
         "b": ("#2f6ee0", None), "B": ("#5f9bff", None),
         "s": ("#cbd6e4", "px-sword"), "d": ("#3a4658", None),
     }),
-    # 3. Геймпад с моргающим индикатором
+    # 3. Геймпад с моргающим индикатором.
+    # Полоска светодиода стоит на столбцах 5–8: центр значка — 6.5, и раньше
+    # она была сдвинута влево, из-за чего налезала на крестовину.
     "pad": _pixel_svg([
         "..BBBBBBBBBB..",
         ".BBBBBBBBBBBB.",
         "BB.w.BBBB.r.BB",
         "B.www.BB.rrrBB",
         "BB.w.BBBB.r.BB",
-        "BBBBLLLLBBBBBB",
+        "BBBBBLLLLBBBBB",
         ".BBBBBBBBBBBB.",
         "..BBB....BBB..",
     ], {
@@ -5527,9 +5529,9 @@ def home():
           background: linear-gradient(90deg, transparent, rgba(255,255,255,.14), transparent);
         }
         .arcade-picks {
-          display: grid; gap: 14px; margin-top: 16px;
-          grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+          display: flex; justify-content: center; gap: 14px; margin-top: 16px;
         }
+        .arcade-picks .pick { width: clamp(104px, 16vw, 132px); }
         .pick {
           --pc: #2de2ff;
           position: relative; display: grid; place-items: center;
@@ -5720,28 +5722,8 @@ def home():
         <section class="arcade-bar" aria-label="Игры">
           <div class="arcade-bar-line"><span>ARCADE</span></div>
           <div class="arcade-picks">
-            <button class="pick pick--cabinet" type="button" data-games aria-label="Открыть игры">
-              <span class="pick-art">__ICON_CABINET__</span>
-              <span class="pick-glow"></span>
-            </button>
-            <button class="pick pick--hero" type="button" data-games aria-label="Открыть игры">
-              <span class="pick-art">__ICON_HERO__</span>
-              <span class="pick-glow"></span>
-            </button>
             <button class="pick pick--pad" type="button" data-games aria-label="Открыть игры">
               <span class="pick-art">__ICON_PAD__</span>
-              <span class="pick-glow"></span>
-            </button>
-            <button class="pick pick--invader" type="button" data-games aria-label="Открыть игры">
-              <span class="pick-art">__ICON_INVADER__</span>
-              <span class="pick-glow"></span>
-            </button>
-            <button class="pick pick--coin" type="button" data-games aria-label="Открыть игры">
-              <span class="pick-art">__ICON_COIN__</span>
-              <span class="pick-glow"></span>
-            </button>
-            <button class="pick pick--cart" type="button" data-games aria-label="Открыть игры">
-              <span class="pick-art">__ICON_CART__</span>
               <span class="pick-glow"></span>
             </button>
           </div>
