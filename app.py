@@ -4052,12 +4052,13 @@ _MONOGRAM_G_BOWL = [(44, 80), (86, 80), (86, 50), (70, 50)]
 # а обрубленные торцы G прячутся внутри знака.
 _MONOGRAM_SCALE = 0.62      # знак занимает ~62% поля, вокруг остаётся воздух
 _MONOGRAM_STROKE = 11
+_MONOGRAM_SLANT = 12        # курсив, градусы: верх знака уезжает вправо
 _MONOGRAM_INK = "#2de2ff"
 _MONOGRAM_BG = "#0d1321"
 
 # Поднимать при смене рисунка: попадает и в имя файла на диске, и в адрес
 # в манифесте — иначе браузер продолжит показывать иконку из кэша.
-ICON_VERSION = "vg3"
+ICON_VERSION = "vg4"
 
 
 def _line_cross(p, pd, q, qd):
@@ -4113,13 +4114,7 @@ def _render_monogram(size, ink=_MONOGRAM_INK, bg=_MONOGRAM_BG):
     image = Image.new("RGB", (big, big), bg)
     draw = ImageDraw.Draw(image)
 
-    scale = big / 100.0
-    shift = 50 - 50 * _MONOGRAM_SCALE
     half = _MONOGRAM_STROKE / 2.0
-
-    def place(p):
-        return ((shift + p[0] * _MONOGRAM_SCALE) * scale,
-                (shift + p[1] * _MONOGRAM_SCALE) * scale)
 
     # Косую палочку V режем не поперёк, а по верхней и нижней границе знака:
     # тогда её торцы встают вровень с перекладинами G, а углы выходят острыми.
@@ -4131,8 +4126,25 @@ def _render_monogram(size, ink=_MONOGRAM_INK, bg=_MONOGRAM_BG):
         _stroke_polygon(_MONOGRAM_G_TOP, half),
         _stroke_polygon(_MONOGRAM_G_BOWL, half),
     ]
+
+    if _MONOGRAM_SLANT:
+        # Настоящий курсив: горизонтальные срезы остаются горизонтальными,
+        # вертикальные едут вбок — все торцы так и остаются плоскими.
+        tilt = math.tan(math.radians(_MONOGRAM_SLANT))
+        shapes = [[(x + (80 - y) * tilt, y) for x, y in poly] for poly in shapes]
+
+    # Вписываем по настоящим габаритам знака, а не по условному полю 100x100:
+    # от наклона и толщины штриха они плывут, а иконка должна быть одного
+    # оптического размера и по центру.
+    points = [p for poly in shapes for p in poly]
+    x0, x1 = min(p[0] for p in points), max(p[0] for p in points)
+    y0, y1 = min(p[1] for p in points), max(p[1] for p in points)
+    scale = _MONOGRAM_SCALE * big / max(x1 - x0, y1 - y0)
+    dx = big / 2 - (x0 + x1) / 2 * scale
+    dy = big / 2 - (y0 + y1) / 2 * scale
+
     for poly in shapes:
-        draw.polygon([place(p) for p in poly], fill=ink)
+        draw.polygon([(x * scale + dx, y * scale + dy) for x, y in poly], fill=ink)
 
     return image.resize((size, size), Image.LANCZOS)
 
