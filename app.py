@@ -3782,10 +3782,14 @@ def manifest():
             "display": "standalone",
             "background_color": "#0d1321",
             "theme_color": "#0d1321",
+            # Версия в адресе обязательна. Браузер кэширует иконки манифеста по
+            # ссылке и на смену самой картинки не смотрит: пока адрес прежний,
+            # при установке он рисует старую, даже если сервер отдаёт новую.
             "icons": [
-                {"src": "/icon-192.png", "sizes": "192x192", "type": "image/png"},
-                {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png"},
-                {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"},
+                {"src": f"/icon-192.png?v={ICON_VERSION}", "sizes": "192x192", "type": "image/png"},
+                {"src": f"/icon-512.png?v={ICON_VERSION}", "sizes": "512x512", "type": "image/png"},
+                {"src": f"/icon-512.png?v={ICON_VERSION}", "sizes": "512x512", "type": "image/png",
+                 "purpose": "maskable"},
             ],
             "share_target": {
                 "action": "/share-target",
@@ -4037,6 +4041,10 @@ _MONOGRAM_STROKE = 11
 _MONOGRAM_INK = "#2de2ff"
 _MONOGRAM_BG = "#0d1321"
 
+# Поднимать при смене рисунка: попадает и в имя файла на диске, и в адрес
+# в манифесте — иначе браузер продолжит показывать иконку из кэша.
+ICON_VERSION = "vg1"
+
 
 def _render_monogram(size, ink=_MONOGRAM_INK, bg=_MONOGRAM_BG):
     from PIL import Image, ImageDraw
@@ -4071,7 +4079,7 @@ def _render_monogram(size, ink=_MONOGRAM_INK, bg=_MONOGRAM_BG):
 def favicon():
     """Браузеры просят его сами, без всяких ссылок в разметке. Отдаём ту же
     иконку, что и приложению, — иначе в логах вечный 404."""
-    return redirect(url_for("app_icon", size=192))
+    return redirect(url_for("app_icon", size=192, v=ICON_VERSION))
 
 
 @app.get("/icon-<int:size>.png")
@@ -4080,14 +4088,18 @@ def app_icon(size):
         return "", 404
     # Версия в имени: у старой иконки был другой рисунок, и без неё браузер
     # с телефоном продолжали бы показывать закэшированную картинку.
-    path = os.path.join(DATA_DIR, f"icon-{size}-vg.png")
+    path = os.path.join(DATA_DIR, f"icon-{size}-{ICON_VERSION}.png")
     if not os.path.exists(path):
         try:
             image = _render_monogram(size)
             image.save(path, "PNG", optimize=True)
         except Exception:
             return "", 404
-    return send_file(path, mimetype="image/png", conditional=True)
+    response = send_file(path, mimetype="image/png", conditional=True)
+    # Сутки — достаточно, чтобы не дёргать сервер, и мало, чтобы не залипло
+    # навсегда, если версию поднять забудут.
+    response.headers["Cache-Control"] = "public, max-age=86400"
+    return response
 
 
 @app.post("/share-target")
