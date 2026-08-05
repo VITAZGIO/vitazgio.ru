@@ -4025,6 +4025,48 @@ _GAME_ICONS = {
 }
 
 
+# ---- Иконка приложения: монограмма VG ---------------------------------------
+# Левая палочка V упирается в общую стойку, она же служит левым боком G,
+# а сама G нарисована квадратной спиралью. Координаты в поле 100x100.
+_MONOGRAM = [
+    [(12, 16), (44, 80)],                                          # V
+    [(86, 16), (50, 16), (44, 80), (86, 80), (86, 50), (66, 50)],  # G
+]
+_MONOGRAM_SCALE = 0.62      # знак занимает ~62% поля, вокруг остаётся воздух
+_MONOGRAM_STROKE = 11
+_MONOGRAM_INK = "#2de2ff"
+_MONOGRAM_BG = "#0d1321"
+
+
+def _render_monogram(size, ink=_MONOGRAM_INK, bg=_MONOGRAM_BG):
+    from PIL import Image, ImageDraw
+
+    # Рисуем вчетверо крупнее и уменьшаем: у PIL линии без сглаживания,
+    # и на косой палочке V иначе видна лесенка.
+    ss = 4
+    big = size * ss
+    image = Image.new("RGB", (big, big), bg)
+    draw = ImageDraw.Draw(image)
+
+    scale = big / 100.0
+    shift = 50 - 50 * _MONOGRAM_SCALE
+    width = max(1, round(_MONOGRAM_STROKE * _MONOGRAM_SCALE * scale))
+    radius = width / 2
+
+    def point(x, y):
+        return ((shift + x * _MONOGRAM_SCALE) * scale,
+                (shift + y * _MONOGRAM_SCALE) * scale)
+
+    for path in _MONOGRAM:
+        points = [point(*p) for p in path]
+        draw.line(points, fill=ink, width=width, joint="curve")
+        # Круглые торцы и стыки: PIL их не делает, дорисовываем кружками.
+        for x, y in points:
+            draw.ellipse([x - radius, y - radius, x + radius, y + radius], fill=ink)
+
+    return image.resize((size, size), Image.LANCZOS)
+
+
 @app.get("/favicon.ico")
 def favicon():
     """Браузеры просят его сами, без всяких ссылок в разметке. Отдаём ту же
@@ -4036,22 +4078,12 @@ def favicon():
 def app_icon(size):
     if size not in (192, 512):
         return "", 404
-    path = os.path.join(DATA_DIR, f"icon-{size}.png")
+    # Версия в имени: у старой иконки был другой рисунок, и без неё браузер
+    # с телефоном продолжали бы показывать закэшированную картинку.
+    path = os.path.join(DATA_DIR, f"icon-{size}-vg.png")
     if not os.path.exists(path):
         try:
-            from PIL import Image, ImageDraw
-
-            image = Image.new("RGB", (size, size), "#0d1321")
-            draw = ImageDraw.Draw(image)
-            unit = size / 16
-            draw.rounded_rectangle([unit, unit, size - unit, size - unit],
-                                   radius=unit * 2, fill="#101d33", outline="#2de2ff",
-                                   width=max(2, int(unit / 3)))
-            # стрелка вниз в лоток — «положить файл»
-            draw.polygon([(size / 2, unit * 10.5), (unit * 4.6, unit * 6.8), (unit * 11.4, unit * 6.8)],
-                         fill="#ff782f")
-            draw.rectangle([unit * 6.9, unit * 3.6, unit * 9.1, unit * 7.2], fill="#ff782f")
-            draw.rectangle([unit * 4.2, unit * 11.6, unit * 11.8, unit * 12.6], fill="#2de2ff")
+            image = _render_monogram(size)
             image.save(path, "PNG", optimize=True)
         except Exception:
             return "", 404
