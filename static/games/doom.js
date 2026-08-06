@@ -1000,6 +1000,8 @@
     // Рекорд в DOOM — время всего прохождения, поэтому секундомер живёт
     // отдельно от state: тот пересоздаётся на каждом уровне.
     var runTime = 0;
+    // Начал не с первой зоны — время в таблицу не пишем
+    var skipped = false;
 
     /* ── Загрузка уровня ──────────────────────────────────────────────── */
     function loadLevel(index) {
@@ -1206,6 +1208,7 @@
       var k = keyName(e);
       keys[k] = true;
       if (k === "Tab") { state.showMap = !state.showMap; e.preventDefault(); }
+      if (k === "l" || k === "L" || k === "д" || k === "Д") { pickLevel(); e.preventDefault(); }
       if (k === "e") { tryUse(); e.preventDefault(); }
       if (k === "1") switchWeapon("pistol");
       if (k === "2") switchWeapon("shotgun");
@@ -1610,6 +1613,9 @@
     }
 
     function finishLevel() {
+      // Пройденное открывается сразу, чтобы в следующий раз можно было
+      // начать отсюда, а не бежать всё заново ради пятой зоны.
+      if (api.unlock) api.unlock(state.levelIndex + 1);
       if (state.levelIndex + 1 < LEVELS.length) {
         snd.exit();
         var next = state.levelIndex + 1;
@@ -1621,14 +1627,26 @@
         snd.exit();
         var seconds = Math.max(1, Math.round(runTime / 1000));
         api.best("doom-kills", state.kills);
-        if (api.record) api.record("doom", seconds);
+        if (api.record && !skipped) api.record("doom", seconds);
       }
     }
 
-    function restart() {
+    function restart(from) {
       state = null;
       runTime = 0;
-      loadLevel(0);
+      if (!from) skipped = false;
+      loadLevel(from || 0);
+    }
+
+    /* Окно выбора зоны. Рекорд времени при этом не пишется: пробежать
+       последнюю зону с разгона и записать это как прохождение — жульничество,
+       и таблица от такого теряет смысл. */
+    function pickLevel() {
+      if (!api.levels) return;
+      api.levels(LEVELS.map(function (l) { return l.name; }), function (i) {
+        skipped = i > 0;
+        restart(i);
+      });
     }
 
     /* ══ Отрисовка мира ═════════════════════════════════════════════════ */
@@ -2275,7 +2293,8 @@
             switchWeapon(next);
           } },
           { icon: "map", label: "Карта", down: function () { state.showMap = !state.showMap; } },
-          { icon: "replay", label: "Заново", down: restart },
+          { icon: "hold", label: "Зона", down: pickLevel },
+          { icon: "replay", label: "Заново", down: function () { restart(0); } },
         ],
       });
     }

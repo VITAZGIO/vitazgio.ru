@@ -193,7 +193,7 @@
     var bricks, balls, drops, sparks;
     var padX, padW, level, score, lives, alive, stuck, saved;
     var slowT, wideT, held = 0, aimT = 0, paused = false;
-    var startedAt = 0, finalScore = 0, finalMult = 1;
+    var startedAt = 0, finalScore = 0, finalMult = 1, skipped = false;
 
     function buildLevel(n) {
       var map = LEVELS[n % LEVELS.length];
@@ -226,7 +226,7 @@
       if (full) {
         level = 0; score = 0; lives = 3;
         startedAt = performance.now(); finalScore = 0; finalMult = 1;
-        paused = false;
+        paused = false; skipped = false;
       }
       padW = 78; padX = W / 2;
       slowT = 0; wideT = 0;
@@ -251,6 +251,20 @@
     var WALL = 8;
     function clampPad(x) {
       return Math.max(WALL + padW / 2, Math.min(W - WALL - padW / 2, x));
+    }
+
+    /* Выбор уровня. Начал не с первого — очки в таблицу не идут: пройти
+       шестой с полным запасом жизней и записать это как рекорд нечестно. */
+    function pickLevel() {
+      if (!api.levels) return;
+      api.levels(LEVELS.map(function (_, i) { return "Уровень " + (i + 1); }), function (i) {
+        reset(true);
+        level = i;
+        skipped = i > 0;
+        buildLevel(level);
+        resetBall();
+        hud_();
+      });
     }
 
     function speed() { return (300 + level * 18) * (slowT > 0 ? 0.62 : 1); }
@@ -392,6 +406,7 @@
 
       if (!bricks.length) {
         level++;
+        if (api.unlock) api.unlock(level);
         score += 500;
         api.audio.tone(700, 0.12, { type: "square", volume: 0.1 });
         setTimeout(function () { api.audio.tone(1000, 0.2, { type: "square", volume: 0.09 }); }, 130);
@@ -525,7 +540,7 @@
         var t = api.tempo(score, (performance.now() - startedAt) / 1000, 600);
         finalScore = t.total; finalMult = t.mult;
         api.best("arkanoid", finalScore);
-        if (finalScore > 0) api.record("arkanoid", finalScore);
+        if (finalScore > 0 && !skipped) api.record("arkanoid", finalScore);
       }
       draw(now);
     }
@@ -573,6 +588,9 @@
         { icon: "pause", aria: "пауза",
           down: function () { if (alive) paused = !paused; } },
         { icon: "replay", aria: "заново", down: function () { reset(true); } },
+      ],
+      extra: [
+        { icon: "hold", label: "УРОВЕНЬ", aria: "выбрать уровень", down: pickLevel },
       ],
     });
 

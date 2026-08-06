@@ -487,6 +487,23 @@ window.VitazArcade = (function () {
       "#arcade-board .bhead i{flex:1;height:1px;background:linear-gradient(90deg,",
       "rgba(45,226,255,.35),transparent)}",
       "#arcade-board .badmin{font-size:.6rem;letter-spacing:.14em;color:#ff3fa4;font-style:normal}",
+      /* Окно выбора уровня */
+      "#arcade-levels{position:absolute;inset:0;z-index:25;display:grid;place-items:center;",
+      "padding:20px;background:rgba(4,6,11,.9)}",
+      ".lv-panel{width:min(460px,100%);max-height:100%;overflow:auto;padding:20px;",
+      "border:1px solid rgba(45,226,255,.4);background:linear-gradient(150deg,#111a28,#0a0e16)}",
+      ".lv-panel h3{margin:0 0 14px;font-size:.9rem;letter-spacing:.18em;color:#2de2ff}",
+      ".lv-grid{display:grid;gap:8px}",
+      ".lv-item{display:flex;align-items:center;gap:12px;padding:11px 14px;cursor:pointer;",
+      "text-align:left;color:#cfe2ee;font:700 .8rem " + FONT + ";letter-spacing:.04em;",
+      "border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.03)}",
+      ".lv-item b{flex:none;width:22px;color:#2de2ff;font-size:1rem}",
+      ".lv-item span{flex:1;min-width:0}",
+      ".lv-item i{flex:none;font-style:normal;font-size:.66rem;color:#4a6379}",
+      ".lv-item:hover{border-color:#2de2ff;background:rgba(45,226,255,.12)}",
+      ".lv-item.locked{opacity:.45;cursor:not-allowed}",
+      ".lv-item.locked:hover{border-color:rgba(255,255,255,.1);background:rgba(255,255,255,.03)}",
+      ".lv-note{margin:12px 0 0;color:#4a6379;font-size:.68rem}",
       "#arcade-board .bcols{display:grid;gap:10px;",
       "grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}",
       ".bcol{min-width:0}",
@@ -822,6 +839,47 @@ window.VitazArcade = (function () {
     if (top) top.textContent = "Звуки: " + (audio.muted ? "выкл" : "вкл");
     var topM = overlay && overlay.querySelector("#arcade-music");
     if (topM) topM.textContent = "Музыка: " + (musicMuted() ? "выкл" : "вкл");
+  }
+
+  /* Выбор уровня. Игра сообщает список названий и что открыто, а мы рисуем
+     окно поверх сцены. Пройденное запоминается на устройстве: проходить
+     пять уровней DOOM подряд ради пятого никто не обязан. */
+  function unlockedKey(game) { return "vitaz-lvl-" + game; }
+
+  function levelUnlocked(game) {
+    try { return parseInt(localStorage.getItem(unlockedKey(game)), 10) || 0; }
+    catch (e) { return 0; }
+  }
+
+  function markUnlocked(game, index) {
+    if (index <= levelUnlocked(game)) return;
+    try { localStorage.setItem(unlockedKey(game), String(index)); } catch (e) {}
+  }
+
+  function chooseLevel(game, names, onPick) {
+    var open = levelUnlocked(game);
+    var box = document.createElement("div");
+    box.id = "arcade-levels";
+    box.innerHTML = '<div class="lv-panel"><h3>ВЫБОР УРОВНЯ</h3><div class="lv-grid"></div>' +
+      '<p class="lv-note">Пройденное открывается само и запоминается.</p></div>';
+    var grid = box.querySelector(".lv-grid");
+    names.forEach(function (name, i) {
+      var locked = i > open;
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = "lv-item" + (locked ? " locked" : "");
+      b.innerHTML = '<b>' + (i + 1) + '</b><span>' + escapeHtml(name) + '</span>' +
+                    (locked ? '<i>закрыт</i>' : "");
+      if (!locked) {
+        b.addEventListener("click", function () {
+          box.remove();
+          onPick(i);
+        });
+      }
+      grid.appendChild(b);
+    });
+    box.addEventListener("click", function (e) { if (e.target === box) box.remove(); });
+    stage.appendChild(box);
   }
 
   /* ── Кнопки панели ───────────────────────────────────────────────────── */
@@ -1333,6 +1391,9 @@ window.VitazArcade = (function () {
       best: best,
       record: record,          // рекорд на сервер, с вопросом об имени
       tempo: tempo,            // множитель за темп прохождения
+      levels: function (names, onPick) { chooseLevel(game.id, names, onPick); },
+      unlock: function (index) { markUnlocked(game.id, index); },
+      unlocked: function () { return levelUnlocked(game.id); },
       top: boardBest,          // число для строки «РЕКОРД»
       topRows: boardTop,       // сами строки таблицы, если понадобятся
       exit: showMenu,

@@ -181,7 +181,7 @@
 
     var grid, me, foes, shots, boom, level, score, lives, alive, paused;
     var toSpawn, spawnT, baseAlive, overT, shieldT;
-    var startedAt = 0, finalScore = 0, finalMult = 1;
+    var startedAt = 0, finalScore = 0, finalMult = 1, skipped = false;
     var held = { x: 0, y: 0 };
 
     function buildLevel(n) {
@@ -235,6 +235,7 @@
       if (full) {
         level = 0; score = 0; lives = 3;
         startedAt = performance.now(); finalScore = 0; finalMult = 1;
+        skipped = false;
       }
       buildLevel(level);
       me = tank(10 * S, (N - 2) * S, 0, "me");
@@ -445,6 +446,7 @@
 
       if (alive && toSpawn === 0 && foes.length === 0) {
         level++;
+        if (api.unlock) api.unlock(level);
         api.audio.tone(700, 0.12, { type: "square", volume: 0.1 });
         setTimeout(function () { api.audio.tone(950, 0.2, { type: "square", volume: 0.09 }); }, 130);
         reset(false);
@@ -560,13 +562,26 @@
           var t = api.tempo(score, (performance.now() - startedAt) / 1000, 500);
           finalScore = t.total; finalMult = t.mult;
           api.best("tanks", finalScore);
-          if (finalScore > 0) api.record("tanks", finalScore);
+          if (finalScore > 0 && !skipped) api.record("tanks", finalScore);
         }
       }
       draw(now);
     }
 
     function restart() { me.saved = false; reset(true); }
+
+    /* Выбор карты. Начал не с первой — очки в таблицу не идут: врагов на
+       поздних картах столько же, а первые волны пропущены. */
+    function pickLevel() {
+      if (!api.levels) return;
+      api.levels(MAPS.map(function (_, i) { return "Карта " + (i + 1); }), function (i) {
+        me.saved = false;
+        reset(true);
+        level = i;
+        skipped = i > 0;
+        reset(false);
+      });
+    }
 
     function onKey(e) {
       if (e.key === "Enter") { if (!alive) restart(); e.preventDefault(); return; }
@@ -600,6 +615,9 @@
       corners: [
         { icon: "pause", aria: "пауза", down: function () { if (alive) paused = !paused; } },
         { icon: "replay", aria: "заново", down: restart },
+      ],
+      extra: [
+        { icon: "hold", label: "КАРТА", aria: "выбрать карту", down: pickLevel },
       ],
     });
 
