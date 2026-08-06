@@ -431,8 +431,12 @@ window.VitazArcade = (function () {
       ".bcol h4{margin:0 0 5px;font-size:.64rem;letter-spacing:.16em;color:var(--ac,#8fa5b8);",
       "text-transform:uppercase;font-weight:700}",
       ".brow{display:flex;align-items:center;gap:7px;font-size:.7rem;line-height:1.75;color:#a9c2d4}",
-      ".brow .pos{width:13px;flex:none;color:#4a6379}",
-      ".brow.p1 .pos{color:#ffd84a}.brow.p2 .pos{color:#c8d6e2}.brow.p3 .pos{color:#c9843f}",
+      ".brow .pos{width:16px;flex:none;color:#4a6379;font-weight:800;text-align:center}",
+      /* Первые три места — обычными арабскими цифрами, но в цвет медали:
+         золото, серебро, бронза. Со свечением, чтобы читалось сразу. */
+      ".brow.p1 .pos{color:#ffd84a;font-size:.92rem;text-shadow:0 0 8px rgba(255,216,74,.55)}",
+      ".brow.p2 .pos{color:#dfe8f2;font-size:.86rem;text-shadow:0 0 7px rgba(223,232,242,.4)}",
+      ".brow.p3 .pos{color:#e0913f;font-size:.82rem;text-shadow:0 0 7px rgba(224,145,63,.45)}",
       ".brow .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
       ".brow .vl{flex:none;color:#eaf6ff;font-variant-numeric:tabular-nums}",
       ".brow.mine .nm{color:#63f5ad}",
@@ -1046,10 +1050,10 @@ window.VitazArcade = (function () {
       paintBoard();
       return;
     }
+    // Ни заголовка про чистку, ни объяснений: кнопка невидимая, и кто её
+    // нашёл — тот и так знает, зачем она. Просто строка и слово «Пароль».
     ask({
-      title: "ЧИСТКА ТАБЛИЦЫ", password: true, max: 40,
-      text: "Суточный пароль. После него у каждой записи появится крестик — " +
-            "снести можно те, где вместо имени похабщина.",
+      title: "ПАРОЛЬ", password: true, max: 40,
       ok: "Войти", no: "Отмена", bad: "Пароль не подошёл.",
       check: function (value) {
         // Проверяем не на слово, а делом: сервер всё равно требует пароль

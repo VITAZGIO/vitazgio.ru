@@ -78,42 +78,73 @@
     { id: "life",  color: "#ff6b9d", text: "+" },   // жизнь
   ];
 
+  /* Превью: честный отскок. Шарик летает между кирпичами и ракеткой, а
+     ракетка едет ему навстречу и подставляется под удар — раньше шарик
+     проходил сквозь неё, и превью выглядело сломанным. */
   function thumb(ctx, w, h, t) {
     ctx.fillStyle = "#05070d";
     ctx.fillRect(0, 0, w, h);
-    var bw = w / 9;
-    for (var r = 0; r < 4; r++) {
+
+    var padY = h - 24, padW = Math.round(w / 4), rad = 6;
+    var top = 74, bw = w / 9;
+
+    // Отскок считаем аналитически: путь вверх-вниз между top и padY —
+    // это «пила», её можно сложить из остатка по времени.
+    var period = 1.9;
+    var ph = (t % period) / period;
+    var span = padY - rad - top;
+    var y = ph < 0.5 ? padY - rad - (ph / 0.5) * span
+                     : top + ((ph - 0.5) / 0.5) * span;
+    // По горизонтали — такая же пила между бортами
+    var xper = 3.1, xph = (t % xper) / xper;
+    var xspan = w - rad * 2 - 16;
+    var x = xph < 0.5 ? 8 + rad + (xph / 0.5) * xspan
+                      : 8 + rad + xspan - ((xph - 0.5) / 0.5) * xspan;
+    // Ракетка всегда под шариком: она его и отбивает
+    var px = Math.max(padW / 2 + 8, Math.min(w - padW / 2 - 8, x));
+
+    var rows = 4;
+    for (var r = 0; r < rows; r++) {
       for (var c = 0; c < 9; c++) {
+        // Ряд, до которого шарик уже добрался, выбит по центру
+        if (r === 0 && c === 4 && ph > 0.55) continue;
         ctx.fillStyle = TINT[(r + c) % TINT.length];
-        ctx.globalAlpha = 0.9;
-        ctx.fillRect(c * bw + 2, 16 + r * 15, bw - 4, 11);
+        ctx.globalAlpha = 0.92;
+        ctx.fillRect(c * bw + 2, 16 + r * 14, bw - 4, 10);
       }
     }
     ctx.globalAlpha = 1;
-    var px = w / 2 + Math.sin(t * 2.1) * (w / 3);
-    ctx.fillStyle = "#2de2ff";
-    ctx.fillRect(px - 26, h - 26, 52, 8);
+
+    ctx.fillStyle = "#131c29";
+    ctx.fillRect(0, 0, 8, h); ctx.fillRect(w - 8, 0, 8, h);
+
+    var grad = ctx.createLinearGradient(0, padY, 0, padY + 10);
+    grad.addColorStop(0, "#7df9ff");
+    grad.addColorStop(1, "#1a8fb0");
+    ctx.fillStyle = grad;
+    ctx.fillRect(px - padW / 2, padY, padW, 10);
+
+    ctx.fillStyle = "rgba(255,255,255,.22)";
+    ctx.beginPath(); ctx.arc(x, y, rad + 4, 0, 7); ctx.fill();
     ctx.fillStyle = "#fff";
-    ctx.beginPath();
-    ctx.arc(px + Math.sin(t * 3.7) * 30, h - 60 + Math.abs(Math.sin(t * 2.6)) * -30, 6, 0, 7);
-    ctx.fill();
+    ctx.beginPath(); ctx.arc(x, y, rad, 0, 7); ctx.fill();
   }
 
   function start(root, api) {
     var wrap = document.createElement("div");
     wrap.style.cssText = "display:flex;flex-direction:column;align-items:center;gap:8px;" +
-      "width:100%;max-height:100%;min-height:0";
+      "width:100%;height:100%;max-height:100%;min-height:0";
     var hud = document.createElement("div");
     hud.style.cssText = "display:flex;gap:16px;flex:none;font:700 .8rem " + api.font +
       ";letter-spacing:.08em;color:#8fa5b8";
     var canvas = document.createElement("canvas");
     canvas.width = W; canvas.height = H;
     canvas.style.cssText = (api.touch
-      ? "width:100%;height:auto;max-height:100%;"
-      : "max-width:100%;max-height:100%;width:auto;height:auto;") +
+      ? "flex:0 1 auto;width:100%;height:auto;max-height:100%;"
+      : "flex:1 1 auto;width:100%;height:100%;min-width:0;") +
       "min-height:0;object-fit:contain;border:1px solid rgba(45,226,255,.22);background:#05070d";
     var tip = document.createElement("div");
-    tip.style.cssText = "color:#4a6379;font-size:.66rem;letter-spacing:.1em;flex:none;text-align:center";
+    tip.style.cssText = "color:#7fd6ea;font-size:.85rem;letter-spacing:.08em;flex:none;text-align:center";
     tip.textContent = api.touch
       ? "ВЕДИ ПАЛЬЦЕМ ПО ЭКРАНУ ИЛИ РУЧКОЙ · КРАСНАЯ — ПУСК"
       : "СТРЕЛКИ ИЛИ МЫШЬ — РАКЕТКА · ПРОБЕЛ — ПУСК · ENTER — ЗАНОВО";
@@ -174,6 +205,13 @@
           "</b></span>" : "");
     }
 
+    /* Борта поля занимают по восемь пикселей с каждой стороны, и раньше
+       ракетка их не учитывала — краем заезжала под рамку. */
+    var WALL = 8;
+    function clampPad(x) {
+      return Math.max(WALL + padW / 2, Math.min(W - WALL - padW / 2, x));
+    }
+
     function speed() { return (300 + level * 18) * (slowT > 0 ? 0.62 : 1); }
 
     function launch() {
@@ -213,7 +251,7 @@
     function takeDrop(d) {
       api.audio.tone(880, 0.1, { type: "square", volume: 0.09 });
       score += 100;
-      if (d.kind.id === "wide") { wideT = 18; padW = 116; }
+      if (d.kind.id === "wide") { wideT = 18; padW = 116; padX = clampPad(padX); }
       else if (d.kind.id === "slow") slowT = 12;
       else if (d.kind.id === "life") lives++;
       else if (d.kind.id === "multi") {
@@ -233,7 +271,7 @@
       if (wideT > 0) { wideT -= dt; if (wideT <= 0) padW = 78; }
 
       if (held) padX += held * 460 * dt;
-      padX = Math.max(padW / 2, Math.min(W - padW / 2, padX));
+      padX = clampPad(padX);
 
       if (stuck) {
         aimT += dt;
@@ -453,8 +491,7 @@
     // Мышь и палец водят ракетку напрямую — так удобнее всего.
     function moveTo(clientX) {
       var r = canvas.getBoundingClientRect();
-      padX = (clientX - r.left) / r.width * W;
-      padX = Math.max(padW / 2, Math.min(W - padW / 2, padX));
+      padX = clampPad((clientX - r.left) / r.width * W);
     }
     canvas.addEventListener("mousemove", function (e) { if (!api.touch) moveTo(e.clientX); });
     canvas.addEventListener("touchmove", function (e) {

@@ -145,14 +145,14 @@
     var canvas = document.createElement("canvas");
     canvas.width = W; canvas.height = H;
     canvas.style.cssText = (api.touch
-      ? "width:100%;height:auto;max-height:100%;"
-      : "max-width:100%;max-height:100%;width:auto;height:auto;") +
+      ? "flex:0 1 auto;width:100%;height:auto;max-height:100%;"
+      : "flex:1 1 auto;width:100%;height:100%;min-width:0;") +
       "min-height:0;object-fit:contain";
     var wrap = document.createElement("div");
     wrap.style.cssText = "display:flex;flex-direction:column;align-items:center;gap:8px;" +
-      "width:100%;max-height:100%;min-height:0";
+      "width:100%;height:100%;max-height:100%;min-height:0";
     var tip = document.createElement("div");
-    tip.style.cssText = "color:#4a6379;font-size:.64rem;letter-spacing:.09em;text-align:center;flex:none";
+    tip.style.cssText = "color:#7fd6ea;font-size:.85rem;letter-spacing:.08em;text-align:center;flex:none";
     tip.textContent = api.touch
       ? "КРЕСТОВИНА — ДВИГАТЬ И УСКОРИТЬ · КРУГЛЫЕ — ПОВОРОТ И СБРОС"
       : "← → — двигать · ↑/X — поворот · Z — против часовой · ↓ — ускорить · " +

@@ -128,15 +128,15 @@
   function start(root, api) {
     var wrap = document.createElement("div");
     wrap.style.cssText = "display:flex;flex-direction:column;align-items:center;gap:8px;" +
-      "width:100%;max-height:100%;min-height:0";
+      "width:100%;height:100%;max-height:100%;min-height:0";
     var canvas = document.createElement("canvas");
     canvas.width = W; canvas.height = H;
     canvas.style.cssText = (api.touch
-      ? "width:100%;height:auto;max-height:100%;"
-      : "max-width:100%;max-height:100%;width:auto;height:auto;") +
+      ? "flex:0 1 auto;width:100%;height:auto;max-height:100%;"
+      : "flex:1 1 auto;width:100%;height:100%;min-width:0;") +
       "min-height:0;object-fit:contain;border:1px solid rgba(45,226,255,.22);background:#0a0705";
     var tip = document.createElement("div");
-    tip.style.cssText = "color:#4a6379;font-size:.66rem;letter-spacing:.1em;flex:none;text-align:center";
+    tip.style.cssText = "color:#7fd6ea;font-size:.85rem;letter-spacing:.08em;flex:none;text-align:center";
     tip.textContent = api.touch
       ? "ВВЕРХ-ВНИЗ — НА ЧТО СТАВИШЬ · ВЛЕВО-ВПРАВО — НОМЕР · КРАСНАЯ — КРУТИТЬ"
       : "СТРЕЛКИ ВВЕРХ-ВНИЗ — НА ЧТО СТАВИШЬ · ВЛЕВО-ВПРАВО — НОМЕР · ПРОБЕЛ — КРУТИТЬ";

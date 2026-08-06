@@ -964,15 +964,15 @@
     var canvas = document.createElement("canvas");
     canvas.width = SCREEN_W; canvas.height = SCREEN_H;
     canvas.style.cssText = (api.touch
-      ? "width:100%;height:auto;max-height:100%;touch-action:none;cursor:default;"
-      : "width:min(100%,1120px);height:auto;max-height:100%;cursor:crosshair;") +
+      ? "flex:0 1 auto;width:100%;height:auto;max-height:100%;touch-action:none;cursor:default;"
+      : "flex:1 1 auto;width:100%;height:100%;min-width:0;cursor:crosshair;") +
       "min-height:0;object-fit:contain;image-rendering:pixelated;" +
       "image-rendering:crisp-edges;background:#000";
     var wrap = document.createElement("div");
     wrap.style.cssText = "display:flex;flex-direction:column;align-items:center;gap:6px;" +
-      "width:100%;max-height:100%;min-height:0";
+      "width:100%;height:100%;max-height:100%;min-height:0";
     var tip = document.createElement("div");
-    tip.style.cssText = "color:#4a6379;font-size:.64rem;letter-spacing:.08em;text-align:center;flex:none";
+    tip.style.cssText = "color:#7fd6ea;font-size:.85rem;letter-spacing:.08em;text-align:center;flex:none";
     tip.textContent = api.touch
       ? "РУЧКА — ИДТИ И ПОВОРАЧИВАТЬ · ПАЛЕЦ ПО ЭКРАНУ — ОБЗОР И ВЫСТРЕЛ"
       : "WASD — движение · МЫШЬ или ← → — обзор · CTRL/ЛКМ — огонь · E — двери · " +
@@ -2288,7 +2288,7 @@
   window.VitazArcade.register({
     id: "doom",
     title: "DOOM",
-    tagline: "Шутер на рейкастинге: два уровня, ключи и двери, бесы с огнём, зомби с винтовками, " +
+    tagline: "Шутер на рейкастинге: пять уровней, ключи и двери, бесы с огнём, зомби с винтовками, " +
       "взрывающиеся бочки и три ствола. Текстуры и спрайты нарисованы кодом.",
     keys: "WASD · мышь — обзор · Ctrl — огонь · E — двери · Tab — карта",
     keysTouch: "Ручка — движение · палец по экрану — обзор и выстрел",

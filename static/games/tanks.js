@@ -82,24 +82,57 @@
      "#.#.#.#.#.#.#"],
   ];
 
+  /* Превью: танк едет по коридору снизу вверх и сбивает кирпичный блок.
+     Цикл повторяется — заезд, выстрел, взрыв, откат. Раньше танк ехал
+     боком прямо сквозь стены, и это выглядело сломанной игрой. */
   function thumb(ctx, w, h, t) {
     ctx.fillStyle = C.bg;
     ctx.fillRect(0, 0, w, h);
-    var s = 14;
-    for (var y = 0; y < Math.ceil(h / s); y++) {
-      for (var x = 0; x < Math.ceil(w / s); x++) {
-        if ((x * 7 + y * 13) % 11 < 3) {
-          ctx.fillStyle = C.brickDark; ctx.fillRect(x * s, y * s, s, s);
-          ctx.fillStyle = C.brick; ctx.fillRect(x * s + 1, y * s + 1, s - 2, s - 2);
-        }
+
+    var cyc = 3.2, k = (t % cyc) / cyc;          // 0..1 — фаза цикла
+    var blk = Math.round(w / 7);                 // размер кирпичного блока
+    var lane = Math.round(w / 2 - blk / 2);      // коридор по центру
+
+    // Кирпичная кладка с проходом посередине; верхний блок над проходом
+    // исчезает во второй половине цикла — его как раз и сносят.
+    function brick(x, y) {
+      ctx.fillStyle = C.brickDark;
+      ctx.fillRect(x, y, blk, blk);
+      ctx.fillStyle = C.brick;
+      for (var r = 0; r < 3; r++) {
+        ctx.fillRect(x + 1, y + 1 + r * (blk / 3), blk - 2, blk / 3 - 2);
       }
     }
-    // Два танка ездят навстречу, между ними летит снаряд
-    var px = 20 + (t * 60) % (w - 90);
-    drawTankArt(ctx, px, h - 60, 34, 0, C.me, C.meDark);
-    drawTankArt(ctx, w - 60, 26, 34, 2, C.foe, C.foeDark);
-    ctx.fillStyle = "#fff";
-    ctx.fillRect(w - 46, 60 + (t * 160) % (h - 120), 5, 9);
+    for (var gy = 0; gy < Math.ceil(h / blk); gy++) {
+      for (var gx = 0; gx < Math.ceil(w / blk); gx++) {
+        var px = gx * blk, py = gy * blk;
+        if (px + blk > lane - 2 && px < lane + blk + 2) continue;   // коридор
+        if ((gx + gy) % 3 === 0) continue;                          // просветы
+        brick(px, py);
+      }
+    }
+    var gateY = Math.round(h * 0.18);
+    var gone = k > 0.55;
+    if (!gone) brick(lane, gateY);
+
+    // Танк заезжает в коридор и останавливается перед стеной
+    var from = h - blk * 1.2, to = gateY + blk * 1.6;
+    var ty = from + (to - from) * Math.min(1, k / 0.42);
+    drawTankArt(ctx, lane, ty, blk, 0, C.me, C.meDark);
+
+    // Снаряд летит от ствола к блоку, потом вспышка
+    if (k > 0.42 && k < 0.58) {
+      var f = (k - 0.42) / 0.16;
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(lane + blk / 2 - 2, ty - f * (ty - gateY - blk), 4, 7);
+    } else if (k >= 0.58 && k < 0.7) {
+      var a = 1 - (k - 0.58) / 0.12;
+      ctx.fillStyle = "rgba(255,179,92," + a + ")";
+      ctx.fillRect(lane - 4, gateY - 4, blk + 8, blk + 8);
+    }
+
+    // Враг наверху ползёт поперёк, но по своему коридору
+    drawTankArt(ctx, w - blk * 1.4, Math.round(h * 0.04), blk, 2, C.foe, C.foeDark);
   }
 
   /* Танк рисуем руками: корпус, гусеницы полосками, башня и ствол по
@@ -130,18 +163,18 @@
   function start(root, api) {
     var wrap = document.createElement("div");
     wrap.style.cssText = "display:flex;flex-direction:column;align-items:center;gap:8px;" +
-      "width:100%;max-height:100%;min-height:0";
+      "width:100%;height:100%;max-height:100%;min-height:0";
     var hud = document.createElement("div");
     hud.style.cssText = "display:flex;gap:16px;flex:none;font:700 .8rem " + api.font +
       ";letter-spacing:.08em;color:#8fa5b8";
     var canvas = document.createElement("canvas");
     canvas.width = W; canvas.height = H;
     canvas.style.cssText = (api.touch
-      ? "width:100%;height:auto;max-height:100%;"
-      : "max-width:100%;max-height:100%;width:auto;height:auto;") +
+      ? "flex:0 1 auto;width:100%;height:auto;max-height:100%;"
+      : "flex:1 1 auto;width:100%;height:100%;min-width:0;") +
       "min-height:0;object-fit:contain;border:1px solid rgba(242,209,107,.22);background:" + C.bg;
     var tip = document.createElement("div");
-    tip.style.cssText = "color:#4a6379;font-size:.66rem;letter-spacing:.1em;flex:none;text-align:center";
+    tip.style.cssText = "color:#7fd6ea;font-size:.85rem;letter-spacing:.08em;flex:none;text-align:center";
     tip.textContent = api.touch
       ? "КРЕСТОВИНА — ЕХАТЬ · КРАСНАЯ — ОГОНЬ"
       : "СТРЕЛКИ — ЕХАТЬ · ПРОБЕЛ — ОГОНЬ · ENTER — ЗАНОВО";

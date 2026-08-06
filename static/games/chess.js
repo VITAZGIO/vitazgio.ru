@@ -474,7 +474,17 @@
     return { move: best, score: bestVal, nodes: ctx.nodes };
   }
 
-  /* ── Превью на карточке ─────────────────────────────────────────────── */
+  /* ── Превью на карточке ─────────────────────────────────────────────
+     Ходят по очереди: белый конь буквой «Г», потом чёрный слон по
+     диагонали, и обратно. Раньше фигура просто качалась на месте, что к
+     шахматам отношения не имело. */
+  var THUMB_PLY = [
+    { piece: N,  from: [1, 7], to: [2, 5] },   // белый конь вперёд
+    { piece: -B, from: [2, 0], to: [5, 3] },   // чёрный слон по диагонали
+    { piece: N,  from: [2, 5], to: [1, 7] },   // конь обратно
+    { piece: -B, from: [5, 3], to: [2, 0] },   // слон обратно
+  ];
+
   function thumb(ctx, w, h, t) {
     var cell = Math.min(w, h) / 8;
     var ox = (w - cell * 8) / 2, oy = (h - cell * 8) / 2;
@@ -482,17 +492,34 @@
     ctx.fillRect(0, 0, w, h);
     for (var r = 0; r < 8; r++) {
       for (var c = 0; c < 8; c++) {
-        ctx.fillStyle = (r + c) % 2 ? "#2a3646" : "#4d5f75";
+        ctx.fillStyle = (r + c) % 2 ? "#26313f" : "#46586d";
         ctx.fillRect(ox + c * cell, oy + r * cell, cell, cell);
       }
     }
-    var pieces = [[R, 0, 0], [N, 1, 0], [K, 4, 0], [Q, 3, 7], [K, 4, 7], [N, 6, 7]];
-    var lift = Math.abs(Math.sin(t * 1.6)) * cell * 0.4;
-    pieces.forEach(function (p, i) {
-      var y = oy + p[2] * cell + (i === 2 ? -lift : 0);
-      drawPiece(ctx, p[2] === 0 ? -p[0] : p[0], ox + p[1] * cell + cell * 0.1,
-                y + cell * 0.1, cell * 0.8);
+
+    var step = 1.4;
+    var idx = Math.floor(t / step) % THUMB_PLY.length;
+    var k = Math.min(1, (t % step) / (step * 0.62));
+    var ply = THUMB_PLY[idx];
+
+    // Свита, которая просто стоит на доске для вида
+    var still = [[-R, 0, 0], [-K, 4, 0], [-P, 6, 1], [P, 3, 6], [K, 4, 7], [R, 7, 7]];
+    still.forEach(function (p2) {
+      drawPiece(ctx, p2[0], ox + p2[1] * cell + cell * 0.06,
+                oy + p2[2] * cell + cell * 0.06, cell * 0.88);
     });
+
+    // Подсветка клеток хода — как в самой игре
+    ctx.fillStyle = "rgba(255,216,74,.22)";
+    ctx.fillRect(ox + ply.from[0] * cell, oy + ply.from[1] * cell, cell, cell);
+    ctx.fillRect(ox + ply.to[0] * cell, oy + ply.to[1] * cell, cell, cell);
+
+    // Плавное скольжение с придержкой в конце
+    var e = k < 1 ? 1 - Math.pow(1 - k, 3) : 1;
+    var px = ply.from[0] + (ply.to[0] - ply.from[0]) * e;
+    var py = ply.from[1] + (ply.to[1] - ply.from[1]) * e;
+    drawPiece(ctx, ply.piece, ox + px * cell + cell * 0.06,
+              oy + py * cell + cell * 0.06, cell * 0.88);
   }
 
   /* ── Игра ────────────────────────────────────────────────────────────── */
@@ -502,19 +529,19 @@
 
     var wrap = document.createElement("div");
     wrap.style.cssText = "display:flex;flex-direction:column;align-items:center;gap:8px;" +
-      "width:100%;max-height:100%;min-height:0";
+      "width:100%;height:100%;max-height:100%;min-height:0";
     var hud = document.createElement("div");
     hud.style.cssText = "display:flex;gap:14px;flex-wrap:wrap;justify-content:center;flex:none;" +
       "font:700 .78rem " + api.font + ";letter-spacing:.06em;color:#8fa5b8";
     var canvas = document.createElement("canvas");
     canvas.width = W; canvas.height = H;
     canvas.style.cssText = (api.touch
-      ? "width:100%;height:auto;max-height:100%;"
-      : "max-width:100%;max-height:100%;width:auto;height:auto;") +
+      ? "flex:0 1 auto;width:100%;height:auto;max-height:100%;"
+      : "flex:1 1 auto;width:100%;height:100%;min-width:0;") +
       "min-height:0;object-fit:contain;border:1px solid rgba(45,226,255,.22);background:#05070d;" +
       "cursor:pointer";
     var tip = document.createElement("div");
-    tip.style.cssText = "color:#4a6379;font-size:.66rem;letter-spacing:.1em;flex:none;text-align:center";
+    tip.style.cssText = "color:#7fd6ea;font-size:.85rem;letter-spacing:.08em;flex:none;text-align:center";
     tip.textContent = "ТЫКНИ ФИГУРУ, ПОТОМ КЛЕТКУ · ДВИЖОК СЧИТАЕТ ЗДЕСЬ ЖЕ, СЕРВЕР НЕ УЧАСТВУЕТ";
     wrap.append(hud, canvas, tip);
     root.appendChild(wrap);

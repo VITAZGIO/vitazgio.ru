@@ -123,31 +123,43 @@
     return a;
   }
 
-  /* ── Превью на карточке ─────────────────────────────────────────────── */
+  /* ── Превью на карточке ─────────────────────────────────────────────
+     Только набор текста и курсор. Ряд «клавиш» с бегающим прямоугольником
+     убран: он ни на что не намекал и просто мельтешил. */
   function thumb(ctx, w, h, t) {
     ctx.fillStyle = "#06090f";
     ctx.fillRect(0, 0, w, h);
-    var line = "слепая печать без ошибок";
-    var shown = Math.floor((t * 7) % (line.length + 12));
-    ctx.font = 'bold 18px "Cascadia Code", Consolas, monospace';
+
+    var lines = ["слепая печать", "без единой ошибки"];
+    var size = Math.max(13, Math.round(w / 22));
+    ctx.font = "bold " + size + 'px "Cascadia Code", Consolas, monospace';
     ctx.textBaseline = "middle";
-    ctx.fillStyle = "#2de2ff";
-    ctx.fillText(line.slice(0, shown), 18, 40);
-    ctx.fillStyle = "#33465a";
-    ctx.fillText(line.slice(shown), 18 + ctx.measureText(line.slice(0, shown)).width, 40);
-    if (Math.floor(t * 3) % 2) {
+
+    var total = lines.join(" ").length;
+    var cyc = total + 14;
+    var shown = Math.floor((t * 8) % cyc);
+    var used = 0;
+    var caret = null;
+    var y0 = h / 2 - size * 0.9;
+
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i];
+      var take = Math.max(0, Math.min(line.length, shown - used));
+      var y = y0 + i * size * 1.8;
+      ctx.fillStyle = "#63f5ad";
+      ctx.fillText(line.slice(0, take), 18, y);
+      var wDone = ctx.measureText(line.slice(0, take)).width;
+      ctx.fillStyle = "#33465a";
+      ctx.fillText(line.slice(take), 18 + wDone, y);
+      if (take > 0 && take <= line.length && shown - used <= line.length) {
+        caret = { x: 18 + wDone, y: y };
+      }
+      used += line.length + 1;
+    }
+    if (caret && Math.floor(t * 3) % 2) {
       ctx.fillStyle = "#ffd84a";
-      ctx.fillRect(18 + ctx.measureText(line.slice(0, shown)).width, 30, 2, 20);
+      ctx.fillRect(caret.x + 1, caret.y - size * 0.62, 2, size * 1.24);
     }
-    // ряд клавиш внизу, подсвечивается «нажатая»
-    var keys = 12, kw = (w - 36) / keys;
-    for (var i = 0; i < keys; i++) {
-      var on = i === Math.floor(t * 7) % keys;
-      ctx.fillStyle = on ? "#2de2ff" : "#182231";
-      ctx.fillRect(18 + i * kw + 2, h - 52, kw - 4, kw - 4 > 26 ? 26 : kw - 4);
-    }
-    ctx.fillStyle = "#182231";
-    ctx.fillRect(18 + kw * 2, h - 22, (w - 36) - kw * 4, 12);
   }
 
   /* ── Игра ────────────────────────────────────────────────────────────── */

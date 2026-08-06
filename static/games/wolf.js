@@ -29,51 +29,101 @@
   var C = { wolf: "#8e9bb0", wolfDark: "#5d6878", egg: "#ffd84a", hen: "#e8e2d4",
             basket: "#a4703a", bg: "#080d14", chute: "#2a3a4d" };
 
+  /* Превью рисуем той же схемой, что и игру: два курятника по краям,
+     четыре жёлоба, волк с корзиной посередине. Раньше тут были две палки
+     и непохожий волк, а яйца катились мимо всего. */
   function thumb(ctx, w, h, t) {
     ctx.fillStyle = C.bg;
     ctx.fillRect(0, 0, w, h);
-    ctx.strokeStyle = C.chute;
-    ctx.lineWidth = 5;
-    [[0.24, -1], [0.76, 1]].forEach(function (p) {
-      ctx.beginPath();
-      ctx.moveTo(w * p[0], h * 0.18);
-      ctx.lineTo(w * (p[0] + p[1] * 0.14), h * 0.72);
-      ctx.stroke();
+
+    var cx = w / 2;
+    var coop = w * 0.17;                       // ширина курятника
+    var yTop = h * 0.26, yBot = h * 0.46;      // насесты
+    var wy = [h * 0.56, h * 0.74];             // два яруса, где стоит волк
+    var bdx = w * 0.13;                        // корзина в стороне от волка
+
+    // куда идёт каждый жёлоб: [сторона, ярус]
+    var lanes = [[-1, 0], [-1, 1], [1, 0], [1, 1]];
+    function geom(i) {
+      var l = lanes[i];
+      return { x0: l[0] < 0 ? coop : w - coop, y0: l[1] ? yBot : yTop,
+               x1: cx + l[0] * bdx, y1: wy[l[1]] };
+    }
+
+    // курятники
+    [-1, 1].forEach(function (side) {
+      var x = side < 0 ? w * 0.03 : w - coop - w * 0.03;
+      ctx.fillStyle = "#141d2a";
+      ctx.fillRect(x, h * 0.16, coop, h * 0.42);
+      ctx.strokeStyle = "#233246"; ctx.lineWidth = 1.5;
+      ctx.strokeRect(x + 0.5, h * 0.16 + 0.5, coop - 1, h * 0.42 - 1);
+      [yTop, yBot].forEach(function (cy) {
+        ctx.fillStyle = C.hen;
+        ctx.beginPath(); ctx.ellipse(x + coop / 2, cy, coop * 0.34, h * 0.035, 0, 0, 7);
+        ctx.fill();
+      });
     });
-    var k = (t * 0.9) % 1;
+
+    // жёлоба
+    ctx.strokeStyle = C.chute; ctx.lineWidth = 4; ctx.lineCap = "round";
+    for (var i = 0; i < 4; i++) {
+      var g = geom(i);
+      ctx.beginPath(); ctx.moveTo(g.x0, g.y0); ctx.lineTo(g.x1, g.y1); ctx.stroke();
+    }
+    ctx.lineCap = "butt";
+
+    // Волк переходит по углам, и яйцо всегда катится в тот жёлоб, под
+    // которым он стоит: превью показывает удачную ловлю, а не промах.
+    var step = 1.5, n = Math.floor(t / step) % 4;
+    var k = (t % step) / step;
+    var g2 = geom(n);
+    var side = lanes[n][0], tier = lanes[n][1];
+
+    var ex = g2.x0 + (g2.x1 - g2.x0) * k, ey = g2.y0 + (g2.y1 - g2.y0) * k;
     ctx.fillStyle = C.egg;
-    ctx.beginPath();
-    ctx.ellipse(w * (0.24 - 0.14 * k), h * (0.18 + 0.54 * k), 6, 8, 0, 0, 7);
-    ctx.fill();
+    ctx.beginPath(); ctx.ellipse(ex, ey, w * 0.017, w * 0.022, 0, 0, 7); ctx.fill();
+
     // волк
-    var wx = w * 0.5, wy = h * 0.62;
+    var x = cx, y = wy[tier];
     ctx.fillStyle = C.wolfDark;
-    ctx.fillRect(wx - 16, wy, 32, 34);
+    ctx.fillRect(x - w * 0.068, y - h * 0.012, w * 0.136, h * 0.155);
     ctx.fillStyle = C.wolf;
-    ctx.fillRect(wx - 13, wy + 3, 26, 28);
-    ctx.beginPath(); ctx.arc(wx, wy - 10, 13, 0, 7); ctx.fill();
+    ctx.fillRect(x - w * 0.058, y, w * 0.116, h * 0.13);
+    ctx.beginPath(); ctx.arc(x, y - h * 0.062, w * 0.058, 0, 7); ctx.fill();
+    ctx.fillStyle = C.wolfDark;                                  // уши
+    ctx.beginPath(); ctx.moveTo(x - w * 0.055, y - h * 0.092);
+    ctx.lineTo(x - w * 0.03, y - h * 0.132); ctx.lineTo(x - w * 0.01, y - h * 0.086);
+    ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(x + w * 0.01, y - h * 0.086);
+    ctx.lineTo(x + w * 0.03, y - h * 0.132); ctx.lineTo(x + w * 0.055, y - h * 0.092);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = C.wolf;                                      // морда и нос
+    ctx.fillRect(side > 0 ? x + w * 0.044 : x - w * 0.086, y - h * 0.078, w * 0.042, h * 0.03);
     ctx.fillStyle = "#1a1f28";
-    ctx.fillRect(wx - 7, wy - 14, 4, 4);
-    ctx.fillRect(wx + 3, wy - 14, 4, 4);
+    ctx.fillRect(side > 0 ? x + w * 0.076 : x - w * 0.09, y - h * 0.072, w * 0.014, h * 0.014);
+    ctx.fillRect(x + side * w * 0.018 - w * 0.007, y - h * 0.084, w * 0.014, h * 0.016);
+    // корзина под жёлобом
+    ctx.fillStyle = "#5f4020";
+    ctx.fillRect(x + side * bdx - w * 0.05, y - h * 0.018, w * 0.1, h * 0.062);
     ctx.fillStyle = C.basket;
-    ctx.fillRect(wx - 30, wy + 6, 16, 12);
+    ctx.fillRect(x + side * bdx - w * 0.042, y - h * 0.01, w * 0.084, h * 0.05);
   }
 
   function start(root, api) {
     var wrap = document.createElement("div");
     wrap.style.cssText = "display:flex;flex-direction:column;align-items:center;gap:8px;" +
-      "width:100%;max-height:100%;min-height:0";
+      "width:100%;height:100%;max-height:100%;min-height:0";
     var hud = document.createElement("div");
     hud.style.cssText = "display:flex;gap:16px;flex:none;font:700 .8rem " + api.font +
       ";letter-spacing:.08em;color:#8fa5b8";
     var canvas = document.createElement("canvas");
     canvas.width = W; canvas.height = H;
     canvas.style.cssText = (api.touch
-      ? "width:100%;height:auto;max-height:100%;"
-      : "max-width:100%;max-height:100%;width:auto;height:auto;") +
+      ? "flex:0 1 auto;width:100%;height:auto;max-height:100%;"
+      : "flex:1 1 auto;width:100%;height:100%;min-width:0;") +
       "min-height:0;object-fit:contain;border:1px solid rgba(255,216,74,.22);background:" + C.bg;
     var tip = document.createElement("div");
-    tip.style.cssText = "color:#4a6379;font-size:.66rem;letter-spacing:.1em;flex:none;text-align:center";
+    tip.style.cssText = "color:#7fd6ea;font-size:.85rem;letter-spacing:.08em;flex:none;text-align:center";
     tip.textContent = api.touch
       ? "КРЕСТОВИНА — УГОЛ, КУДА ВСТАТЬ · ЛОВИ ЯЙЦА КОРЗИНОЙ"
       : "СТРЕЛКИ — УГОЛ, КУДА ВСТАТЬ · ENTER — ЗАНОВО";
@@ -275,12 +325,14 @@
       ctx.lineTo(x - 4, y - 30); ctx.closePath(); ctx.fill();
       ctx.beginPath(); ctx.moveTo(x + 4, y - 30); ctx.lineTo(x + 8, y - 42);
       ctx.lineTo(x + 16, y - 30); ctx.closePath(); ctx.fill();
-      // морда смотрит в сторону своего жёлоба
+      // Морда смотрит в сторону своего жёлоба. Прямоугольник рисуется от
+      // левого края, поэтому при взгляде влево его надо отодвинуть на всю
+      // ширину — иначе он уезжал внутрь головы, и нос пропадал.
       ctx.fillStyle = C.wolf;
-      ctx.fillRect(x + s * 14, y - 24, 12, 9);
+      ctx.fillRect(s > 0 ? x + 14 : x - 26, y - 24, 12, 9);
       ctx.fillStyle = "#1a1f28";
-      ctx.fillRect(x + s * 24, y - 23, 4, 4);
-      ctx.fillRect(x + s * 4 - 2, y - 26, 4, 5);
+      ctx.fillRect(s > 0 ? x + 24 : x - 28, y - 23, 4, 4);   // нос
+      ctx.fillRect(x + s * 4 - 2, y - 26, 4, 5);             // глаз
       // Корзина стоит ровно там, где кончается жёлоб: те же координаты,
       // что считает laneGeom, — промахнуться нечем.
       var bx = w.bx;

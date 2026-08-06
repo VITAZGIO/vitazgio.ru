@@ -4261,22 +4261,28 @@ _GAME_ICONS = {
         "..hhhhhhhhhh..",
         ".hccccccccccg.",
         ".hcSSSSSSSSch.",
-        ".hcSGr...vScg.",
+        ".hcS1y32d1Scg.",
         ".hcSSSSSSSSch.",
         ".hcSSSSSSSSch.",
-        ".hcSGy...vScg.",
+        ".hcS31r23yScg.",
         ".hcSSSSSSSSch.",
         ".hcSSSSSSSSch.",
-        ".hcSGr...vScg.",
+        ".hcS2d31y2Scg.",
         ".hcSSSSSSSSch.",
         ".hccccccccccg.",
         "..hhhhhhhhhh..",
         "..h........h..",
     ], {
         "h": ("#48566b", None), "c": ("#232a35", None), "g": ("#161c25", None),
-        "S": ("#2f3846", None), "G": ("#63f5ad", "px-blink"),
-        "r": ("#ff3b53", "px-blink"), "y": ("#ffd84a", "px-blink"),
-        "v": ("#5a6577", None),
+        "S": ("#2f3846", None),
+        # Лампы идут во всю ширину полки. Зелёных две трети и мигают они
+        # вразнобой: одинаковый такт превращает стойку в новогоднюю гирлянду.
+        "1": ("#63f5ad", "px-blink"),
+        "2": ("#63f5ad", "px-blink2"),
+        "3": ("#63f5ad", None),
+        "y": ("#ffd84a", "px-blink3"),
+        "r": ("#ff3b53", "px-blink2"),
+        "d": ("#1b2530", None),
     }),
     # 3. Геймпад с моргающим индикатором.
     # Полоска светодиода стоит на столбцах 5–8: центр значка — 6.5, и раньше
@@ -6127,12 +6133,14 @@ def home():
         .pick--pad .pick-art svg { animation: pxTilt 3s ease-in-out infinite; }
         @keyframes pxTilt { 0%, 100% { transform: rotate(-4deg); } 50% { transform: rotate(4deg); } }
         /* У стойки лампы моргают вразнобой: одинаковый такт выглядит мёртво. */
-        .pick--rack .pick-art svg [fill="#63f5ad"] { animation-duration: 1.7s; }
-        .pick--rack .pick-art svg [fill="#ffd84a"] { animation-duration: 3.1s; }
-        .pick--rack .pick-art svg [fill="#ff3b53"] { animation-duration: 2.3s; }
+        .pick-art .px-blink2 { animation: pxBlink2 2.9s steps(1) infinite; }
+        @keyframes pxBlink2 { 0%, 58% { opacity: 1; } 64%, 100% { opacity: .18; } }
+        .pick-art .px-blink3 { animation: pxBlink3 1.3s steps(1) infinite; }
+        @keyframes pxBlink3 { 0%, 44% { opacity: 1; } 51%, 100% { opacity: .28; } }
 
         @media (prefers-reduced-motion: reduce) {
-          .pick-art svg, .pick-art .px-blink, .pick--cabinet .px-screen { animation: none; }
+          .pick-art svg, .pick-art .px-blink, .pick-art .px-blink2,
+          .pick-art .px-blink3, .pick--cabinet .px-screen { animation: none; }
         }
 
         .auth-modal {
@@ -6261,23 +6269,23 @@ def home():
         <!-- Полка с двумя кнопками: стойка ведёт в кабинет, геймпад — в игры.
              Обе без единой буквы: подпись даёт aria-label и всплывающая
              подсказка, а глазу хватает пиксельного значка. -->
-        <section class="arcade-bar" aria-label="Пульт">
-          <div class="arcade-bar-line"><span>ПУЛЬТ</span></div>
+        <section class="arcade-bar" aria-label="Рубка">
+          <div class="arcade-bar-line"><span>РУБКА</span></div>
           <div class="arcade-picks">
-            <button class="pick pick--rack" type="button" id="cabinet-pick"
-                    title="Личный кабинет" aria-label="Открыть личный кабинет">
-              <span class="pick-art">__ICON_RACK__</span>
-              <span class="pick-glow"></span>
-            </button>
             <button class="pick pick--pad" type="button" data-games
                     title="Игры" aria-label="Открыть игры">
               <span class="pick-art">__ICON_PAD__</span>
               <span class="pick-glow"></span>
             </button>
+            <button class="pick pick--rack" type="button" id="cabinet-pick"
+                    title="Личный кабинет" aria-label="Открыть личный кабинет">
+              <span class="pick-art">__ICON_RACK__</span>
+              <span class="pick-glow"></span>
+            </button>
           </div>
         </section>
 
-        <footer><span>© 2026 vitazgio.ru · Основан 2:12 04.05.2026</span></footer>
+        <footer><span>Vitaz Gio · Основан 2:12 04.05.2026</span></footer>
       </main>
       <div id="auth-modal" class="auth-modal" hidden>
         <div class="auth-backdrop" data-auth-close></div>
