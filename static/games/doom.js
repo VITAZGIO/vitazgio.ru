@@ -984,9 +984,9 @@
     var tip = document.createElement("div");
     tip.style.cssText = "color:#7fd6ea;font-size:.85rem;letter-spacing:.08em;text-align:center;flex:none";
     tip.textContent = api.touch
-      ? "РУЧКА — ИДТИ И ПОВОРАЧИВАТЬ · ПАЛЕЦ ПО ЭКРАНУ — ОБЗОР И ВЫСТРЕЛ"
+      ? "РУЧКА — ИДТИ · ПАЛЕЦ ПО ЭКРАНУ — ОБЗОР · ДВЕРИ ОТКРЫВАЮТСЯ САМИ"
       : "WASD — движение · МЫШЬ или ← → — обзор · CTRL/ЛКМ — огонь · E — двери · " +
-        "1-3 — оружие · TAB — карта · клик по экрану захватывает мышь";
+        "1-3 — оружие · TAB — карта · L — зона · двери открываются сами";
     wrap.append(canvas, tip);
     root.appendChild(wrap);
 
@@ -1005,6 +1005,7 @@
 
     /* ── Загрузка уровня ──────────────────────────────────────────────── */
     function loadLevel(index) {
+      if (api.track) api.track(index);      // у каждой зоны своя тема
       var level = LEVELS[index];
       var grid = [], things = [];
       for (var y = 0; y < level.map.length; y++) {
@@ -1247,6 +1248,10 @@
         if (c.exit) { finishLevel(); return; }
         if (c.door) {
           if (c.key && !state.keys[c.key]) {
+            // Дверь открывается от прикосновения, и без задержки замок
+            // тарахтел бы по десять раз в секунду
+            if (state.lockedNag && state.lockedNag > performance.now()) return;
+            state.lockedNag = performance.now() + 1400;
             snd.locked();
             var names = { red: "красный", blue: "синий", yellow: "жёлтый" };
             say("Нужен " + names[c.key] + " ключ");
@@ -1449,6 +1454,10 @@
         // по осям раздельно, чтобы вдоль стены можно было скользить
         if (!isWall(p.x + fx + Math.sign(fx) * 0.18, p.y)) p.x += fx;
         if (!isWall(p.x, p.y + fy + Math.sign(fy) * 0.18)) p.y += fy;
+        // Упёрся в дверь — она открывается сама. Отдельной кнопки под это
+        // больше нет: искать её посреди боя было некогда, а других поводов
+        // «использовать» в игре нет.
+        tryUse();
         state.bob += Math.hypot(fx, fy) * 3.4;
       } else {
         state.bob += sec * 1.2;
@@ -2277,8 +2286,9 @@
         },
         stickBig: true,
         actions: [
-          { icon: "door", aria: "открыть дверь", color: "#ffd84a", big: true, down: tryUse },
-          { icon: "fire", aria: "огонь", color: "#ff3b30", huge: true,
+          // Только огонь и покрупнее: дверь теперь открывается сама, когда
+          // в неё упираешься, и вторая кнопка стала лишней.
+          { icon: "fire", aria: "огонь", color: "#ff3b30", giant: true,
             down: function () { firing = true; }, up: function () { firing = false; } },
         ],
         // Ствол, карта и заново — к правому краю, как в тетрисе: жмут их

@@ -1,8 +1,8 @@
 /* Раздел «Треки» — не игра, а проигрыватель тем аркады.
  *
  * Стоит последним в списке, чтобы не мешался между играми. Тут можно
- * послушать все шестнадцать мелодий подряд и решить, какую куда поставить:
- * привязка тем к играм живёт в arcade.js одной таблицей.
+ * послушать все темы подряд; подпись слева говорит, где каждая звучит.
+ * Привязка групп к играм живёт в arcade.js одной таблицей.
  */
 (function () {
   "use strict";
@@ -44,7 +44,7 @@
       ".tk-head b{color:" + ACCENT + ";font-size:.95rem;letter-spacing:.04em}",
       ".tk-list{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;",
       "touch-action:pan-y;display:grid;gap:6px;",
-      "grid-template-columns:repeat(auto-fill,minmax(210px,1fr));align-content:start;",
+      "grid-template-columns:repeat(auto-fill,minmax(280px,1fr));align-content:start;",
       "padding:4px;border:1px solid rgba(181,124,255,.2);background:rgba(6,10,17,.8)}",
       ".tk-item{display:flex;align-items:center;gap:10px;padding:9px 12px;cursor:pointer;",
       "border:1px solid rgba(255,255,255,.07);background:rgba(255,255,255,.02);",
@@ -53,6 +53,9 @@
       ".tk-item .n{flex:none;width:22px;color:#4a6379;font-size:.7rem}",
       ".tk-item .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
       ".tk-item .b{flex:none;color:#4a6379;font-size:.66rem}",
+      ".tk-item .w{flex:none;color:#8a6ac0;font-size:.66rem;font-weight:800;",
+      "letter-spacing:.04em}",
+      ".tk-item.tagged{border-color:rgba(181,124,255,.24)}",
       ".tk-item.on{border-color:" + ACCENT + ";background:rgba(181,124,255,.18);color:#fff}",
       ".tk-item.on .n,.tk-item.on .b{color:#d7b3ff}",
       ".tk-note{flex:none;color:#4a6379;font-size:.68rem;line-height:1.6}",
@@ -69,7 +72,8 @@
         '<span data-now>ничего не играет</span></div>' +
       '<div class="tk-list"></div>' +
       '<div class="tk-note">Тыкни в тему — заиграет, тыкни ещё раз — замолчит. ' +
-      'Ноту внизу никто не отменял: ей музыка глушится целиком.</div>';
+      'Спокойные без подписи крутятся во всех тихих играх вперемешку и ' +
+      'меняются каждые полторы минуты.</div>';
     root.appendChild(css);
     root.appendChild(wrap);
 
@@ -91,14 +95,31 @@
       });
     }
 
+    /* Подпись слева от названия говорит, где тема звучит. У меню и у игр с
+       музыкой по уровням это конкретное место, у спокойных — ничего:
+       они крутятся во всех тихих играх вперемешку. */
+    var TANK_MAPS = ["карта 1", "карта 2", "карта 3", "карта 4"];
+    var DOOM_ZONES = ["ангар", "реактор", "склад", "канализация", "логово"];
+
+    function whereOf(t, seen) {
+      var n = seen[t.group] = (seen[t.group] || 0) + 1;
+      if (t.group === "menu") return "меню " + n;
+      if (t.group === "tanks") return "танчики · " + (TANK_MAPS[n - 1] || n);
+      if (t.group === "doom") return "дум · " + (DOOM_ZONES[n - 1] || n);
+      return "";
+    }
+
     if (!music) {
       list.innerHTML = '<div class="tk-note">Музыкальный модуль не загрузился.</div>';
     } else {
+      var seen = {};
       music.list().forEach(function (t, i) {
+        var where = whereOf(t, seen);
         var el = document.createElement("button");
         el.type = "button";
-        el.className = "tk-item";
+        el.className = "tk-item" + (where ? " tagged" : "");
         el.innerHTML = '<span class="n">' + (i + 1) + '</span>' +
+                       (where ? '<span class="w">' + escapeHtml(where) + '</span>' : "") +
                        '<span class="t">' + escapeHtml(t.name) + '</span>' +
                        '<span class="b">' + t.bpm + '</span>';
         el.addEventListener("click", function () {
@@ -145,9 +166,9 @@
   window.VitazArcade.register({
     id: "tracks",
     title: "ТРЕКИ",
-    tagline: "Шестнадцать коротких зацикленных тем в духе восьми бит. Никаких " +
-             "файлов: всё считается на лету из нотной записи — три голоса, " +
-             "квадрат, треугольник и шум под ударные.",
+    tagline: "Двадцать семь коротких зацикленных тем в духе восьми бит: три для " +
+             "меню, пятнадцать спокойных, четыре под карты танчиков и пять " +
+             "ревущих под зоны DOOM. Никаких файлов — всё считается из нотной записи.",
     keys: "Тык по теме — играет, тык ещё раз — тишина",
     keysTouch: "Тык по теме — играет, тык ещё раз — тишина",
     accent: ACCENT,

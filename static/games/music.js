@@ -49,6 +49,8 @@
     гонка:   "k h k h s h k h k h k h s h k H",
     тихо:    "k - - - s - - - k - - - s - - h",
     сбивка:  "k - h - s - h h k - h - s s s H",
+    молот:   "k h k h k h s h k h k h s h s H",
+    двойная: "k k h k k k h k s k h k k k s H",
     пусто:   "- - - - - - - - - - - - - - - -",
   };
 
@@ -56,69 +58,116 @@
      Порядок важен только для списка; по играм их раскидывает MUSIC_FOR
      в arcade.js — поменять привязку это одна строка. */
   var TRACKS = [
-    { name: "Ангар", bpm: 132, drum: D.ровно,
+    { name: "Ангар", group: "calm", bpm: 132, drum: D.ровно,
       lead: "c5 - e5 - g5 - e5 - c5 - g4 - a4 - b4 - | c5 - e5 - a5 - g5 - e5 - c5 - d5 - e5 -",
       bass: "c3 . . . c3 . . . g2 . . . g2 . . . | a2 . . . a2 . . . f2 . . . g2 . . ." },
 
-    { name: "Погоня", bpm: 156, drum: D.гонка,
+    { name: "Погоня", group: "tanks", bpm: 156, drum: D.гонка,
       lead: "e5 e5 - g5 a5 - g5 e5 d5 - e5 - c5 - - - | e5 e5 - g5 c6 - b5 a5 g5 - e5 - g5 - - -",
       bass: "a2 a2 - a2 e2 e2 - e2 f2 f2 - f2 g2 g2 - g2 | a2 a2 - a2 e2 e2 - e2 f2 f2 g2 g2 a2 - - -" },
 
-    { name: "Ночной двор", bpm: 96, drum: D.тихо,
+    { name: "Ночной двор", group: "calm", bpm: 96, drum: D.тихо,
       lead: "a4 - c5 - e5 - . - d5 - c5 - b4 - - - | a4 - c5 - e5 - g5 - f5 - e5 - d5 - c5 -",
       bass: "a2 . . . . . . . f2 . . . . . . . | d2 . . . . . . . e2 . . . e2 . . ." },
 
-    { name: "Кирпичи", bpm: 144, drum: D.быстро,
+    { name: "Кирпичи", group: "tanks", bpm: 144, drum: D.быстро,
       lead: "g4 - g4 - a4 - b4 - c5 - b4 - a4 - g4 - | g4 - b4 - d5 - c5 - b4 - a4 - g4 - d4 -",
       bass: "g2 - g2 - g2 - g2 - c3 - c3 - c3 - c3 - | d3 - d3 - d3 - d3 - g2 - g2 - g2 - g2 -" },
 
-    { name: "Стальной цех", bpm: 126, drum: D.марш,
+    { name: "Стальной цех", group: "tanks", bpm: 126, drum: D.марш,
       lead: "d5 - - d5 - f5 - d5 c5 - - c5 - a4 - - | d5 - - d5 - f5 - a5 g5 - f5 - d5 - - -",
       bass: "d2 . . . a2 . . . as2 . . . a2 . . . | d2 . . . a2 . . . g2 . . . a2 . . ." },
 
-    { name: "Лабиринт", bpm: 118, drum: D.ровно,
+    { name: "Лабиринт", group: "calm", bpm: 118, drum: D.ровно,
       lead: "e4 - a4 - b4 - c5 - b4 - a4 - e4 - - - | e4 - a4 - c5 - d5 - c5 - b4 - a4 - - -",
       bass: "a2 . . . e2 . . . f2 . . . e2 . . . | a2 . . . e2 . . . g2 . . . a2 . . ." },
 
-    { name: "Пружина", bpm: 168, drum: D.гонка,
-      lead: "c5 g4 c5 g4 ds5 g4 ds5 g4 f5 g4 f5 g4 ds5 - c5 - | c5 g4 c5 g4 gs5 g4 gs5 g4 as5 - gs5 - f5 - ds5 -",
-      bass: "c2 c2 - c2 c2 c2 - c2 f2 f2 - f2 f2 f2 - f2 | gs2 gs2 - gs2 gs2 - as2 - c3 c3 - c3 c3 - - -" },
+    { name: "Пекло", group: "doom", bpm: 172, drum: D.молот,
+      lead: "e4 e4 as4 e4 e4 as4 e4 - d4 d4 gs4 d4 d4 gs4 d4 - | e4 e4 as4 e4 g4 as4 c5 as4 e4 - d4 - cs4 - c4 -",
+      bass: "e1 e1 e1 e1 e1 e1 e1 e1 d1 d1 d1 d1 d1 d1 d1 d1 | e1 e1 e1 e1 e1 e1 e1 e1 c1 c1 c1 c1 b0 b0 b0 b0" },
 
-    { name: "Дозор", bpm: 108, drum: D.вальс,
+    { name: "Дозор", group: "calm", bpm: 108, drum: D.вальс,
       lead: "f4 - a4 - c5 - a4 - g4 - as4 - d5 - as4 - | f4 - a4 - c5 - f5 - e5 - d5 - c5 - a4 -",
       bass: "f2 . . . . . . . g2 . . . . . . . | f2 . . . . . . . c3 . . . c3 . . ." },
 
-    { name: "Жёлоб", bpm: 138, drum: D.сбивка,
+    { name: "Жёлоб", group: "calm", bpm: 138, drum: D.сбивка,
       lead: "b4 - - a4 - g4 - - a4 - b4 - d5 - - - | b4 - - d5 - e5 - - d5 - b4 - a4 - g4 -",
       bass: "e2 - e2 - e2 - e2 - g2 - g2 - g2 - g2 - | a2 - a2 - a2 - a2 - b2 - b2 - e2 - - -" },
 
-    { name: "Тревога", bpm: 150, drum: D.марш,
+    { name: "Тревога", group: "tanks", bpm: 150, drum: D.марш,
       lead: "d5 d5 - as4 - d5 - as4 c5 c5 - a4 - c5 - a4 | as4 as4 - f4 - as4 - d5 c5 - as4 - a4 - - -",
       bass: "d2 d2 d2 - d2 d2 d2 - c2 c2 c2 - c2 c2 c2 - | as1 as1 as1 - as1 as1 - - a1 a1 - - a1 - - -" },
 
-    { name: "Синий лёд", bpm: 100, drum: D.тихо,
+    { name: "Синий лёд", group: "calm", bpm: 100, drum: D.тихо,
       lead: "g5 - - - e5 - - - c5 - d5 - e5 - - - | g5 - - - a5 - - - g5 - e5 - d5 - c5 -",
       bass: "c3 . . . . . . . a2 . . . . . . . | f2 . . . . . . . g2 . . . . . . ." },
 
-    { name: "Шестерёнки", bpm: 128, drum: D.быстро,
+    { name: "Шестерёнки", group: "calm", bpm: 128, drum: D.быстро,
       lead: "a4 b4 c5 - a4 b4 c5 - d5 - c5 - b4 - a4 - | a4 b4 c5 - e5 d5 c5 - b4 - a4 - gs4 - - -",
       bass: "a2 - a2 a2 - a2 - a2 e2 - e2 e2 - e2 - e2 | f2 - f2 f2 - f2 - f2 e2 - e2 - a2 - - -" },
 
-    { name: "Праздник", bpm: 146, drum: D.сбивка,
+    { name: "Праздник", group: "calm", bpm: 146, drum: D.сбивка,
       lead: "c5 - e5 g5 - a5 g5 - e5 - c5 - g4 - - - | c5 - e5 g5 - c6 b5 - g5 - e5 - c5 - - -",
       bass: "c3 - g2 - c3 - g2 - f2 - c3 - f2 - c3 - | g2 - d3 - g2 - d3 - c3 - g2 - c3 - - -" },
 
-    { name: "Тёмный трюм", bpm: 92, drum: D.тихо,
+    { name: "Тёмный трюм", group: "menu", bpm: 92, drum: D.тихо,
       lead: "d4 - - - f4 - - - a4 - - - g4 - f4 - | d4 - - - as4 - - - a4 - - - f4 - - -",
       bass: "d2 . . . . . . . d2 . . . . . . . | as1 . . . . . . . a1 . . . . . . ." },
 
-    { name: "Финал", bpm: 160, drum: D.гонка,
-      lead: "c5 e5 g5 c6 - g5 e5 c5 d5 f5 a5 d6 - a5 f5 d5 | e5 g5 b5 e6 - b5 g5 e5 c6 - b5 - a5 - g5 -",
-      bass: "c3 - c3 - g2 - g2 - d3 - d3 - a2 - a2 - | e3 - e3 - b2 - b2 - c3 - g2 - c3 - - -" },
+    { name: "Последний этаж", group: "doom", bpm: 184, drum: D.молот,
+      lead: "a4 - a4 ds5 a4 - a4 ds5 g4 - g4 cs5 g4 - g4 cs5 | a4 as4 a4 gs4 a4 as4 c5 as4 a4 - ds5 - e5 - f5 -",
+      bass: "a1 a1 a1 a1 ds1 ds1 a1 a1 g1 g1 g1 g1 cs1 cs1 g1 g1 | a1 a1 a1 a1 a1 a1 a1 a1 as1 as1 as1 as1 b1 b1 b1 b1" },
 
-    { name: "Титры", bpm: 88, drum: D.пусто,
+    { name: "Титры", group: "menu", bpm: 88, drum: D.пусто,
       lead: "c5 - - e5 - - g5 - - e5 - - c5 - - - | a4 - - c5 - - e5 - - d5 - - c5 - - -",
       bass: "c3 . . . . . . . g2 . . . . . . . | a2 . . . . . . . f2 . . . g2 . . ." },
+
+    /* ── Ещё три темы DOOM: низко, быстро и с тритоном, чтобы ревело ── */
+    { name: "Мясорубка", group: "doom", bpm: 176, drum: D.двойная,
+      lead: "d4 d4 gs4 d4 - gs4 d4 - c4 c4 fs4 c4 - fs4 c4 - | d4 f4 gs4 as4 - gs4 f4 d4 c4 - b3 - as3 - a3 -",
+      bass: "d1 d1 d1 d1 gs1 gs1 d1 d1 c1 c1 c1 c1 fs1 fs1 c1 c1 | d1 d1 d1 d1 d1 d1 d1 d1 as0 as0 as0 as0 a0 a0 a0 a0" },
+
+    { name: "Стальная глотка", group: "doom", bpm: 168, drum: D.молот,
+      lead: "f4 - f4 b4 f4 - f4 b4 ds4 - ds4 a4 ds4 - ds4 a4 | f4 g4 gs4 b4 c5 b4 gs4 g4 f4 - ds4 - d4 - cs4 -",
+      bass: "f1 f1 b1 f1 f1 f1 b1 f1 ds1 ds1 a1 ds1 ds1 ds1 a1 ds1 | f1 f1 f1 f1 gs1 gs1 gs1 gs1 as1 as1 as1 as1 b1 b1 b1 b1" },
+
+    { name: "Ров", group: "doom", bpm: 158, drum: D.двойная,
+      lead: "c4 - fs4 - c4 - fs4 - as3 - e4 - as3 - e4 - | c4 ds4 fs4 gs4 - fs4 ds4 c4 as3 - c4 - cs4 - d4 -",
+      bass: "c1 c1 c1 fs1 c1 c1 c1 fs1 as0 as0 as0 e1 as0 as0 as0 e1 | c1 c1 c1 c1 ds1 ds1 ds1 ds1 fs1 fs1 - - g1 - - -" },
+
+    /* ── Ещё одна тема меню: медленная и просторная ─────────────────── */
+    { name: "Неон", group: "menu", bpm: 84, drum: D.тихо,
+      lead: "e5 - - - b4 - - - d5 - - - a4 - - - | c5 - - - g4 - - - a4 - b4 - c5 - - -",
+      bass: "a2 . . . . . . . f2 . . . . . . . | c3 . . . . . . . e2 . . . . . . ." },
+
+    /* ── Спокойные: их пятнадцать, они крутятся во всех тихих играх ─── */
+    { name: "Тёплый пол", group: "calm", bpm: 104, drum: D.тихо,
+      lead: "f4 - a4 - c5 - a4 - g4 - e4 - f4 - - - | f4 - a4 - d5 - c5 - a4 - g4 - f4 - - -",
+      bass: "f2 . . . . . . . c3 . . . . . . . | d2 . . . . . . . f2 . . . c3 . . ." },
+
+    { name: "Чердак", group: "calm", bpm: 112, drum: D.ровно,
+      lead: "d5 - c5 - a4 - g4 - a4 - c5 - d5 - - - | f5 - d5 - c5 - a4 - g4 - a4 - c5 - - -",
+      bass: "d3 . . . a2 . . . f2 . . . g2 . . . | d3 . . . a2 . . . c3 . . . d3 . . ." },
+
+    { name: "Дождь по крыше", group: "calm", bpm: 94, drum: D.тихо,
+      lead: "b4 - - c5 - - d5 - - c5 - - b4 - a4 - | g4 - - a4 - - b4 - - a4 - - g4 - - -",
+      bass: "e2 . . . . . . . g2 . . . . . . . | c3 . . . . . . . d3 . . . . . . ." },
+
+    { name: "Первый рейс", group: "calm", bpm: 122, drum: D.ровно,
+      lead: "g4 - b4 - d5 - b4 - c5 - e5 - c5 - a4 - | g4 - b4 - d5 - g5 - f5 - d5 - b4 - g4 -",
+      bass: "g2 . . . d3 . . . c3 . . . a2 . . . | g2 . . . d3 . . . g2 . . . g2 . . ." },
+
+    { name: "Стекло", group: "calm", bpm: 98, drum: D.тихо,
+      lead: "c5 - e5 - g5 - - - f5 - d5 - c5 - - - | a4 - c5 - e5 - - - d5 - c5 - a4 - - -",
+      bass: "c3 . . . . . . . f2 . . . . . . . | a2 . . . . . . . d3 . . . g2 . . ." },
+
+    { name: "Пыльный склад", group: "calm", bpm: 116, drum: D.вальс,
+      lead: "a4 - - c5 - - e5 - - c5 - - a4 - - - | d5 - - c5 - - a4 - - g4 - - a4 - - -",
+      bass: "a2 . . . . . . . d3 . . . . . . . | f2 . . . . . . . e2 . . . a2 . . ." },
+
+    { name: "Тихий ход", group: "calm", bpm: 106, drum: D.ровно,
+      lead: "e5 - d5 - c5 - b4 - c5 - d5 - e5 - - - | g5 - f5 - e5 - d5 - c5 - b4 - a4 - - -",
+      bass: "c3 . . . g2 . . . a2 . . . e2 . . . | f2 . . . c3 . . . d3 . . . g2 . . ." },
   ];
 
   /* ── Проигрыватель ───────────────────────────────────────────────── */
@@ -134,10 +183,53 @@
     parsed: null,
 
     list: function () {
-      return TRACKS.map(function (t) { return { name: t.name, bpm: t.bpm }; });
+      return TRACKS.map(function (t, i) {
+        return { name: t.name, bpm: t.bpm, group: t.group, index: i };
+      });
     },
 
     count: function () { return TRACKS.length; },
+
+    /* Номера тем одной группы в том порядке, в каком они записаны. */
+    group: function (name) {
+      var out = [];
+      TRACKS.forEach(function (t, i) { if (t.group === name) out.push(i); });
+      return out;
+    },
+
+    /* Тема по номеру внутри группы: для уровней, у которых своя музыка.
+       Если уровней больше, чем тем, идём по кругу. */
+    playAt: function (groupName, n, audio) {
+      var g = this.group(groupName);
+      if (!g.length) return;
+      this._rotate = null;
+      this.play(g[((n || 0) % g.length + g.length) % g.length], audio);
+    },
+
+    /* Случайная тема из группы, и каждые ROTATE секунд — следующая.
+       Одна и та же подряд не повторяется: слушать её по кругу тоскливо. */
+    ROTATE: 90,
+    playGroup: function (groupName, audio) {
+      var g = this.group(groupName);
+      if (!g.length) return this.stop();
+      if (this._rotate === groupName) return;      // уже крутим эту группу
+      var self = this;
+      this._rotate = groupName;
+      var order = g.slice();
+      for (var i = order.length - 1; i > 0; i--) {
+        var j = Math.floor(Math.random() * (i + 1));
+        var t = order[i]; order[i] = order[j]; order[j] = t;
+      }
+      var at = 0;
+      function next() {
+        if (self._rotate !== groupName) return;
+        if (at >= order.length) at = 0;
+        self.play(order[at++], audio);
+        self._rotateTimer = setTimeout(next, self.ROTATE * 1000);
+      }
+      clearTimeout(this._rotateTimer);
+      next();
+    },
 
     /* Включить тему по номеру. Тот же номер второй раз — ничего не делаем,
        иначе при каждом обращении музыка начиналась бы заново. */
@@ -145,7 +237,9 @@
       if (index == null || index < 0) return this.stop();
       index = index % TRACKS.length;
       if (this.index === index && this.timer) return;
-      this.stop();
+      // Гасим только звук, не трогая расписание ротации: иначе смена темы
+      // по таймеру сама бы это расписание и отменила.
+      this._hush();
       var ctx = audio && audio.ensure ? audio.ensure() : null;
       if (!ctx) return;
       this.ctx = ctx;
@@ -169,6 +263,8 @@
     },
 
     stop: function () {
+      this._rotate = null;
+      clearTimeout(this._rotateTimer);
       if (this.timer) clearInterval(this.timer);
       this.timer = 0;
       this.index = -1;
@@ -181,6 +277,13 @@
         } catch (e) {}
       }
       this.gain = null;
+    },
+
+    _hush: function () {
+      var keep = this._rotate, timer = this._rotateTimer;
+      this.stop();
+      this._rotate = keep;
+      this._rotateTimer = timer;
     },
 
     setMuted: function (on) {

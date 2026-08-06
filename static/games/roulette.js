@@ -477,8 +477,9 @@
       },
       padBig: true,
       actions: [
-        { icon: "replay", aria: "крутить", label: "КРУТИТЬ", color: "#ff3fa4", big: true,
-          down: spin },
+        // Ни подписи, ни значка: круглая стрелка тут читалась как «заново» —
+        // ровно такая же стоит в углу и правда сбрасывает игру.
+        { aria: "крутить", color: "#ff3fa4", big: true, down: spin },
       ],
       corners: [
         null,

@@ -587,6 +587,7 @@ window.VitazArcade = (function () {
       "align-items:center;min-height:clamp(178px,27vh,214px)}",
       ".deck-main.slim{grid-template-columns:minmax(0,1fr);min-height:0}",
       ".deck-main.no-corners{grid-template-columns:minmax(0,1fr)}",
+      ".deck-main.tall{min-height:calc(clamp(178px,27vh,214px) + 48px)}",
       ".deck-corner{display:flex;flex-direction:column;gap:8px;align-items:center;",
       "justify-content:center}",
       /* Мелочь по углам: вдвое меньше прочих кнопок и подальше от крестовины */
@@ -618,6 +619,8 @@ window.VitazArcade = (function () {
       "inset 0 2px 5px rgba(255,255,255,.35),0 0 0 2px rgba(45,226,255,.35)}",
       ".dbtn.huge{width:112px;height:112px;font-size:.6rem}",
       ".dbtn.huge svg{width:44px;height:44px}",
+      ".dbtn.giant{width:132px;height:132px;font-size:.66rem}",
+      ".dbtn.giant svg{width:54px;height:54px}",
       /* Широкие кнопки в узкой полосе — одинаковые прямоугольники */
       ".deck-row .dbtn.wide{flex:1 1 0;min-width:120px;max-width:260px;height:44px}",
       ".deck-pad.big{width:186px;height:186px}",
@@ -633,6 +636,8 @@ window.VitazArcade = (function () {
       ".dbtn.round.big{width:66px;height:66px}",
       ".dbtn.huge{width:84px;height:84px}",
       ".dbtn.huge svg{width:34px;height:34px}",
+      ".dbtn.giant{width:104px;height:104px}",
+      ".dbtn.giant svg{width:42px;height:42px}",
       ".stick-knob{width:54px;height:54px;margin:-27px 0 0 -27px}",
       ".deck-stick.big{width:150px;height:150px}",
       ".deck-stick.big .stick-knob{width:64px;height:64px;margin:-32px 0 0 -32px}",
@@ -800,11 +805,17 @@ window.VitazArcade = (function () {
      Живёт в music.js, здесь только привязка к играм и переключатель.
      Поменять тему у игры — одна строка в таблице ниже; null означает
      «без музыки»: в шахматах, рулетке и печати она мешает думать. */
+  /* Какой группе тем какая игра. Спокойные игры берут случайную из
+     пятнадцати и каждые полторы минуты меняют, у танчиков и DOOM тема
+     своя на каждый уровень — их переключают сами игры через api.track.
+     null означает тишину: в шахматах, рулетке и печати музыка мешает. */
   var MUSIC_FOR = {
-    snake: 0, tetris: 3, tanks: 9, arkanoid: 11, wolf: 8,
-    doom: 13, chess: null, roulette: null, typing: null, tracks: null,
+    snake: "calm", tetris: "calm", arkanoid: "calm", wolf: "calm",
+    tanks: "tanks", doom: "doom",
+    chess: null, roulette: null, typing: null, tracks: null,
   };
-  var MENU_TRACK = 15;                 // в меню играют «Титры»
+  // Группы, где тема привязана к уровню, а не крутится сама
+  var PER_LEVEL = { tanks: true, doom: true };
 
   function music() { return window.VitazMusic || null; }
   function musicMuted() {
@@ -820,8 +831,12 @@ window.VitazArcade = (function () {
   function musicFor(gameId) {
     var m = music();
     if (!m) return;
-    var idx = gameId === undefined ? MENU_TRACK : MUSIC_FOR[gameId];
-    if (idx == null) m.stop(); else m.play(idx, audio);
+    if (gameId === undefined) return m.playGroup("menu", audio);
+    var group = MUSIC_FOR[gameId];
+    if (!group) return m.stop();
+    // Игры с музыкой по уровням включают её сами, как только знают номер
+    if (PER_LEVEL[group]) return m.playAt(group, 0, audio);
+    m.playGroup(group, audio);
   }
 
   function syncSound() {
@@ -887,7 +902,7 @@ window.VitazArcade = (function () {
     var b = document.createElement("button");
     b.type = "button";
     b.className = "dbtn" + (cfg.round ? " round" : "") + (cfg.big ? " big" : "") +
-                  (cfg.huge ? " huge" : "") +
+                  (cfg.huge ? " huge" : "") + (cfg.giant ? " giant" : "") +
                   (cfg.mid ? " mid" : "") +
                   (cfg.wide ? " wide" : "") + (cfg.arrow ? " arrow" : "") +
                   (cfg.className ? " " + cfg.className : "");
@@ -1127,7 +1142,11 @@ window.VitazArcade = (function () {
     if (spec.pad || spec.stick || (spec.actions && spec.actions.length) ||
         spec.corners || spec.side) {
       var main = document.createElement("div");
-      main.className = "deck-main" + (slim ? " slim" : "");
+      // Без верхнего ряда основной блок делаем выше ровно на его высоту:
+      // тогда панель у всех игр одна и та же, и экран при переходе между
+      // играми не прыгает.
+      var hasExtra = !!(spec.extra && spec.extra.length);
+      main.className = "deck-main" + (slim ? " slim" : (hasExtra ? "" : " tall"));
 
       // Углы держим всегда, даже пустыми: иначе центр съезжает вбок,
       // когда у игры одна угловая кнопка вместо двух.
@@ -1392,6 +1411,11 @@ window.VitazArcade = (function () {
       record: record,          // рекорд на сервер, с вопросом об имени
       tempo: tempo,            // множитель за темп прохождения
       levels: function (names, onPick) { chooseLevel(game.id, names, onPick); },
+      // Игра сообщает номер уровня — ставим положенную ему тему
+      track: function (n) {
+        var m = music(), group = MUSIC_FOR[game.id];
+        if (m && group && PER_LEVEL[group]) m.playAt(group, n, audio);
+      },
       unlock: function (index) { markUnlocked(game.id, index); },
       unlocked: function () { return levelUnlocked(game.id); },
       top: boardBest,          // число для строки «РЕКОРД»

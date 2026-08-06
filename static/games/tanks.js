@@ -214,6 +214,7 @@
     var held = { x: 0, y: 0 };
 
     function buildLevel(n) {
+      if (api.track) api.track(n);          // у каждой карты своя тема
       var map = MAPS[n % MAPS.length];
       grid = [];
       for (var y = 0; y < N; y++) {
