@@ -142,7 +142,11 @@
     });
 
     // Дверь — две створки с предупреждающими полосами.
-    function doorTexture(rTint, gTint, bTint) {
+    /* Обычная дверь серая, запертая — в цвет своего ключа. Раньше тинт
+       красил только основу, а косые полосы у всех дверей были одинаково
+       оранжевыми, и красную от синей приходилось угадывать. Теперь цвет
+       берут и полосы, и накладка замка посередине. */
+    function doorTexture(rTint, gTint, bTint, locked) {
       return makeTexture(function (put) {
         for (var y = 0; y < TEX; y++) {
           for (var x = 0; x < TEX; x++) {
@@ -151,10 +155,16 @@
             var edge = x < 3 || x > 60;
             var base = seam ? 40 : (edge ? 70 : 118 - center * 0.5);
             var band = (y > 20 && y < 30) || (y > 38 && y < 44);
-            if (band && !seam) {
-              // косые полосы «не влезай»
-              var s = ((x + y) % 12) < 6;
-              put(x, y, s ? 190 : 40, s ? 150 : 40, s ? 30 : 40);
+            // Накладка замка: заметное пятно в центре створки
+            var plate = locked && center > 6 && center < 20 && y > 28 && y < 40;
+            if (plate) {
+              var hole = center > 11 && center < 15 && y > 31 && y < 37;
+              if (hole) put(x, y, 20, 18, 16);
+              else put(x, y, 235 * rTint, 235 * gTint, 235 * bTint);
+            } else if (band && !seam) {
+              var st = ((x + y) % 12) < 6;
+              if (st) put(x, y, 190 * rTint, 150 * gTint, 30 + 120 * bTint);
+              else put(x, y, 40, 40, 40);
             } else {
               put(x, y, base * rTint, base * gTint, base * bTint);
             }
@@ -163,9 +173,9 @@
       });
     }
     t.door = doorTexture(1, 1.02, 1.08);
-    t.doorRed = doorTexture(1.35, 0.6, 0.6);
-    t.doorBlue = doorTexture(0.6, 0.75, 1.5);
-    t.doorYellow = doorTexture(1.3, 1.2, 0.5);
+    t.doorRed = doorTexture(1.6, 0.42, 0.42, true);
+    t.doorBlue = doorTexture(0.42, 0.7, 1.7, true);
+    t.doorYellow = doorTexture(1.45, 1.3, 0.35, true);
 
     // Выход — панель с большим рычагом.
     t.exit = makeTexture(function (put) {
@@ -1564,9 +1574,11 @@
       var taken = true;
       switch (it.type) {
         case "medkit":
+          // Лечит до полного: искать по уровню четыре аптечки, чтобы
+          // закрыть одну рану, — занятие без всякого удовольствия.
           if (state.player.health >= 100) { taken = false; break; }
-          state.player.health = Math.min(100, state.player.health + 25);
-          say("Аптечка +25");
+          state.player.health = 100;
+          say("Аптечка - здоровье полное");
           break;
         case "armor":
           state.armor = Math.min(100, state.armor + 50);
@@ -1732,7 +1744,11 @@
         if (transY <= 0.15) return;
 
         var screenX = Math.floor((VIEW_W / 2) * (1 + transX / transY));
-        var scale = v.e.kind === "item" || v.e.kind === "projectile" ? 0.6 : 1;
+        // Аптечку рисуем в полтора раза крупнее прочих предметов: она
+        // важнее всего остального, а в полумраке терялась под ногами.
+        var scale = v.e.kind === "projectile" ? 0.6
+                  : v.e.kind === "item" ? (v.e.type === "medkit" ? 0.9 : 0.6)
+                  : 1;
         var spriteH = Math.abs(Math.floor(VIEW_H / transY)) * scale;
         var spriteW = Math.floor(spriteH * (v.sprite.w / v.sprite.h));
         // предметы лежат на полу, монстры стоят
@@ -2100,11 +2116,19 @@
           ctx.fillRect(ox + x * cell, oy + y * cell, cell - 1, cell - 1);
         }
       }
+      var KEY_DOT = { keyRed: "#ff5a5a", keyBlue: "#5f8dff", keyYellow: "#ffd84a" };
       state.entities.forEach(function (e) {
+        var big = false;
         if (e.kind === "monster" && e.alive) ctx.fillStyle = "#ff4040";
-        else if (e.kind === "item") ctx.fillStyle = "#40ff90";
+        else if (e.kind === "item" && KEY_DOT[e.type]) {
+          // Ключи на карте — своим цветом и крупнее прочего добра: по ним
+          // и понятно, куда идти, когда упёрся в цветную дверь.
+          ctx.fillStyle = KEY_DOT[e.type];
+          big = true;
+        } else if (e.kind === "item") ctx.fillStyle = "#40ff90";
         else return;
-        ctx.fillRect(ox + e.x * cell - 1, oy + e.y * cell - 1, 3, 3);
+        var d = big ? 3 : 1;
+        ctx.fillRect(ox + e.x * cell - d, oy + e.y * cell - d, d * 2 + 1, d * 2 + 1);
       });
       var p = state.player;
       ctx.strokeStyle = "#ffffff";
