@@ -82,51 +82,80 @@
      "#.#.#.#.#.#.#"],
   ];
 
-  /* Превью: враг стоит прямо напротив, между нами кирпичная стена. Мой
-     танк стреляет, блок стены разлетается, враг подаётся назад — и всё
-     начинается заново. Раньше враг стоял внутри кладки, а танк ехал сквозь
-     стены, и сцена выглядела сломанной игрой. */
+  /* Превью. Кирпичное поле с коридором посередине: внизу мой танк, над ним
+     блок стены, а сразу за стеной — вражеский. Мой стреляет, блок
+     разлетается, в проём становится виден враг, потом стена отстраивается
+     и всё повторяется.
+
+     Раскладка задана картой по клеткам, а не координатами на глаз: так
+     танки гарантированно стоят в пустых клетках и не наезжают на кладку.
+     Кирпич везде обычный — брони на превью нет. */
+  var THUMB_MAP = [
+    "##.B.##",
+    "#..W..#",
+    "#..M..#",
+    "##...##",
+  ];
+
   function thumb(ctx, w, h, t) {
     ctx.fillStyle = C.bg;
     ctx.fillRect(0, 0, w, h);
 
-    var cyc = 2.6, k = (t % cyc) / cyc;
-    var size = Math.round(Math.min(w / 6, h / 4));      // размер танка и блока
-    var lane = Math.round(w / 2 - size / 2);
-    var wallY = Math.round(h / 2 - size / 2);
-    var meY = h - size * 1.3;
-    var foeY = size * 0.3;
+    var cols = THUMB_MAP[0].length, rows = THUMB_MAP.length;
+    var cell = Math.floor(Math.min(w / cols, h / rows));
+    var ox = Math.round((w - cell * cols) / 2);
+    var oy = Math.round((h - cell * rows) / 2);
 
-    function brick(x, y) {
+    var cyc = 2.8, k = (t % cyc) / cyc;
+    var broken = k > 0.5 && k < 0.88;          // окно, когда стены нет
+
+    function brick(cx, cy) {
+      var x = ox + cx * cell, y = oy + cy * cell;
       ctx.fillStyle = C.brickDark;
-      ctx.fillRect(x, y, size, size);
+      ctx.fillRect(x, y, cell, cell);
       ctx.fillStyle = C.brick;
+      // кладка в три ряда со смещением, как в самой игре
       for (var r = 0; r < 3; r++) {
-        ctx.fillRect(x + 1, y + 1 + r * (size / 3), size - 2, size / 3 - 2);
+        var top = y + 2 + r * (cell / 3);
+        var hgt = cell / 3 - 3;
+        var shift = r % 2 ? cell / 4 : 0;
+        ctx.fillRect(x + 2, top, cell / 2 - 3 + shift, hgt);
+        ctx.fillRect(x + cell / 2 + shift, top, cell / 2 - 2 - shift, hgt);
       }
     }
 
-    // Сплошная стена поперёк, и ровно один блок напротив ствола пробивается
-    var cols = Math.ceil(w / size) + 1;
-    var hole = k > 0.5 && k < 0.92;
-    for (var c = 0; c < cols; c++) {
-      var bx = c * size;
-      if (hole && bx + size > lane && bx < lane + size) continue;
-      brick(bx, wallY);
+    var me = null, foe = null, wall = null;
+    for (var cy = 0; cy < rows; cy++) {
+      for (var cx = 0; cx < cols; cx++) {
+        var ch = THUMB_MAP[cy].charAt(cx);
+        if (ch === "#") brick(cx, cy);
+        else if (ch === "W") { wall = [cx, cy]; if (!broken) brick(cx, cy); }
+        else if (ch === "M") me = [cx, cy];
+        else if (ch === "B") foe = [cx, cy];
+      }
     }
 
-    drawTankArt(ctx, lane, meY, size, 0, C.me, C.meDark);
-    // Враг стоит на чистом полу и смотрит на нас, а не торчит из кладки
-    drawTankArt(ctx, lane, foeY, size, 2, C.foe, C.foeDark);
+    // Танки ровно в своих клетках, с небольшим полем — гусеницы не должны
+    // касаться кладки, иначе кажется, что танк въехал в стену.
+    var pad = Math.round(cell * 0.08), size = cell - pad * 2;
+    if (foe) drawTankArt(ctx, ox + foe[0] * cell + pad, oy + foe[1] * cell + pad,
+                         size, 2, C.foe, C.foeDark);
+    if (me) drawTankArt(ctx, ox + me[0] * cell + pad, oy + me[1] * cell + pad,
+                        size, 0, C.me, C.meDark);
 
-    if (k < 0.5) {                                     // снаряд летит к стене
-      var f = k / 0.5;
-      ctx.fillStyle = "#fff";
-      ctx.fillRect(lane + size / 2 - 2, meY - f * (meY - wallY - size), 4, 8);
-    } else if (k < 0.62) {                             // вспышка на месте блока
-      var a = 1 - (k - 0.5) / 0.12;
-      ctx.fillStyle = "rgba(255,179,92," + a.toFixed(2) + ")";
-      ctx.fillRect(lane - 5, wallY - 5, size + 10, size + 10);
+    if (me && wall) {
+      var mx = ox + me[0] * cell + cell / 2;
+      var fromY = oy + me[1] * cell;
+      var toY = oy + (wall[1] + 1) * cell;
+      if (k < 0.5) {                            // снаряд идёт к стене
+        var f = k / 0.5;
+        ctx.fillStyle = "#fff";
+        ctx.fillRect(mx - 2, fromY - f * (fromY - toY), 4, Math.max(6, cell * 0.16));
+      } else if (k < 0.62) {                    // вспышка на месте блока
+        var a = 1 - (k - 0.5) / 0.12;
+        ctx.fillStyle = "rgba(255,179,92," + a.toFixed(2) + ")";
+        ctx.fillRect(ox + wall[0] * cell - 4, oy + wall[1] * cell - 4, cell + 8, cell + 8);
+      }
     }
   }
 
