@@ -1785,18 +1785,26 @@ def drop_thumb(item_id):
 # Растровые картинки, которые можно безопасно отдать в строку: они не умеют
 # выполнять скрипты. SVG сюда не входит намеренно — внутри него живёт
 # полноценный JS, и на домене сайта он дотянулся бы до сессии.
+# Что можно безопасно показать прямо в браузере. Ни один из этих типов не
+# умеет выполнять скрипты. SVG и HTML сюда не входят намеренно: внутри них
+# живёт полноценный JS, и на домене сайта он дотянулся бы до сессии.
 DROP_INLINE_TYPES = {
     ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
     ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp",
     ".ico": "image/x-icon", ".avif": "image/avif",
+    ".pdf": "application/pdf",
+    ".txt": "text/plain; charset=utf-8", ".log": "text/plain; charset=utf-8",
+    ".md": "text/plain; charset=utf-8", ".csv": "text/plain; charset=utf-8",
+    ".mp4": "video/mp4", ".webm": "video/webm",
+    ".mp3": "audio/mpeg", ".ogg": "audio/ogg", ".wav": "audio/wav",
 }
 
 
 def _drop_send(item_id, item, inline=False):
     """По умолчанию отдаём вложением: иначе загруженный .html или .svg со
     скриптом выполнился бы на домене сайта и добрался до сессии и токена
-    устройства. Исключение — растровая картинка по публичной ссылке: её
-    отдаём в строку, чтобы ссылку можно было вставить как адрес иконки."""
+    устройства. Открываем в браузере только по бессрочной ссылке и только
+    те типы, которые заведомо ничего не выполняют."""
     ext = os.path.splitext(item["name"])[1].lower()
     mime = DROP_INLINE_TYPES.get(ext) if inline else None
     response = send_file(
@@ -2143,7 +2151,11 @@ def drop_public(token):
         item = drop_items.get(item_id) if item_id else None
     if not item:
         return "Ссылка недействительна или истекла", 404
-    return _drop_send(item_id, item, inline=True)
+    # Ссылка со сроком ведёт себя как раньше — файл скачивается. Бессрочная
+    # открывается прямо в браузере: её и делают, чтобы вставить адресом
+    # картинки в настройки другого сайта, а не чтобы качать по одному файлу.
+    forever = not (item.get("share") or {}).get("expires")
+    return _drop_send(item_id, item, inline=forever)
 
 
 @app.delete("/api/drop/<item_id>")
@@ -5298,8 +5310,9 @@ def drop_page():
                 '<input type="number" min="1" max="720" value="24" id="sh-h"></label>' +
               '<label class="share-row check"><input type="checkbox" id="sh-f">' +
                 '<span>Без срока — не истекает никогда</span></label>' +
-              '<p class="share-note">Картинка по бессрочной ссылке открывается ' +
-                'прямо в браузере, поэтому её адрес можно вставлять как иконку.</p>' +
+              '<p class="share-note">Ссылка со сроком скачивает файл. ' +
+                'Бессрочная открывает его прямо в браузере — такой адрес ' +
+                'можно вставить как картинку в настройки другого сайта.</p>' +
               '<div class="share-btns">' +
                 '<button type="button" class="go" id="sh-ok">СОЗДАТЬ</button>' +
                 '<button type="button" id="sh-no">ОТМЕНА</button>' +
