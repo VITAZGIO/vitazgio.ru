@@ -595,6 +595,9 @@ window.VitazArcade = (function () {
       ".deck-corner .dbtn svg{width:17px;height:17px}",
       ".deck-center{display:flex;gap:16px;align-items:center;justify-content:center;",
       "flex-wrap:nowrap;min-width:0}",
+      /* В DOOM между ручкой и огнём просвет побольше: там кнопка крупная,
+         и вплотную к ручке большой палец задевал её при развороте. */
+      ".deck-center.airy{gap:30px}",
       ".deck-actions{display:flex;gap:10px;align-items:center;flex-wrap:nowrap;",
       "justify-content:center}",
 
@@ -608,7 +611,7 @@ window.VitazArcade = (function () {
       "0 4px 0 rgba(0,0,0,.5),0 8px 16px rgba(0,0,0,.45)}",
       ".stick-ring{position:absolute;inset:14px;border-radius:50%;pointer-events:none;",
       "border:1px dashed rgba(45,226,255,.22)}",
-      ".stick-knob{position:absolute;left:50%;top:50%;width:64px;height:64px;margin:-32px 0 0 -32px;",
+      ".stick-knob{position:absolute;left:29%;top:29%;width:64px;height:64px;",
       "border-radius:50%;pointer-events:none;transition:transform .07s ease-out;",
       "background:radial-gradient(circle at 36% 28%,#8fa6bd,#3c4653 52%,#1b2027 100%);",
       "border:2px solid rgba(0,0,0,.55);",
@@ -623,27 +626,20 @@ window.VitazArcade = (function () {
       ".dbtn.giant svg{width:54px;height:54px}",
       /* Широкие кнопки в узкой полосе — одинаковые прямоугольники */
       ".deck-row .dbtn.wide{flex:1 1 0;min-width:120px;max-width:260px;height:44px}",
-      ".deck-pad.big{width:186px;height:186px}",
-      ".deck-stick.big{width:180px;height:180px}",
-      ".deck-stick.big .stick-knob{width:76px;height:76px;margin:-38px 0 0 -38px}",
+      /* Крестовина и ручка одного размера во всех играх: палец привыкает к
+         одному месту, и переход между играми не сбивает. Размер выбран по
+         самой тесной раскладке — тетрис, где рядом с крестовиной стоят три
+         круглые кнопки. Класс big оставлен ради совместимости, но на размер
+         больше не влияет. */
       /* На телефоне всё ужимаем так, чтобы ряд помещался в одну строку:
          перенос кнопок вниз раздувал панель вдвое против других игр. */
-      "@media (max-width:430px){.deck-stick{width:126px;height:126px}",
+      "@media (max-width:430px){",
       ".deck-row .dbtn.wide{min-width:0;padding:0 6px;height:38px;min-height:38px;font-size:.55rem}",
       ".deck-row .dbtn.wide svg{width:16px;height:16px}",
-      ".dbtn.round{width:54px;height:54px}",
-      ".dbtn.round.mid{width:58px;height:58px}",
-      ".dbtn.round.big{width:66px;height:66px}",
       ".dbtn.huge{width:84px;height:84px}",
       ".dbtn.huge svg{width:34px;height:34px}",
-      ".dbtn.giant{width:104px;height:104px}",
-      ".dbtn.giant svg{width:42px;height:42px}",
-      ".stick-knob{width:54px;height:54px;margin:-27px 0 0 -27px}",
-      ".deck-stick.big{width:150px;height:150px}",
-      ".deck-stick.big .stick-knob{width:64px;height:64px;margin:-32px 0 0 -32px}",
-      ".deck-pad{width:132px;height:132px}",
-      ".deck-pad.big{width:146px;height:146px}",
-      ".deck-main{grid-template-columns:46px minmax(0,1fr) 46px;gap:6px}",
+      ".deck-center.airy{gap:20px}",
+      ".deck-main{grid-template-columns:44px minmax(0,1fr) 44px;gap:5px}",
       ".deck-corner .dbtn{width:42px;height:34px}",
       ".deck-center{gap:10px}}",
       ".deck-pad{position:relative;width:148px;height:148px;flex:none}",
@@ -719,19 +715,29 @@ window.VitazArcade = (function () {
       ".deck-sys .dbtn.accent{--bc:#ff3fa4;color:#ffd9ec;border-color:rgba(255,63,164,.35);",
       "background:linear-gradient(180deg,#3a2434,#241620)}",
 
-      /* На узких экранах ужимаем железо, иначе круглые кнопки переносятся
-         на вторую строку и панель разъезжается. */
-      "@media (max-width:430px){.deck-pad{width:130px;height:130px}",
-      ".dbtn.round{width:58px;height:58px}.dbtn.round.big{width:74px;height:74px}",
-      ".dbtn.round.mid{width:66px;height:66px}",
-      ".deck-actions{gap:9px}.deck-main{gap:9px}}",
-      /* Совсем узкие экраны: три круглых кнопки рядом с крестовиной иначе
-         переносятся на вторую строку и панель разъезжается. */
-      "@media (max-width:380px){.deck-pad{width:118px;height:118px}",
-      ".deck-pad.big{width:150px;height:150px}",
-      ".dbtn.round{width:52px;height:52px}.dbtn.round.mid{width:58px;height:58px}",
-      ".dbtn.round.big{width:64px;height:64px}",
-      ".deck-actions{gap:7px}.deck-main{gap:7px}}",
+      /* Размеры железа держим в одном месте и в самом конце, чтобы ничто их
+         дальше не перебивало. Крестовина и ручка одинаковы во всех играх;
+         круглые кнопки подобраны так, чтобы самая тесная раскладка — тетрис,
+         где рядом с крестовиной стоят три круглые, — укладывалась в ширину
+         телефона без переносов. */
+      ".deck-pad,.deck-pad.big,.deck-stick,.deck-stick.big{",
+      "width:var(--ctl,200px);height:var(--ctl,200px);flex:none}",
+      ".deck-stick .stick-knob{width:calc(var(--ctl,200px) * .42);",
+      "height:calc(var(--ctl,200px) * .42);margin:0;left:29%;top:29%}",
+      "@media (max-width:430px){#arcade-deck{--ctl:156px}",
+      ".dbtn.round{width:52px;height:52px}",
+      ".dbtn.round.mid{width:54px;height:54px}",
+      ".dbtn.round.big{width:58px;height:58px}",
+      ".dbtn.round.big.icon-text{width:auto;min-width:58px;padding:0 6px}",
+      ".dbtn.giant{width:112px;height:112px}",
+      ".dbtn.giant svg{width:46px;height:46px}",
+      ".deck-actions{gap:8px}}",
+      "@media (max-width:380px){#arcade-deck{--ctl:140px}",
+      ".dbtn.round{width:48px;height:48px}",
+      ".dbtn.round.mid{width:50px;height:50px}",
+      ".dbtn.round.big{width:54px;height:54px}",
+      ".dbtn.giant{width:98px;height:98px}",
+      ".deck-actions{gap:6px}.deck-center{gap:10px}.deck-center.airy{gap:16px}}",
       "@media (max-width:560px){#arcade-bar{padding:8px 10px;gap:8px}",
       "#arcade-bar .hint{display:none}",
       "#arcade-menu{grid-template-columns:1fr;gap:10px;padding:10px}",
@@ -1165,7 +1171,7 @@ window.VitazArcade = (function () {
       if (hasCorners) main.appendChild(corner(corners[0]));
 
       var center = document.createElement("div");
-      center.className = "deck-center";
+      center.className = "deck-center" + (spec.airy ? " airy" : "");
       if (spec.stick) center.appendChild(makeStick(spec.stick, spec.stickBig));
 
       if (spec.pad) {
