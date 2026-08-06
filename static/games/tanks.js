@@ -82,57 +82,52 @@
      "#.#.#.#.#.#.#"],
   ];
 
-  /* Превью: танк едет по коридору снизу вверх и сбивает кирпичный блок.
-     Цикл повторяется — заезд, выстрел, взрыв, откат. Раньше танк ехал
-     боком прямо сквозь стены, и это выглядело сломанной игрой. */
+  /* Превью: враг стоит прямо напротив, между нами кирпичная стена. Мой
+     танк стреляет, блок стены разлетается, враг подаётся назад — и всё
+     начинается заново. Раньше враг стоял внутри кладки, а танк ехал сквозь
+     стены, и сцена выглядела сломанной игрой. */
   function thumb(ctx, w, h, t) {
     ctx.fillStyle = C.bg;
     ctx.fillRect(0, 0, w, h);
 
-    var cyc = 3.2, k = (t % cyc) / cyc;          // 0..1 — фаза цикла
-    var blk = Math.round(w / 7);                 // размер кирпичного блока
-    var lane = Math.round(w / 2 - blk / 2);      // коридор по центру
+    var cyc = 2.6, k = (t % cyc) / cyc;
+    var size = Math.round(Math.min(w / 6, h / 4));      // размер танка и блока
+    var lane = Math.round(w / 2 - size / 2);
+    var wallY = Math.round(h / 2 - size / 2);
+    var meY = h - size * 1.3;
+    var foeY = size * 0.3;
 
-    // Кирпичная кладка с проходом посередине; верхний блок над проходом
-    // исчезает во второй половине цикла — его как раз и сносят.
     function brick(x, y) {
       ctx.fillStyle = C.brickDark;
-      ctx.fillRect(x, y, blk, blk);
+      ctx.fillRect(x, y, size, size);
       ctx.fillStyle = C.brick;
       for (var r = 0; r < 3; r++) {
-        ctx.fillRect(x + 1, y + 1 + r * (blk / 3), blk - 2, blk / 3 - 2);
+        ctx.fillRect(x + 1, y + 1 + r * (size / 3), size - 2, size / 3 - 2);
       }
     }
-    for (var gy = 0; gy < Math.ceil(h / blk); gy++) {
-      for (var gx = 0; gx < Math.ceil(w / blk); gx++) {
-        var px = gx * blk, py = gy * blk;
-        if (px + blk > lane - 2 && px < lane + blk + 2) continue;   // коридор
-        if ((gx + gy) % 3 === 0) continue;                          // просветы
-        brick(px, py);
-      }
+
+    // Сплошная стена поперёк, и ровно один блок напротив ствола пробивается
+    var cols = Math.ceil(w / size) + 1;
+    var hole = k > 0.5 && k < 0.92;
+    for (var c = 0; c < cols; c++) {
+      var bx = c * size;
+      if (hole && bx + size > lane && bx < lane + size) continue;
+      brick(bx, wallY);
     }
-    var gateY = Math.round(h * 0.18);
-    var gone = k > 0.55;
-    if (!gone) brick(lane, gateY);
 
-    // Танк заезжает в коридор и останавливается перед стеной
-    var from = h - blk * 1.2, to = gateY + blk * 1.6;
-    var ty = from + (to - from) * Math.min(1, k / 0.42);
-    drawTankArt(ctx, lane, ty, blk, 0, C.me, C.meDark);
+    drawTankArt(ctx, lane, meY, size, 0, C.me, C.meDark);
+    // Враг стоит на чистом полу и смотрит на нас, а не торчит из кладки
+    drawTankArt(ctx, lane, foeY, size, 2, C.foe, C.foeDark);
 
-    // Снаряд летит от ствола к блоку, потом вспышка
-    if (k > 0.42 && k < 0.58) {
-      var f = (k - 0.42) / 0.16;
+    if (k < 0.5) {                                     // снаряд летит к стене
+      var f = k / 0.5;
       ctx.fillStyle = "#fff";
-      ctx.fillRect(lane + blk / 2 - 2, ty - f * (ty - gateY - blk), 4, 7);
-    } else if (k >= 0.58 && k < 0.7) {
-      var a = 1 - (k - 0.58) / 0.12;
-      ctx.fillStyle = "rgba(255,179,92," + a + ")";
-      ctx.fillRect(lane - 4, gateY - 4, blk + 8, blk + 8);
+      ctx.fillRect(lane + size / 2 - 2, meY - f * (meY - wallY - size), 4, 8);
+    } else if (k < 0.62) {                             // вспышка на месте блока
+      var a = 1 - (k - 0.5) / 0.12;
+      ctx.fillStyle = "rgba(255,179,92," + a.toFixed(2) + ")";
+      ctx.fillRect(lane - 5, wallY - 5, size + 10, size + 10);
     }
-
-    // Враг наверху ползёт поперёк, но по своему коридору
-    drawTankArt(ctx, w - blk * 1.4, Math.round(h * 0.04), blk, 2, C.foe, C.foeDark);
   }
 
   /* Танк рисуем руками: корпус, гусеницы полосками, башня и ствол по

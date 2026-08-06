@@ -474,15 +474,18 @@
     return { move: best, score: bestVal, nodes: ctx.nodes };
   }
 
-  /* ── Превью на карточке ─────────────────────────────────────────────
-     Ходят по очереди: белый конь буквой «Г», потом чёрный слон по
-     диагонали, и обратно. Раньше фигура просто качалась на месте, что к
-     шахматам отношения не имело. */
+  /* ── Превью на карточке ───────────────────────────────────────────── */
+  /* Конь ходит к чёрным и остаётся стоять, потом ходит слон и тоже
+     остаётся, потом конь возвращается, потом слон. Никто не растворяется в
+     воздухе — за этим и следит таблица ниже: на каждом такте записано, где
+     стоят обе фигуры и кто из них сейчас идёт. */
+  var KN_HOME = [1, 7], KN_OUT = [2, 5];         // конь: дом и куда выходит
+  var BI_HOME = [2, 0], BI_OUT = [5, 3];         // слон: дом и куда выходит
   var THUMB_PLY = [
-    { piece: N,  from: [1, 7], to: [2, 5] },   // белый конь вперёд
-    { piece: -B, from: [2, 0], to: [5, 3] },   // чёрный слон по диагонали
-    { piece: N,  from: [2, 5], to: [1, 7] },   // конь обратно
-    { piece: -B, from: [5, 3], to: [2, 0] },   // слон обратно
+    { move: "kn", knight: [KN_HOME, KN_OUT], bishop: [BI_HOME, BI_HOME] },
+    { move: "bi", knight: [KN_OUT,  KN_OUT], bishop: [BI_HOME, BI_OUT] },
+    { move: "kn", knight: [KN_OUT,  KN_HOME], bishop: [BI_OUT,  BI_OUT] },
+    { move: "bi", knight: [KN_HOME, KN_HOME], bishop: [BI_OUT,  BI_HOME] },
   ];
 
   function thumb(ctx, w, h, t) {
@@ -497,29 +500,33 @@
       }
     }
 
-    var step = 1.4;
-    var idx = Math.floor(t / step) % THUMB_PLY.length;
-    var k = Math.min(1, (t % step) / (step * 0.62));
-    var ply = THUMB_PLY[idx];
+    var step = 1.6;
+    var ply = THUMB_PLY[Math.floor(t / step) % THUMB_PLY.length];
+    // Ход занимает две трети такта, оставшаяся треть — пауза на месте
+    var k = Math.min(1, (t % step) / (step * 0.66));
+    var e = 1 - Math.pow(1 - k, 3);
 
-    // Свита, которая просто стоит на доске для вида
+    function at(pair) {
+      return [pair[0][0] + (pair[1][0] - pair[0][0]) * e,
+              pair[0][1] + (pair[1][1] - pair[0][1]) * e];
+    }
+    var kn = at(ply.knight), bi = at(ply.bishop);
+
+    // Свита стоит на месте — просто чтобы доска не выглядела пустой
     var still = [[-R, 0, 0], [-K, 4, 0], [-P, 6, 1], [P, 3, 6], [K, 4, 7], [R, 7, 7]];
     still.forEach(function (p2) {
       drawPiece(ctx, p2[0], ox + p2[1] * cell + cell * 0.06,
                 oy + p2[2] * cell + cell * 0.06, cell * 0.88);
     });
 
-    // Подсветка клеток хода — как в самой игре
+    // Подсветка под той фигурой, которая сейчас идёт
+    var live = ply.move === "kn" ? ply.knight : ply.bishop;
     ctx.fillStyle = "rgba(255,216,74,.22)";
-    ctx.fillRect(ox + ply.from[0] * cell, oy + ply.from[1] * cell, cell, cell);
-    ctx.fillRect(ox + ply.to[0] * cell, oy + ply.to[1] * cell, cell, cell);
+    ctx.fillRect(ox + live[0][0] * cell, oy + live[0][1] * cell, cell, cell);
+    ctx.fillRect(ox + live[1][0] * cell, oy + live[1][1] * cell, cell, cell);
 
-    // Плавное скольжение с придержкой в конце
-    var e = k < 1 ? 1 - Math.pow(1 - k, 3) : 1;
-    var px = ply.from[0] + (ply.to[0] - ply.from[0]) * e;
-    var py = ply.from[1] + (ply.to[1] - ply.from[1]) * e;
-    drawPiece(ctx, ply.piece, ox + px * cell + cell * 0.06,
-              oy + py * cell + cell * 0.06, cell * 0.88);
+    drawPiece(ctx, N,  ox + kn[0] * cell + cell * 0.06, oy + kn[1] * cell + cell * 0.06, cell * 0.88);
+    drawPiece(ctx, -B, ox + bi[0] * cell + cell * 0.06, oy + bi[1] * cell + cell * 0.06, cell * 0.88);
   }
 
   /* ── Игра ────────────────────────────────────────────────────────────── */

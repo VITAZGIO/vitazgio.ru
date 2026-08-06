@@ -32,81 +32,120 @@
   /* Превью рисуем той же схемой, что и игру: два курятника по краям,
      четыре жёлоба, волк с корзиной посередине. Раньше тут были две палки
      и непохожий волк, а яйца катились мимо всего. */
+  /* Волка рисуем одной функцией и для игры, и для карточки в меню — иначе
+     на превью получается непохожий на себя зверь. k — масштаб, w — то, что
+     вернул wolfAt(): точка, где он стоит, сторона взгляда и место корзины. */
+  /* Жёлоб идёт от насеста к тому месту, где встанет корзина, если волк
+     займёт этот угол. Начало — край курятника, конец — сама корзина. */
+  function laneAt(i) {
+    var w = wolfAt(i);
+    return {
+      x0: i < 2 ? 116 : W - 116,
+      y0: i % 2 === 0 ? 104 : 176,
+      x1: w.bx, y1: w.y + 4,
+    };
+  }
+
+  function paintWolf(ctx, w, k) {
+    var x = w.x, y = w.y, s = w.side, bx = w.bx;
+    var R = function (dx, dy, dw, dh) {
+      ctx.fillRect(x + dx * k, y + dy * k, dw * k, dh * k);
+    };
+    var T = function (pts) {                      // треугольник (уши)
+      ctx.beginPath();
+      ctx.moveTo(x + pts[0] * k, y + pts[1] * k);
+      ctx.lineTo(x + pts[2] * k, y + pts[3] * k);
+      ctx.lineTo(x + pts[4] * k, y + pts[5] * k);
+      ctx.closePath(); ctx.fill();
+    };
+
+    ctx.fillStyle = C.wolfDark;
+    R(-13, 40, 10, 26); R(3, 40, 10, 26);         // ноги
+    R(-20, -4, 40, 48);                            // тень корпуса
+    ctx.fillStyle = C.wolf;
+    R(-17, -1, 34, 42);                            // корпус
+    ctx.beginPath(); ctx.arc(x, y - 20 * k, 17 * k, 0, 7); ctx.fill();   // голова
+    ctx.fillStyle = C.wolfDark;
+    T([-16, -30, -8, -42, -4, -30]);
+    T([4, -30, 8, -42, 16, -30]);
+    // Морда смотрит в сторону своего жёлоба. Прямоугольник рисуется от
+    // левого края, поэтому при взгляде влево его надо отодвинуть на всю
+    // ширину — иначе он уезжает внутрь головы и нос пропадает.
+    ctx.fillStyle = C.wolf;
+    R(s > 0 ? 14 : -26, -24, 12, 9);
+    ctx.fillStyle = "#1a1f28";
+    R(s > 0 ? 24 : -28, -23, 4, 4);                // нос
+    R(s * 4 - 2, -26, 4, 5);                       // глаз
+    // Корзина ровно там, где кончается жёлоб: те же числа, что у laneGeom
+    var b = (bx - x) / k;
+    ctx.fillStyle = "#5f4020";
+    R(b - 15, -6, 30, 20);
+    ctx.fillStyle = C.basket;
+    R(b - 13, -4, 26, 16);
+    ctx.fillStyle = "#7d5228";
+    for (var i = 0; i < 4; i++) R(b - 10 + i * 6, -4, 2, 16);
+    ctx.fillStyle = "rgba(255,255,255,.18)";
+    R(b - 13, -4, 26, 3);
+    ctx.fillStyle = C.wolf;                        // рука к корзине
+    R(s < 0 ? b + 10 : 14, 1, Math.abs(b) - 24, 8);
+  }
+
+  /* Превью — уменьшенная копия игрового экрана: те же курятники, те же
+     четыре жёлоба и тот же волк, нарисованный тем же кодом. */
   function thumb(ctx, w, h, t) {
     ctx.fillStyle = C.bg;
     ctx.fillRect(0, 0, w, h);
 
-    var cx = w / 2;
-    var coop = w * 0.17;                       // ширина курятника
-    var yTop = h * 0.26, yBot = h * 0.46;      // насесты
-    var wy = [h * 0.56, h * 0.74];             // два яруса, где стоит волк
-    var bdx = w * 0.13;                        // корзина в стороне от волка
-
-    // куда идёт каждый жёлоб: [сторона, ярус]
-    var lanes = [[-1, 0], [-1, 1], [1, 0], [1, 1]];
-    function geom(i) {
-      var l = lanes[i];
-      return { x0: l[0] < 0 ? coop : w - coop, y0: l[1] ? yBot : yTop,
-               x1: cx + l[0] * bdx, y1: wy[l[1]] };
-    }
+    var k = Math.min(w / W, h / H);                // вписываем поле в карточку
+    var ox = (w - W * k) / 2, oy = (h - H * k) / 2;
+    ctx.save();
+    ctx.translate(ox, oy);
+    ctx.scale(k, k);
 
     // курятники
-    [-1, 1].forEach(function (side) {
-      var x = side < 0 ? w * 0.03 : w - coop - w * 0.03;
+    [0, 1].forEach(function (side) {
+      var x = side ? W - 116 : 24;
       ctx.fillStyle = "#141d2a";
-      ctx.fillRect(x, h * 0.16, coop, h * 0.42);
-      ctx.strokeStyle = "#233246"; ctx.lineWidth = 1.5;
-      ctx.strokeRect(x + 0.5, h * 0.16 + 0.5, coop - 1, h * 0.42 - 1);
-      [yTop, yBot].forEach(function (cy) {
+      ctx.fillRect(x, 60, 92, 250);
+      ctx.strokeStyle = "#233246"; ctx.lineWidth = 2;
+      ctx.strokeRect(x + 1, 61, 90, 248);
+      [0, 1].forEach(function (r) {
+        var cy = 104 + r * 72;
         ctx.fillStyle = C.hen;
-        ctx.beginPath(); ctx.ellipse(x + coop / 2, cy, coop * 0.34, h * 0.035, 0, 0, 7);
-        ctx.fill();
+        ctx.beginPath(); ctx.ellipse(x + 46, cy, 25, 18, 0, 0, 7); ctx.fill();
+        ctx.beginPath(); ctx.arc(x + (side ? 26 : 66), cy - 14, 10, 0, 7); ctx.fill();
+        ctx.fillStyle = "#ff6b6b";
+        ctx.fillRect(x + (side ? 22 : 62), cy - 27, 8, 6);
+        ctx.fillStyle = "#1a1f28";
+        ctx.fillRect(x + (side ? 22 : 68), cy - 17, 3, 3);
       });
     });
 
-    // жёлоба
-    ctx.strokeStyle = C.chute; ctx.lineWidth = 4; ctx.lineCap = "round";
+    // Волк по очереди обходит все четыре угла, и яйцо катится ровно в тот
+    // жёлоб, под которым он стоит: превью показывает удачную ловлю.
+    var step = 1.5;
+    var spot = Math.floor(t / step) % 4;
+    var k2 = (t % step) / step;
+    var wolf = wolfAt(spot);
+
     for (var i = 0; i < 4; i++) {
-      var g = geom(i);
+      var g = laneAt(i);
+      ctx.strokeStyle = C.chute; ctx.lineWidth = 8; ctx.lineCap = "round";
       ctx.beginPath(); ctx.moveTo(g.x0, g.y0); ctx.lineTo(g.x1, g.y1); ctx.stroke();
+      ctx.strokeStyle = "#3d5570"; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(g.x0, g.y0 - 3); ctx.lineTo(g.x1, g.y1 - 3); ctx.stroke();
     }
     ctx.lineCap = "butt";
 
-    // Волк переходит по углам, и яйцо всегда катится в тот жёлоб, под
-    // которым он стоит: превью показывает удачную ловлю, а не промах.
-    var step = 1.5, n = Math.floor(t / step) % 4;
-    var k = (t % step) / step;
-    var g2 = geom(n);
-    var side = lanes[n][0], tier = lanes[n][1];
-
-    var ex = g2.x0 + (g2.x1 - g2.x0) * k, ey = g2.y0 + (g2.y1 - g2.y0) * k;
+    var g2 = laneAt(spot);
     ctx.fillStyle = C.egg;
-    ctx.beginPath(); ctx.ellipse(ex, ey, w * 0.017, w * 0.022, 0, 0, 7); ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(g2.x0 + (g2.x1 - g2.x0) * k2, g2.y0 + (g2.y1 - g2.y0) * k2,
+                8, 10, 0, 0, 7);
+    ctx.fill();
 
-    // волк
-    var x = cx, y = wy[tier];
-    ctx.fillStyle = C.wolfDark;
-    ctx.fillRect(x - w * 0.068, y - h * 0.012, w * 0.136, h * 0.155);
-    ctx.fillStyle = C.wolf;
-    ctx.fillRect(x - w * 0.058, y, w * 0.116, h * 0.13);
-    ctx.beginPath(); ctx.arc(x, y - h * 0.062, w * 0.058, 0, 7); ctx.fill();
-    ctx.fillStyle = C.wolfDark;                                  // уши
-    ctx.beginPath(); ctx.moveTo(x - w * 0.055, y - h * 0.092);
-    ctx.lineTo(x - w * 0.03, y - h * 0.132); ctx.lineTo(x - w * 0.01, y - h * 0.086);
-    ctx.closePath(); ctx.fill();
-    ctx.beginPath(); ctx.moveTo(x + w * 0.01, y - h * 0.086);
-    ctx.lineTo(x + w * 0.03, y - h * 0.132); ctx.lineTo(x + w * 0.055, y - h * 0.092);
-    ctx.closePath(); ctx.fill();
-    ctx.fillStyle = C.wolf;                                      // морда и нос
-    ctx.fillRect(side > 0 ? x + w * 0.044 : x - w * 0.086, y - h * 0.078, w * 0.042, h * 0.03);
-    ctx.fillStyle = "#1a1f28";
-    ctx.fillRect(side > 0 ? x + w * 0.076 : x - w * 0.09, y - h * 0.072, w * 0.014, h * 0.014);
-    ctx.fillRect(x + side * w * 0.018 - w * 0.007, y - h * 0.084, w * 0.014, h * 0.016);
-    // корзина под жёлобом
-    ctx.fillStyle = "#5f4020";
-    ctx.fillRect(x + side * bdx - w * 0.05, y - h * 0.018, w * 0.1, h * 0.062);
-    ctx.fillStyle = C.basket;
-    ctx.fillRect(x + side * bdx - w * 0.042, y - h * 0.01, w * 0.084, h * 0.05);
+    paintWolf(ctx, wolf, 1);
+    ctx.restore();
   }
 
   function start(root, api) {
@@ -154,17 +193,7 @@
     function rollTime() { return Math.max(1.05, 2.6 - score * 0.016); }
     function gap() { return Math.max(0.42, 1.5 - score * 0.012); }
 
-    /* Жёлоб идёт от насеста к тому месту, где стоит корзина, если волк
-       займёт этот угол. Начало — край курятника, конец — сама корзина. */
-    function laneGeom(i) {
-      var w = wolfAt(i);
-      var top = i % 2 === 0;
-      return {
-        x0: i < 2 ? 116 : W - 116,
-        y0: top ? 104 : 176,
-        x1: w.bx, y1: w.y + 4,
-      };
-    }
+    var laneGeom = laneAt;
 
     function step(dt) {
       if (shellT > 0) shellT -= dt;

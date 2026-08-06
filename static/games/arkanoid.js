@@ -78,56 +78,92 @@
     { id: "life",  color: "#ff6b9d", text: "+" },   // жизнь
   ];
 
-  /* Превью: честный отскок. Шарик летает между кирпичами и ракеткой, а
-     ракетка едет ему навстречу и подставляется под удар — раньше шарик
-     проходил сквозь неё, и превью выглядело сломанным. */
-  function thumb(ctx, w, h, t) {
-    ctx.fillStyle = "#05070d";
-    ctx.fillRect(0, 0, w, h);
+  /* Превью гоняет настоящую мини-игру, а не рисует красивую картинку:
+     шарик летит, отскакивает от бортов и ракетки и выбивает ровно тот
+     кирпич, в который попал. Раньше дырка появлялась в заранее выбранном
+     месте, и было видно, что шарик тут вообще ни при чём. */
+  var demo = null;
 
-    var padY = h - 24, padW = Math.round(w / 4), rad = 6;
-    var top = 74, bw = w / 9;
-
-    // Отскок считаем аналитически: путь вверх-вниз между top и padY —
-    // это «пила», её можно сложить из остатка по времени.
-    var period = 1.9;
-    var ph = (t % period) / period;
-    var span = padY - rad - top;
-    var y = ph < 0.5 ? padY - rad - (ph / 0.5) * span
-                     : top + ((ph - 0.5) / 0.5) * span;
-    // По горизонтали — такая же пила между бортами
-    var xper = 3.1, xph = (t % xper) / xper;
-    var xspan = w - rad * 2 - 16;
-    var x = xph < 0.5 ? 8 + rad + (xph / 0.5) * xspan
-                      : 8 + rad + xspan - ((xph - 0.5) / 0.5) * xspan;
-    // Ракетка всегда под шариком: она его и отбивает
-    var px = Math.max(padW / 2 + 8, Math.min(w - padW / 2 - 8, x));
-
-    var rows = 4;
+  function demoReset(w, h) {
+    var cols = 9, rows = 4;
+    var bw = w / cols, bh = 11, top = 14;
+    var bricks = [];
     for (var r = 0; r < rows; r++) {
-      for (var c = 0; c < 9; c++) {
-        // Ряд, до которого шарик уже добрался, выбит по центру
-        if (r === 0 && c === 4 && ph > 0.55) continue;
-        ctx.fillStyle = TINT[(r + c) % TINT.length];
-        ctx.globalAlpha = 0.92;
-        ctx.fillRect(c * bw + 2, 16 + r * 14, bw - 4, 10);
+      for (var c = 0; c < cols; c++) {
+        bricks.push({ x: c * bw + 2, y: top + r * (bh + 3),
+                      w: bw - 4, h: bh, c: TINT[(r + c) % TINT.length] });
       }
     }
-    ctx.globalAlpha = 1;
+    return {
+      w: w, h: h, bricks: bricks, t: 0,
+      padW: Math.round(w / 4), padX: w / 2, padY: h - 22,
+      x: w / 2, y: h - 60, vx: 74, vy: -96, r: 5,
+    };
+  }
 
-    ctx.fillStyle = "#131c29";
-    ctx.fillRect(0, 0, 8, h); ctx.fillRect(w - 8, 0, 8, h);
+  function thumb(ctx, w, h, t) {
+    if (!demo || demo.w !== w || demo.h !== h || t < demo.t) demo = demoReset(w, h);
+    // Идём фиксированным шагом от прошлого кадра: так отскоки честные и
+    // не зависят от того, с какой частотой браузер зовёт отрисовку.
+    var dt = Math.min(0.05, Math.max(0, t - demo.t));
+    demo.t = t;
+    var d = demo, steps = Math.ceil(dt / 0.008) || 1;
+    for (var i = 0; i < steps; i++) {
+      var s2 = dt / steps;
+      d.x += d.vx * s2;
+      d.y += d.vy * s2;
+      if (d.x - d.r < 0) { d.x = d.r; d.vx = Math.abs(d.vx); }
+      if (d.x + d.r > w) { d.x = w - d.r; d.vx = -Math.abs(d.vx); }
+      if (d.y - d.r < 0) { d.y = d.r; d.vy = Math.abs(d.vy); }
 
-    var grad = ctx.createLinearGradient(0, padY, 0, padY + 10);
+      // Ракетка едет к шарику и всегда успевает — она тут для вида
+      d.padX += (d.x - d.padX) * Math.min(1, s2 * 6);
+      d.padX = Math.max(d.padW / 2, Math.min(w - d.padW / 2, d.padX));
+      if (d.vy > 0 && d.y + d.r >= d.padY && d.y - d.r <= d.padY + 8 &&
+          d.x > d.padX - d.padW / 2 && d.x < d.padX + d.padW / 2) {
+        d.y = d.padY - d.r;
+        var off = (d.x - d.padX) / (d.padW / 2);
+        var sp = Math.sqrt(d.vx * d.vx + d.vy * d.vy);
+        var a = -Math.PI / 2 + off * 0.9;
+        d.vx = Math.cos(a) * sp; d.vy = Math.sin(a) * sp;
+      }
+      if (d.y - d.r > h) { demo = demoReset(w, h); return thumb(ctx, w, h, t); }
+
+      for (var b = 0; b < d.bricks.length; b++) {
+        var br = d.bricks[b];
+        if (d.x + d.r < br.x || d.x - d.r > br.x + br.w ||
+            d.y + d.r < br.y || d.y - d.r > br.y + br.h) continue;
+        // По какой грани попали: сравниваем перекрытия и отражаем по ней
+        var ox = Math.min(d.x + d.r - br.x, br.x + br.w - (d.x - d.r));
+        var oy = Math.min(d.y + d.r - br.y, br.y + br.h - (d.y - d.r));
+        if (ox < oy) d.vx = -d.vx; else d.vy = -d.vy;
+        d.bricks.splice(b, 1);
+        break;
+      }
+    }
+    if (!d.bricks.length) demo = demoReset(w, h);
+
+    ctx.fillStyle = "#05070d";
+    ctx.fillRect(0, 0, w, h);
+    d.bricks.forEach(function (br) {
+      ctx.fillStyle = br.c;
+      ctx.globalAlpha = 0.92;
+      ctx.fillRect(br.x, br.y, br.w, br.h);
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = "rgba(255,255,255,.25)";
+      ctx.fillRect(br.x, br.y, br.w, 2);
+    });
+
+    var grad = ctx.createLinearGradient(0, d.padY, 0, d.padY + 8);
     grad.addColorStop(0, "#7df9ff");
     grad.addColorStop(1, "#1a8fb0");
     ctx.fillStyle = grad;
-    ctx.fillRect(px - padW / 2, padY, padW, 10);
+    ctx.fillRect(d.padX - d.padW / 2, d.padY, d.padW, 8);
 
     ctx.fillStyle = "rgba(255,255,255,.22)";
-    ctx.beginPath(); ctx.arc(x, y, rad + 4, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.arc(d.x, d.y, d.r + 4, 0, 7); ctx.fill();
     ctx.fillStyle = "#fff";
-    ctx.beginPath(); ctx.arc(x, y, rad, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.arc(d.x, d.y, d.r, 0, 7); ctx.fill();
   }
 
   function start(root, api) {
