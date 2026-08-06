@@ -5963,7 +5963,7 @@ def home():
           display: flex;
           flex-direction: column;
           justify-content: center;
-          padding: clamp(32px, 6vw, 76px) 0 28px;
+          padding: clamp(32px, 6vw, 76px) 0 12px;
           overflow: hidden;
         }
 
@@ -6191,13 +6191,16 @@ def home():
         .service p { min-height: 44px; margin: 0 0 18px; color: var(--muted); line-height: 1.45; }
         .domain { color: var(--accent); font-size: .74rem; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }
 
+        /* Подпись прижата к самому левому нижнему углу окна. Раньше она
+           жила в общей колонке шириной 1380px и на широком мониторе
+           повисала в воздухе далеко от края — колонка-то по центру. */
         footer {
-          width: min(1380px, calc(100% - 40px));
+          width: 100%;
           display: flex;
-          justify-content: space-between;
+          justify-content: flex-start;
           gap: 20px;
-          margin: auto auto 0;
-          padding-top: 28px;
+          margin: auto 0 0;
+          padding: 28px 12px 0 clamp(12px, 1.4vw, 20px);
           color: #686f80;
           font-size: .82rem;
         }
@@ -6443,7 +6446,7 @@ def home():
           </div>
         </section>
 
-        <footer><span>Vitaz Gio · Основан 2:12 04.05.2026</span></footer>
+        <footer><span>@Vitaz Gio · Основан 2:12 04.05.2026</span></footer>
       </main>
       <div id="auth-modal" class="auth-modal" hidden>
         <div class="auth-backdrop" data-auth-close></div>
