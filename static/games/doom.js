@@ -2257,11 +2257,15 @@
         stick: {
           move: function (x, y) { stick.x = x; stick.y = y; },
         },
+        stickBig: true,
         actions: [
-          { icon: "door", aria: "открыть дверь", color: "#ffd84a", down: tryUse },
-          { icon: "fire", aria: "огонь", color: "#ff3b30", big: true,
+          { icon: "door", aria: "открыть дверь", color: "#ffd84a", big: true, down: tryUse },
+          { icon: "fire", aria: "огонь", color: "#ff3b30", huge: true,
             down: function () { firing = true; }, up: function () { firing = false; } },
         ],
+        // Ствол, карта и заново — к правому краю, как в тетрисе: жмут их
+        // редко, а место под ручкой освобождают заметно.
+        extraRight: true,
         extra: [
           { icon: "gun", label: "Ствол", down: function () {
             // Перебираем только то, что уже подобрано.

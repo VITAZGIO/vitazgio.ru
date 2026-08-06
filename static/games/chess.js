@@ -764,7 +764,10 @@
     document.addEventListener("keydown", onKey);
 
     function buildDeck() {
+      // Шахматам крестовина и большая круглая кнопка не нужны: в них тыкают
+      // по доске. Поэтому панель узкая — только две одинаковые плашки.
       api.deck({
+        slim: true,
         extra: [
           { label: "УРОВЕНЬ: " + LEVELS[level], aria: "сменить уровень",
             down: function () {
@@ -773,10 +776,7 @@
               buildDeck();
               hud_();
             } },
-        ],
-        actions: [
-          { icon: "replay", aria: "новая партия", label: "ЗАНОВО", color: "#ff3fa4",
-            big: true, down: reset },
+          { icon: "replay", label: "ЗАНОВО", aria: "новая партия", down: reset },
         ],
       });
     }

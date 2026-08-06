@@ -671,6 +671,10 @@
         { icon: "drop", aria: "сбросить", color: "#ff3fa4", big: true,
           down: function () { actionDown("drop"); } },
       ],
+      padBig: true,
+      // Карман, пауза и заново — к правому краю: они нужны редко, а место
+      // под крестовиной освобождают заметно.
+      extraRight: true,
       extra: [
         { icon: "hold", label: "Карман", down: function () { actionDown("hold"); } },
         { icon: "pause", label: "Пауза", down: function () { actionDown("pause"); } },

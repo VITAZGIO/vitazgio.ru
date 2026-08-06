@@ -173,12 +173,14 @@
     var raf = 0, last = 0;
 
     var spot, eggs, broken, score, alive, saved, spawnT, shellT, flashT, pardons;
+    var paused = false;
     var startedAt = 0, finalScore = 0, finalMult = 1;
 
     function reset() {
       spot = 1;                    // 0 лево-верх, 1 лево-низ, 2 право-верх, 3 право-низ
       eggs = []; broken = 0; score = 0; alive = true; saved = false;
       startedAt = performance.now(); finalScore = 0; finalMult = 1;
+      paused = false;
       spawnT = 1.2; shellT = 0; flashT = 0; pardons = 0;
       hud_();
     }
@@ -317,6 +319,15 @@
         ctx.closePath(); ctx.fill();
       }
 
+      if (alive && paused) {
+        ctx.fillStyle = "rgba(8,13,20,.72)";
+        ctx.fillRect(0, H / 2 - 30, W, 60);
+        ctx.textAlign = "center";
+        ctx.fillStyle = "#ffd84a";
+        ctx.font = 'bold 26px "Cascadia Code", Consolas, monospace';
+        ctx.fillText("ПАУЗА", W / 2, H / 2 + 9);
+        ctx.textAlign = "left";
+      }
       if (!alive) {
         ctx.fillStyle = "rgba(8,13,20,.86)";
         ctx.fillRect(0, H / 2 - 58, W, 116);
@@ -384,7 +395,7 @@
       raf = requestAnimationFrame(loop);
       var dt = Math.min(0.05, (now - last) / 1000);
       last = now;
-      if (alive) step(dt);
+      if (alive && !paused) step(dt);
       else if (!saved) {
         saved = true;
         var t = api.tempo(score, (performance.now() - startedAt) / 1000, 30);
@@ -398,8 +409,9 @@
     function go(i) { if (alive) spot = i; }
 
     function onKey(e) {
-      if (e.key === "Enter" || e.key === " ") {
-        if (!alive) reset();
+      if (e.key === "Enter") { if (!alive) reset(); e.preventDefault(); return; }
+      if (e.key === " ") {
+        if (alive) paused = !paused; else reset();
         e.preventDefault(); return;
       }
       // Крестовина ложится на четыре угла естественно: верх-низ выбирают
@@ -420,7 +432,9 @@
         right: function () { go(spot % 2 === 0 ? 2 : 3); },
       },
       padBig: true,
-      side: [
+      corners: [
+        { icon: "pause", aria: "пауза",
+          down: function () { if (alive) paused = !paused; } },
         { icon: "replay", aria: "заново", down: reset },
       ],
     });

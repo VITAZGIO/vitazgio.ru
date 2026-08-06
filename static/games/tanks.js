@@ -597,7 +597,7 @@
         { icon: "fire", aria: "огонь", label: "ОГОНЬ", color: "#ff3fa4", big: true,
           down: function () { if (alive && !paused) fire(me); else restart(); } },
       ],
-      side: [
+      corners: [
         { icon: "pause", aria: "пауза", down: function () { if (alive) paused = !paused; } },
         { icon: "replay", aria: "заново", down: restart },
       ],

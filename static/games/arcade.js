@@ -481,8 +481,13 @@ window.VitazArcade = (function () {
       ".brow.p1 .pos{color:#ffd84a;font-size:.92rem;text-shadow:0 0 8px rgba(255,216,74,.55)}",
       ".brow.p2 .pos{color:#dfe8f2;font-size:.86rem;text-shadow:0 0 7px rgba(223,232,242,.4)}",
       ".brow.p3 .pos{color:#e0913f;font-size:.82rem;text-shadow:0 0 7px rgba(224,145,63,.45)}",
-      ".brow .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
-      ".brow .vl{flex:none;color:#eaf6ff;font-variant-numeric:tabular-nums}",
+      /* Имя и очки стоят вплотную: раньше очки прижимались к правому краю,
+         и между «Вася» и «1488» зияла половина колонки. */
+      ".brow .nm{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;",
+      "white-space:nowrap}",
+      ".brow .dash{flex:none;color:#3d5265}",
+      ".brow .vl{flex:1 1 auto;min-width:0;color:#eaf6ff;font-variant-numeric:tabular-nums;",
+      "overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
       ".brow.mine .nm{color:#63f5ad}",
       ".brow .del{flex:none;width:19px;height:19px;display:grid;place-items:center;padding:0;",
       "border:1px solid rgba(255,63,164,.45);background:rgba(255,63,164,.12);color:#ff8ac4;",
@@ -539,9 +544,22 @@ window.VitazArcade = (function () {
       "background:#14181d;transform:rotate(38deg);border-radius:1px}",
 
       ".deck-row{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}",
-      ".deck-main{display:flex;gap:12px;align-items:center;justify-content:space-between}",
-      ".deck-actions{display:flex;gap:12px;align-items:center;flex-wrap:wrap;",
-      "justify-content:flex-end;flex:1}",
+      ".deck-row.to-right{justify-content:flex-end}",
+      /* Сетка «угол — центр — угол». Высота одна на все игры, чтобы экран
+         не прыгал при переходе между ними. */
+      ".deck-main{display:grid;grid-template-columns:54px minmax(0,1fr) 54px;gap:10px;",
+      "align-items:center;min-height:clamp(178px,27vh,214px)}",
+      ".deck-main.slim{grid-template-columns:minmax(0,1fr);min-height:0}",
+      ".deck-main.no-corners{grid-template-columns:minmax(0,1fr)}",
+      ".deck-corner{display:flex;flex-direction:column;gap:8px;align-items:center;",
+      "justify-content:center}",
+      /* Мелочь по углам: вдвое меньше прочих кнопок и подальше от крестовины */
+      ".deck-corner .dbtn{width:48px;height:38px;min-width:0;min-height:0;border-radius:7px}",
+      ".deck-corner .dbtn svg{width:17px;height:17px}",
+      ".deck-center{display:flex;gap:16px;align-items:center;justify-content:center;",
+      "flex-wrap:nowrap;min-width:0}",
+      ".deck-actions{display:flex;gap:10px;align-items:center;flex-wrap:nowrap;",
+      "justify-content:center}",
 
       /* крестовина — цельная деталь, кнопки лежат прозрачными накладками */
       /* аналоговая ручка: основание с насечкой и шляпка, которая ходит за пальцем */
@@ -562,15 +580,31 @@ window.VitazArcade = (function () {
       ".deck-stick.on .stick-knob{transition:none;",
       "box-shadow:0 3px 7px rgba(0,0,0,.6),inset 0 -3px 7px rgba(0,0,0,.45),",
       "inset 0 2px 5px rgba(255,255,255,.35),0 0 0 2px rgba(45,226,255,.35)}",
-      /* раскладка «крестовина по центру, мелочь по краям» — для змейки */
-      ".deck-main.center{justify-content:center;gap:14px}",
-      ".deck-side{display:flex;flex-direction:column;gap:8px;flex:none}",
-      ".deck-side .dbtn{min-width:60px;min-height:42px;font-size:.58rem}",
-      ".deck-pad.big{width:190px;height:190px}",
-      "@media (max-width:430px){.deck-stick{width:132px;height:132px}",
-      ".stick-knob{width:56px;height:56px;margin:-28px 0 0 -28px}",
-      ".deck-pad.big{width:168px;height:168px}",
-      ".deck-side .dbtn{min-width:54px;min-height:38px}}",
+      ".dbtn.huge{width:112px;height:112px;font-size:.6rem}",
+      ".dbtn.huge svg{width:44px;height:44px}",
+      /* Широкие кнопки в узкой полосе — одинаковые прямоугольники */
+      ".deck-row .dbtn.wide{flex:1 1 0;min-width:120px;max-width:260px;height:44px}",
+      ".deck-pad.big{width:186px;height:186px}",
+      ".deck-stick.big{width:180px;height:180px}",
+      ".deck-stick.big .stick-knob{width:76px;height:76px;margin:-38px 0 0 -38px}",
+      /* На телефоне всё ужимаем так, чтобы ряд помещался в одну строку:
+         перенос кнопок вниз раздувал панель вдвое против других игр. */
+      "@media (max-width:430px){.deck-stick{width:126px;height:126px}",
+      ".deck-row .dbtn.wide{min-width:0;padding:0 6px;height:38px;min-height:38px;font-size:.55rem}",
+      ".deck-row .dbtn.wide svg{width:16px;height:16px}",
+      ".dbtn.round{width:54px;height:54px}",
+      ".dbtn.round.mid{width:58px;height:58px}",
+      ".dbtn.round.big{width:66px;height:66px}",
+      ".dbtn.huge{width:84px;height:84px}",
+      ".dbtn.huge svg{width:34px;height:34px}",
+      ".stick-knob{width:54px;height:54px;margin:-27px 0 0 -27px}",
+      ".deck-stick.big{width:150px;height:150px}",
+      ".deck-stick.big .stick-knob{width:64px;height:64px;margin:-32px 0 0 -32px}",
+      ".deck-pad{width:132px;height:132px}",
+      ".deck-pad.big{width:146px;height:146px}",
+      ".deck-main{grid-template-columns:46px minmax(0,1fr) 46px;gap:6px}",
+      ".deck-corner .dbtn{width:42px;height:34px}",
+      ".deck-center{gap:10px}}",
       ".deck-pad{position:relative;width:148px;height:148px;flex:none}",
       ".deck-pad::before{content:'';position:absolute;inset:0;",
       "background:linear-gradient(160deg,#464f5b,#262d36 46%,#171c22);",
@@ -731,6 +765,7 @@ window.VitazArcade = (function () {
     var b = document.createElement("button");
     b.type = "button";
     b.className = "dbtn" + (cfg.round ? " round" : "") + (cfg.big ? " big" : "") +
+                  (cfg.huge ? " huge" : "") +
                   (cfg.mid ? " mid" : "") +
                   (cfg.wide ? " wide" : "") + (cfg.arrow ? " arrow" : "") +
                   (cfg.className ? " " + cfg.className : "");
@@ -799,9 +834,9 @@ window.VitazArcade = (function () {
   /* ── Аналоговый джойстик ──────────────────────────────────────────────
      Как ручка на корпусе автомата: наклон в любую сторону, а не четыре
      фиксированных направления. Возвращает игре пару -1..1. */
-  function makeStick(cfg) {
+  function makeStick(cfg, big) {
     var base = document.createElement("div");
-    base.className = "deck-stick";
+    base.className = "deck-stick" + (big ? " big" : "");
     base.innerHTML = '<div class="stick-ring"></div><div class="stick-knob"></div>';
     var knob = base.querySelector(".stick-knob");
 
@@ -930,38 +965,57 @@ window.VitazArcade = (function () {
   /* Раскладка панели для конкретной игры.
      spec = { pad: {up,down,left,right}, actions: [...], extra: [...] }
      Каждая кнопка: { label, color, down, up, round, big, wide, repeat } */
+  /* Панель управления. Раскладка у всех игр одна, чтобы палец не искал
+     кнопку заново в каждой игре:
+
+       [верхний ряд широких кнопок]        — необязательный
+       [угол] [ крестовина/ручка + действие ] [угол]
+
+     Углы — мелкие кнопки вроде паузы и рестарта. Они нарочно прижаты к
+     самым краям и вдвое меньше прочих: раньше стояли вплотную к
+     крестовине, и «заново» жалось случайно посреди партии.
+     Высота панели фиксирована, поэтому при переходе между играми экран
+     не прыгает. */
   function deck(spec) {
     if (!deckInner) return;
     releaseAllControls();
     deckInner.innerHTML = "";
     spec = spec || {};
+    var slim = !!spec.slim;
 
     if (spec.extra && spec.extra.length) {
       var extraRow = document.createElement("div");
-      extraRow.className = "deck-row";
+      extraRow.className = "deck-row" + (spec.extraRight ? " to-right" : "");
       spec.extra.forEach(function (cfg) {
         extraRow.appendChild(makeButton(Object.assign({ wide: true }, cfg)));
       });
       deckInner.appendChild(extraRow);
     }
 
-    if (spec.pad || spec.stick || spec.side || (spec.actions && spec.actions.length)) {
+    if (spec.pad || spec.stick || (spec.actions && spec.actions.length) ||
+        spec.corners || spec.side) {
       var main = document.createElement("div");
-      main.className = "deck-main";
+      main.className = "deck-main" + (slim ? " slim" : "");
 
-      if (spec.stick) {
-        main.appendChild(makeStick(spec.stick));
+      // Углы держим всегда, даже пустыми: иначе центр съезжает вбок,
+      // когда у игры одна угловая кнопка вместо двух.
+      var corners = spec.corners || spec.side || [];
+      // Колонки под углы занимают место, даже когда пустые. Если игре они
+      // не нужны — не резервируем, иначе центру не хватает ширины и
+      // крестовина с кнопками вылезает за край экрана.
+      var hasCorners = !slim && (corners[0] || corners[1]);
+      if (!hasCorners) main.classList.add("no-corners");
+      function corner(cfg) {
+        var col = document.createElement("div");
+        col.className = "deck-corner";
+        if (cfg) col.appendChild(makeButton(cfg));
+        return col;
       }
+      if (hasCorners) main.appendChild(corner(corners[0]));
 
-      if (spec.side && spec.side.length) main.classList.add("center");
-      if (spec.side) {
-        var leftCol = document.createElement("div");
-        leftCol.className = "deck-side";
-        spec.side.slice(0, Math.ceil(spec.side.length / 2)).forEach(function (cfg) {
-          leftCol.appendChild(makeButton(cfg));
-        });
-        main.appendChild(leftCol);
-      }
+      var center = document.createElement("div");
+      center.className = "deck-center";
+      if (spec.stick) center.appendChild(makeStick(spec.stick, spec.stickBig));
 
       if (spec.pad) {
         var pad = document.createElement("div");
@@ -977,24 +1031,19 @@ window.VitazArcade = (function () {
           btn.classList.add("pad-" + dir);
           pad.appendChild(btn);
         });
-        main.appendChild(pad);
+        center.appendChild(pad);
       }
 
-      if (spec.side) {
-        var rightCol = document.createElement("div");
-        rightCol.className = "deck-side";
-        spec.side.slice(Math.ceil(spec.side.length / 2)).forEach(function (cfg) {
-          rightCol.appendChild(makeButton(cfg));
+      if (spec.actions && spec.actions.length) {
+        var actions = document.createElement("div");
+        actions.className = "deck-actions";
+        spec.actions.forEach(function (cfg) {
+          actions.appendChild(makeButton(Object.assign({ round: true }, cfg)));
         });
-        main.appendChild(rightCol);
+        center.appendChild(actions);
       }
-
-      var actions = document.createElement("div");
-      actions.className = "deck-actions";
-      (spec.actions || []).forEach(function (cfg) {
-        actions.appendChild(makeButton(Object.assign({ round: true }, cfg)));
-      });
-      main.appendChild(actions);
+      main.appendChild(center);
+      if (hasCorners) main.appendChild(corner(corners[1]));
       deckInner.appendChild(main);
     }
 
@@ -1061,6 +1110,7 @@ window.VitazArcade = (function () {
               (mine && r.name === mine ? " mine" : "") + '">' +
               '<span class="pos">' + romanPlace(i + 1) + '</span>' +
               '<span class="nm">' + escapeHtml(r.name) + '</span>' +
+              '<span class="dash">—</span>' +
               '<span class="vl">' + escapeHtml(formatValue(game.id, r.value)) + '</span>' +
               (board.admin ? '<button class="del" type="button" data-game="' + game.id +
                 '" data-id="' + escapeHtml(r.id) + '" aria-label="Удалить">×</button>' : "") +

@@ -477,8 +477,13 @@
       },
       padBig: true,
       actions: [
-        { icon: "replay", aria: "крутить", label: "", color: "#ff3fa4", big: true,
+        { icon: "replay", aria: "крутить", label: "КРУТИТЬ", color: "#ff3fa4", big: true,
           down: spin },
+      ],
+      corners: [
+        null,
+        { icon: "replay", aria: "сбросить серию",
+          down: function () { streak = 0; points = 0; history = []; phase = "idle"; } },
       ],
     });
 

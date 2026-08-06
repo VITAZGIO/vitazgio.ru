@@ -192,7 +192,7 @@
 
     var bricks, balls, drops, sparks;
     var padX, padW, level, score, lives, alive, stuck, saved;
-    var slowT, wideT, held = 0, aimT = 0;
+    var slowT, wideT, held = 0, aimT = 0, paused = false;
     var startedAt = 0, finalScore = 0, finalMult = 1;
 
     function buildLevel(n) {
@@ -226,6 +226,7 @@
       if (full) {
         level = 0; score = 0; lives = 3;
         startedAt = performance.now(); finalScore = 0; finalMult = 1;
+        paused = false;
       }
       padW = 78; padX = W / 2;
       slowT = 0; wideT = 0;
@@ -487,6 +488,15 @@
         ctx.textAlign = "left";
       }
 
+      if (alive && paused) {
+        ctx.fillStyle = "rgba(4,7,13,.72)";
+        ctx.fillRect(0, H / 2 - 30, W, 60);
+        ctx.textAlign = "center";
+        ctx.fillStyle = "#ffd84a";
+        ctx.font = 'bold 26px "Cascadia Code", Consolas, monospace';
+        ctx.fillText("ПАУЗА", W / 2, H / 2 + 9);
+        ctx.textAlign = "left";
+      }
       if (!alive) {
         ctx.fillStyle = "rgba(4,7,13,.85)";
         ctx.fillRect(0, H / 2 - 60, W, 120);
@@ -509,8 +519,8 @@
       raf = requestAnimationFrame(loop);
       var dt = Math.min(0.04, (now - last) / 1000);
       last = now;
-      if (alive) step(dt);
-      else if (!saved) {
+      if (alive && !paused) step(dt);
+      else if (!alive && !saved) {
         saved = true;
         var t = api.tempo(score, (performance.now() - startedAt) / 1000, 600);
         finalScore = t.total; finalMult = t.mult;
@@ -522,6 +532,10 @@
 
     function onKey(e) {
       if (e.key === "Enter") { if (!alive) reset(true); e.preventDefault(); return; }
+      if (e.key === "p" || e.key === "P" || e.key === "з" || e.key === "З") {
+        if (alive) paused = !paused;
+        e.preventDefault(); return;
+      }
       if (e.key === " ") { launch(); e.preventDefault(); return; }
       if (e.key === "ArrowLeft") { held = -1; e.preventDefault(); }
       if (e.key === "ArrowRight") { held = 1; e.preventDefault(); }
@@ -555,7 +569,9 @@
       actions: [
         { icon: "fire", aria: "пуск", label: "ПУСК", color: "#ff3fa4", big: true, down: launch },
       ],
-      side: [
+      corners: [
+        { icon: "pause", aria: "пауза",
+          down: function () { if (alive) paused = !paused; } },
         { icon: "replay", aria: "заново", down: function () { reset(true); } },
       ],
     });
