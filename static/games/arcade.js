@@ -193,6 +193,18 @@ window.VitazArcade = (function () {
 
   function boardTop(game) { return board.scores[game] || []; }
 
+  /* Лучший результат числом — то, что игры показывают в строке «РЕКОРД».
+     Раньше туда отдавался массив строк таблицы, и в HUD выводилась пустота:
+     `[] || 0` — это массив, а он при склейке со строкой превращается в "". */
+  function boardBest(game) {
+    var rows = boardTop(game);
+    if (!rows.length) return 0;
+    var meta = board.games[game] || {};
+    var vals = rows.map(function (r) { return r.value; });
+    return meta.order === "min" ? Math.min.apply(null, vals)
+                                : Math.max.apply(null, vals);
+  }
+
   // Место, на которое встал бы результат: 0 — первое, -1 — мимо таблицы.
   function boardPlace(game, value) {
     var meta = board.games[game];
@@ -204,6 +216,14 @@ window.VitazArcade = (function () {
       if (better(value, rows[i].value)) return i;
     }
     return rows.length < 3 ? rows.length : -1;
+  }
+
+  /* Места в таблице — римскими: I, II, III. Дальше третьего таблица не
+     показывает, но на всякий случай считаем до десяти, а потом переходим
+     на обычные цифры — «VIII» в колонке шириной в два знака не поместится. */
+  var ROMAN = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"];
+  function romanPlace(n) {
+    return ROMAN[n - 1] || String(n);
   }
 
   function formatValue(game, value) {
@@ -431,7 +451,8 @@ window.VitazArcade = (function () {
       ".bcol h4{margin:0 0 5px;font-size:.64rem;letter-spacing:.16em;color:var(--ac,#8fa5b8);",
       "text-transform:uppercase;font-weight:700}",
       ".brow{display:flex;align-items:center;gap:7px;font-size:.7rem;line-height:1.75;color:#a9c2d4}",
-      ".brow .pos{width:16px;flex:none;color:#4a6379;font-weight:800;text-align:center}",
+      ".brow .pos{width:26px;flex:none;color:#4a6379;font-weight:800;text-align:center;",
+      "letter-spacing:-.04em}",
       /* Первые три места — обычными арабскими цифрами, но в цвет медали:
          золото, серебро, бронза. Со свечением, чтобы читалось сразу. */
       ".brow.p1 .pos{color:#ffd84a;font-size:.92rem;text-shadow:0 0 8px rgba(255,216,74,.55)}",
@@ -1015,7 +1036,7 @@ window.VitazArcade = (function () {
         ? rows.map(function (r, i) {
             return '<div class="brow p' + (i + 1) +
               (mine && r.name === mine ? " mine" : "") + '">' +
-              '<span class="pos">' + (i + 1) + '</span>' +
+              '<span class="pos">' + romanPlace(i + 1) + '</span>' +
               '<span class="nm">' + escapeHtml(r.name) + '</span>' +
               '<span class="vl">' + escapeHtml(formatValue(game.id, r.value)) + '</span>' +
               (board.admin ? '<button class="del" type="button" data-game="' + game.id +
@@ -1158,7 +1179,8 @@ window.VitazArcade = (function () {
       audio: audio,
       best: best,
       record: record,          // рекорд на сервер, с вопросом об имени
-      top: boardTop,
+      top: boardBest,          // число для строки «РЕКОРД»
+      topRows: boardTop,       // сами строки таблицы, если понадобятся
       exit: showMenu,
       font: FONT,
       touch: TOUCH,

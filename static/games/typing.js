@@ -74,10 +74,26 @@
      режима, так что каждый добавленный абзац сам попадает и туда. */
   function bank() { return window.VitazTypingTexts || { ru: [], en: [] }; }
 
+  /* Уровень считаем по числу слов, а не проставляем руками: подправил
+     текст — уровень пересчитался сам и не разъехался с содержимым. */
+  var LEVEL_STEPS = [60, 100, 170, 260];
+  function levelOf(text) {
+    var words = text.trim().split(/\s+/).length;
+    for (var i = 0; i < LEVEL_STEPS.length; i++) {
+      if (words < LEVEL_STEPS[i]) return i + 1;
+    }
+    return 5;
+  }
+
+  // В рейтинг идут только третий уровень и выше: на тридцати словах
+  // скорость держится на удаче, а не на навыке.
+  var RANK_FROM = 3;
+
   /* Приводим текст к тому, что реально набирается с клавиатуры: длинные тире,
      «ёлочки» и многоточие одной клавишей не наберёшь. */
   function normalize(s) {
-    return s.replace(/[—–]/g, "-")
+    return s.replace(/ё/g, "е").replace(/Ё/g, "Е")   // «ё» на письме почти никто не ставит
+            .replace(/[—–]/g, "-")
             .replace(/[«»“”„]/g, '"')
             .replace(/[‘’]/g, "'")
             .replace(/…/g, "...")
@@ -106,7 +122,7 @@
   function sentencePool(lang) {
     var out = [];
     (bank()[lang] || []).forEach(function (t) {
-      if (!t.rank) return;
+      if (levelOf(normalize(t.body)) < RANK_FROM) return;
       splitSentences(normalize(t.body)).forEach(function (one) {
         if (one.length >= 24 && one.length <= 210) out.push(one);
       });
@@ -165,7 +181,7 @@
   /* ── Игра ────────────────────────────────────────────────────────────── */
   function start(root, api) {
     var lang = "ru";
-    var textIndex = 8;
+    var textIndex = 0;
     var showKb = true;
     var shiftOn = false;
 
@@ -231,6 +247,12 @@
       ".tp-done s{display:block;color:#63f5ad;font-size:1.05rem;text-decoration:none;",
       "margin-bottom:4px}",
       ".tp-warn{flex:none;color:#ffb35c;font:700 .7rem " + api.font + ";letter-spacing:.06em}",
+      ".tp-top{margin-top:8px;padding:8px 16px;font:800 .74rem " + api.font + ";",
+      "letter-spacing:.08em;color:#04060b;border:0;background:#63f5ad;cursor:pointer}",
+      ".tp-top:disabled{opacity:.6;cursor:default}",
+      ".tp-tick .tp-stats b{animation:tpTick .45s ease-out}",
+      "@keyframes tpTick{0%{color:#ffd84a;text-shadow:0 0 10px rgba(255,216,74,.8)}",
+      "100%{color:inherit;text-shadow:none}}",
     ].join("");
 
     var wrap = document.createElement("div");
@@ -361,13 +383,25 @@
     /* ── Текст ───────────────────────────────────────────────────────── */
     function fillPicker() {
       var list = bank()[lang] || [];
+      // Сортируем по уровню: сначала короткие разминки, дальше длинные тексты
+      var order = list.map(function (t, i) {
+        return { i: i, lvl: levelOf(normalize(t.body)), title: t.title };
+      }).sort(function (a, b) { return a.lvl - b.lvl || a.i - b.i; });
       elPick.innerHTML =
-        '<option value="endless">∞ Вечный режим - случайные предложения</option>' +
-        list.map(function (t, i) {
-          return '<option value="' + i + '">' + escapeHtml(t.title) +
-                 (t.rank ? " ★" : "") + "</option>";
+        '<option value="endless">Ур. 0 · Вечный режим</option>' +
+        order.map(function (o) {
+          return '<option value="' + o.i + '">Ур. ' + o.lvl + " · " +
+                 escapeHtml(o.title) + (o.lvl >= RANK_FROM ? " ★" : "") + "</option>";
         }).join("");
       elPick.value = endless ? "endless" : String(textIndex);
+    }
+
+    // Идёт ли текущий забег в рейтинг
+    function ranked() {
+      if (endless) return done >= 300;
+      var list = bank()[lang] || [];
+      var item = list[textIndex];
+      return !!item && levelOf(normalize(item.body)) >= RANK_FROM;
     }
 
     /* Дописываем в конец буфера случайные предложения, пока впереди не
@@ -453,29 +487,45 @@
       if (finishedAt || !startedAt) return;
       finishedAt = performance.now();
       paintStats();
-      var list = bank()[lang] || [];
-      // В вечном режиме рейтинг открывается после трёхсот знаков: на меньшем
-      // отрезке цифра держится на удаче, а не на навыке.
-      var item = endless ? { rank: done >= 300 } : (list[textIndex] || {});
       var speed = netCpm();
+      var canRank = ranked();
       api.audio.tone(660, 0.12, { type: "square", volume: 0.12 });
       setTimeout(function () { api.audio.tone(990, 0.2, { type: "square", volume: 0.1 }); }, 130);
       api.buzz([40, 50, 90]);
 
       var acc = strokes ? Math.round((strokes - errors) / strokes * 100) : 100;
+      var best = api.top ? (api.top("typing") || 0) : 0;
+      var beat = canRank && speed > best;
+
       elDone.hidden = false;
       elDone.innerHTML =
         "<s>" + (endless ? "ОСТАНОВЛЕНО - " : "ГОТОВО - ") + speed + " зн/мин чистыми</s>" +
         "знаков: " + done + " &middot; ошибок: " + errors +
-        " &middot; точность: " + acc + "%<br>" +
-        (item.rank
-          ? "результат уходит в общий рейтинг"
+        " &middot; точность: " + acc + "%" +
+        (beat ? '<br><b style="color:#ffd84a">Рекорд побит! Прежний - ' + best +
+                " зн/мин</b>" : "") +
+        "<br>" +
+        (canRank
+          ? '<button class="tp-top" type="button">ДОБАВИТЬ В ТОП</button>'
           : (endless
               ? "для рейтинга в вечном режиме нужно набрать хотя бы 300 знаков"
-              : "разминка в рейтинг не идёт - выбери текст со звёздочкой"));
-      if (item.rank && speed > 0 && api.record) {
-        api.best("typing", speed);
-        api.record("typing", speed);
+              : "в рейтинг идут тексты с 3-го уровня - они со звёздочкой"));
+
+      if (canRank && speed > 0) api.best("typing", speed);
+      var send = elDone.querySelector(".tp-top");
+      if (send) {
+        // Отправляем только по кнопке. Тихая отправка сбивала: человек не
+        // понимал, попал он в таблицу или нет.
+        send.addEventListener("click", function () {
+          send.disabled = true;
+          send.textContent = "ОТПРАВЛЯЮ…";
+          Promise.resolve(api.record("typing", speed)).then(function () {
+            send.textContent = "ОТПРАВЛЕНО";
+          }).catch(function () {
+            send.disabled = false;
+            send.textContent = "НЕ ВЫШЛО, ЕЩЁ РАЗ";
+          });
+        });
       }
     }
 
@@ -489,7 +539,17 @@
         done++;
         wrongAt = -1;
         api.audio.tone(1100, 0.02, { type: "square", volume: 0.04 });
-        if (endless) { trimBuffer(); refill(); }
+        if (endless) {
+          trimBuffer(); refill();
+          // Слово дописано — сразу пересчитываем и коротко подсвечиваем
+          // цифры, чтобы было видно, что они обновились.
+          if (ch === " ") {
+            paintStats();
+            wrap.classList.remove("tp-tick");
+            void wrap.offsetWidth;               // перезапуск анимации
+            wrap.classList.add("tp-tick");
+          }
+        }
         else if (pos >= text.length) { paintText(); paintKeyboard(); finish(); return; }
       } else {
         errors++;
@@ -529,7 +589,7 @@
     wrap.querySelectorAll("[data-lang]").forEach(function (b) {
       b.addEventListener("click", function () {
         lang = b.dataset.lang;
-        textIndex = lang === "ru" ? 8 : 1;
+        textIndex = 0;
         wrap.querySelectorAll("[data-lang]").forEach(function (o) {
           o.classList.toggle("on", o.dataset.lang === lang);
         });
@@ -572,9 +632,11 @@
   window.VitazArcade.register({
     id: "typing",
     title: "ПЕЧАТЬ",
-    tagline: "Тренажёр слепой печати: русский и английский, экранная клавиатура " +
-             "с разбивкой по пальцам, скорость, ошибки и точность.",
-    keys: "Просто печатай · пока не попал в нужную клавишу, текст не двинется",
+    tagline: "Тренажёр слепой печати: пять уровней длины от разминки до текста " +
+             "на три сотни слов плюс вечный режим. Русский и английский, экранная " +
+             "клавиатура с разбивкой по пальцам, скорость, ошибки и точность.",
+    keys: "Просто печатай · пока не попал в нужную клавишу, текст не двинется · " +
+          "Ур. 0 — вечный режим, цифры обновляются на каждом слове",
     keysTouch: "Печатай по экранной клавиатуре",
     accent: "#63f5ad",
     thumb: thumb,
