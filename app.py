@@ -1782,17 +1782,33 @@ def drop_thumb(item_id):
     return response
 
 
-def _drop_send(item_id, item):
-    """Отдаём всегда вложением: иначе загруженный .html или .svg со скриптом
-    выполнился бы на домене сайта и добрался до сессии и токена устройства."""
+# Растровые картинки, которые можно безопасно отдать в строку: они не умеют
+# выполнять скрипты. SVG сюда не входит намеренно — внутри него живёт
+# полноценный JS, и на домене сайта он дотянулся бы до сессии.
+DROP_INLINE_TYPES = {
+    ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+    ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp",
+    ".ico": "image/x-icon", ".avif": "image/avif",
+}
+
+
+def _drop_send(item_id, item, inline=False):
+    """По умолчанию отдаём вложением: иначе загруженный .html или .svg со
+    скриптом выполнился бы на домене сайта и добрался до сессии и токена
+    устройства. Исключение — растровая картинка по публичной ссылке: её
+    отдаём в строку, чтобы ссылку можно было вставить как адрес иконки."""
+    ext = os.path.splitext(item["name"])[1].lower()
+    mime = DROP_INLINE_TYPES.get(ext) if inline else None
     response = send_file(
         _drop_path(item_id),
-        mimetype="application/octet-stream",
-        as_attachment=True,
+        mimetype=mime or "application/octet-stream",
+        as_attachment=not mime,
         download_name=item["name"],
         conditional=True,
     )
     response.headers["Content-Security-Policy"] = "default-src 'none'; sandbox"
+    # Без этого браузер может «донюхать» тип сам и решить, что перед ним HTML
+    response.headers["X-Content-Type-Options"] = "nosniff"
     return response
 
 
@@ -2084,8 +2100,10 @@ def drop_update(item_id):
 @app.post("/api/drop/share/<item_id>")
 @login_required
 def drop_share_create(item_id):
+    payload = request.get_json(silent=True) or {}
+    forever = bool(payload.get("forever"))
     try:
-        hours = int((request.get_json(silent=True) or {}).get("hours", 24))
+        hours = int(payload.get("hours", 24))
     except (TypeError, ValueError):
         hours = 24
     hours = max(1, min(hours, 24 * 30))
@@ -2093,10 +2111,16 @@ def drop_share_create(item_id):
         item = drop_items.get(item_id)
         if not item or item["kind"] == "folder":
             return jsonify(error="Папки ссылкой не отдаются."), 400
-        item["share"] = {"token": secrets.token_urlsafe(24), "expires": time.time() + hours * 3600}
+        # expires = None означает «без срока»: проверка на истечение такую
+        # ссылку пропускает, потому что сравнивает только заданное время.
+        item["share"] = {
+            "token": secrets.token_urlsafe(24),
+            "expires": None if forever else time.time() + hours * 3600,
+        }
         token = item["share"]["token"]
         _drop_write_index()
-    return jsonify(url=url_for("drop_public", token=token, _external=True), hours=hours)
+    return jsonify(url=url_for("drop_public", token=token, _external=True),
+                   hours=0 if forever else hours, forever=forever)
 
 
 @app.delete("/api/drop/share/<item_id>")
@@ -2119,7 +2143,7 @@ def drop_public(token):
         item = drop_items.get(item_id) if item_id else None
     if not item:
         return "Ссылка недействительна или истекла", 404
-    return _drop_send(item_id, item)
+    return _drop_send(item_id, item, inline=True)
 
 
 @app.delete("/api/drop/<item_id>")
@@ -5121,6 +5145,26 @@ def drop_page():
 
         body.modal-open { overflow: hidden; }
 
+        .share-panel { width: min(380px, 100%); padding: 24px; color: #e8fbff;
+                       border: 1px solid rgba(45,226,255,.35);
+                       background: linear-gradient(145deg, rgba(16,30,47,.99), rgba(20,16,37,.99));
+                       box-shadow: 0 32px 100px rgba(0,0,0,.7); }
+        .share-panel h3 { margin: 0 0 16px; font-size: 1.05rem; letter-spacing: .04em; }
+        .share-row { display: flex; align-items: center; gap: 10px; margin-bottom: 12px;
+                     font-size: .82rem; color: #b8c8d8; }
+        .share-row input[type=number] { width: 90px; height: 34px; padding: 0 10px; color: #f4fbff;
+                     font: 600 .85rem "Cascadia Code", Consolas, monospace;
+                     border: 1px solid rgba(255,255,255,.14); outline: none; background: rgba(4,10,20,.65); }
+        .share-row input[type=number]:disabled { opacity: .4; }
+        .share-row.check { cursor: pointer; }
+        .share-row input[type=checkbox] { width: 17px; height: 17px; margin: 0; accent-color: #2de2ff; }
+        .share-note { margin: 0 0 16px; color: #5d6d80; font-size: .72rem; line-height: 1.5; }
+        .share-btns { display: flex; gap: 10px; }
+        .share-btns button { flex: 1; height: 36px; font: 700 .74rem "Cascadia Code", Consolas, monospace;
+                     letter-spacing: .06em; cursor: pointer; color: #cfe2ee;
+                     border: 1px solid rgba(255,255,255,.16); background: rgba(255,255,255,.05); }
+        .share-btns button.go { color: #04121c; border-color: #2de2ff; background: #2de2ff; }
+
         /* Просмотр картинки во весь экран */
         .lightbox { position: fixed; inset: 0; z-index: 300; display: grid; place-items: center; padding: 24px;
                     background: rgba(2,5,10,.94); backdrop-filter: blur(4px); }
@@ -5240,6 +5284,54 @@ def drop_page():
           const label = ext ? ext.slice(0, 4).toUpperCase() : "ФАЙЛ";
           return `<span class="ico" style="--tint:${tintOf(ext)}">${esc(label)}</span>`;
         };
+
+        /* Окно выдачи ссылки: часы и галка «без срока». Бессрочная нужна,
+           чтобы картинку можно было вставить адресом в настройки другого
+           сайта — там ссылка с истечением через сутки бесполезна. */
+        const askShare = () => new Promise(resolve => {
+          const box = document.createElement("div");
+          box.className = "lightbox share-ask";
+          box.innerHTML =
+            '<div class="share-panel">' +
+              '<h3>Ссылка на файл</h3>' +
+              '<label class="share-row"><span>Часов</span>' +
+                '<input type="number" min="1" max="720" value="24" id="sh-h"></label>' +
+              '<label class="share-row check"><input type="checkbox" id="sh-f">' +
+                '<span>Без срока — не истекает никогда</span></label>' +
+              '<p class="share-note">Картинка по бессрочной ссылке открывается ' +
+                'прямо в браузере, поэтому её адрес можно вставлять как иконку.</p>' +
+              '<div class="share-btns">' +
+                '<button type="button" class="go" id="sh-ok">СОЗДАТЬ</button>' +
+                '<button type="button" id="sh-no">ОТМЕНА</button>' +
+              '</div>' +
+            '</div>';
+          document.body.appendChild(box);
+          document.body.classList.add("modal-open");
+          const hours = box.querySelector("#sh-h");
+          const forever = box.querySelector("#sh-f");
+          hours.focus();
+          const shut = value => {
+            box.remove();
+            document.body.classList.remove("modal-open");
+            document.removeEventListener("keydown", onKey);
+            resolve(value);
+          };
+          const onKey = ev => {
+            if (ev.key === "Escape") shut(null);
+            if (ev.key === "Enter") box.querySelector("#sh-ok").click();
+          };
+          // Галка и поле часов взаимно исключают друг друга — так понятнее,
+          // чем оставлять серое неактивное число рядом с «без срока».
+          forever.addEventListener("change", () => { hours.disabled = forever.checked; });
+          box.querySelector("#sh-ok").addEventListener("click", () => {
+            shut(forever.checked
+              ? { forever: true }
+              : { hours: parseInt(hours.value, 10) || 24 });
+          });
+          box.querySelector("#sh-no").addEventListener("click", () => shut(null));
+          box.addEventListener("click", ev => { if (ev.target === box) shut(null); });
+          document.addEventListener("keydown", onKey);
+        });
 
         /* Картинка во весь экран. Закрыть можно крестиком, щелчком по фону,
            Escape или кнопкой «назад» — последнее важно на телефоне, где
@@ -5452,10 +5544,50 @@ def drop_page():
           enqueue(e.dataTransfer.files);
         });
 
+        // Снимок экрана (Win+Shift+S) кладётся в буфер картинкой, но в
+        // clipboardData.files её может не оказаться — Chrome отдаёт её только
+        // через items[].getAsFile(). Из-за этого Ctrl+V молчал на картинке,
+        // хотя текст вставлялся. Смотрим оба места.
+        const clipFiles = data => {
+          const out = [];
+          const seen = new Set();
+          Array.from(data.files || []).forEach(f => { out.push(f); seen.add(f.name + f.size); });
+          Array.from(data.items || []).forEach(it => {
+            if (it.kind !== "file" || !it.type.startsWith("image/")) return;
+            const f = it.getAsFile();
+            if (f && !seen.has(f.name + f.size)) out.push(f);
+          });
+          // Имя у снимка пустое или generic — даём своё, по времени
+          return out.map(f => {
+            if (f.name && f.name !== "image.png") return f;
+            const ext = (f.type.split("/")[1] || "png").split("+")[0];
+            const t = new Date();
+            const pad = n => String(n).padStart(2, "0");
+            const stamp = t.getFullYear() + "-" + pad(t.getMonth() + 1) + "-" + pad(t.getDate()) +
+                          "-" + pad(t.getHours()) + pad(t.getMinutes()) + pad(t.getSeconds());
+            return new File([f], "снимок-" + stamp + "." + ext, { type: f.type });
+          });
+        };
+
         document.addEventListener("paste", e => {
+          const files = clipFiles(e.clipboardData);
+          if (files.length) {
+            // Картинка идёт файлом всегда, даже если курсор стоит в поле
+            // текста: в текстовое поле её всё равно не вставить.
+            e.preventDefault();
+            enqueue(files);
+            toast(files.length > 1 ? "Вставлено " + files.length + " файла" : "Картинка из буфера");
+            return;
+          }
           if (document.activeElement === $("text-area")) return;
-          const files = Array.from(e.clipboardData.files || []);
-          if (files.length) { e.preventDefault(); enqueue(files); toast("Вставлено из буфера"); }
+          const text = (e.clipboardData.getData("text/plain") || "").trim();
+          if (text) {
+            // Текст кладём в поле заметки — оттуда его отправляют как .txt
+            e.preventDefault();
+            $("text-area").value = text;
+            $("text-area").focus();
+            toast("Текст вставлен — проверь и отправь");
+          }
         });
 
         // Кнопка «Из буфера»: на телефоне это обход кривого выбора файлов —
@@ -5484,7 +5616,9 @@ def drop_page():
             if (plain.trim()) { $("text-area").value = plain; toast("Текст вставлен — проверь и отправь"); return; }
             toast("В буфере ничего подходящего", true);
           } catch (err) {
-            toast("Не дали доступ к буферу", true);
+            // Чтение буфера кнопкой браузер разрешает не всегда. Ctrl+V
+            // работает без всяких разрешений — на него и отправляем.
+            toast("Браузер не дал прочитать буфер. Нажми Ctrl+V прямо на странице", true);
           }
         });
 
@@ -5690,14 +5824,15 @@ def drop_page():
               catch (err) { toast(err.message, true); }
               return;
             }
-            const raw = prompt("На сколько часов дать ссылку?", "24");
-            if (raw === null) return;
+            const choice = await askShare();
+            if (!choice) return;
             try {
               const data = await api("/api/drop/share/" + id, {
                 method: "POST", headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ hours: parseInt(raw, 10) || 24 }) });
-              try { await navigator.clipboard.writeText(data.url); toast("Ссылка скопирована, живёт " + data.hours + " ч"); }
-              catch { prompt("Ссылка (живёт " + data.hours + " ч):", data.url); }
+                body: JSON.stringify(choice) });
+              const life = data.forever ? "без срока" : "живёт " + data.hours + " ч";
+              try { await navigator.clipboard.writeText(data.url); toast("Ссылка скопирована, " + life); }
+              catch { prompt("Ссылка (" + life + "):", data.url); }
               load();
             } catch (err) { toast(err.message, true); }
             return;
