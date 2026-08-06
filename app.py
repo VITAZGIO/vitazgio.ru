@@ -121,13 +121,9 @@ METRICS_TARGETS = [
         "user_env": "METRICS_UBUNTUSERVER_USER",
         "pass_env": "METRICS_UBUNTUSERVER_PASS",
     },
-    {
-        "ip": "100.104.111.39",
-        "name": "ubuntuvitaz1",
-        "user_env": "METRICS_UBUNTUVITAZ1_USER",
-        "pass_env": "METRICS_UBUNTUVITAZ1_PASS",
-    },
 ]
+# ubuntuvitaz1 из сбора метрик убрана намеренно: в Netbird она осталась и
+# по SSH к ней по-прежнему ходим, просто датчики по ней больше не снимаем.
 METRICS_INTERVAL = 30
 METRICS_CPU_SAMPLE = 1  # пауза между двумя замерами /proc/stat, секунды
 metrics_data: dict = {t["ip"]: None for t in METRICS_TARGETS}
@@ -703,6 +699,9 @@ ARCADE_SUBMIT_MAX = 40       # результатов с одного адрес
 # lo/hi — границы правдоподобного результата. Считает очки браузер, подделать
 # запрос может кто угодно, но хотя бы заведомая чушь в таблицу не попадёт:
 # человек не печатает тысячу знаков в минуту и не проходит DOOM за пять секунд.
+# Рулетки тут намеренно нет: колесо — генератор случайных чисел, место в
+# такой таблице говорит про везение, а не про игрока. Свой лучший результат
+# она по-прежнему помнит, но только на устройстве.
 ARCADE_GAMES = {
     "snake":    {"title": "Змейка",  "order": "max", "unit": "score", "epoch": 1,
                  "lo": 10, "hi": 20_000},
@@ -711,8 +710,6 @@ ARCADE_GAMES = {
     # epoch 2: уровней стало пять вместо двух, старые времена несравнимы
     "doom":     {"title": "DOOM",    "order": "min", "unit": "time",  "epoch": 2,
                  "lo": 40, "hi": 7_200},
-    "roulette": {"title": "Рулетка", "order": "max", "unit": "score", "epoch": 1,
-                 "lo": 1, "hi": 100_000},
     "tanks":    {"title": "Танчики", "order": "max", "unit": "score", "epoch": 1,
                  "lo": 100, "hi": 500_000},
     "arkanoid": {"title": "Арканоид", "order": "max", "unit": "score", "epoch": 1,
@@ -1799,6 +1796,12 @@ def _drop_send(item_id, item):
     return response
 
 
+def _drop_text_name(first_line):
+    """Имя текстовой заметки: первая строка плюс .txt, если его ещё нет."""
+    name = (first_line or "").strip()[:60] or "Текст"
+    return name if name.lower().endswith(".txt") else name + ".txt"
+
+
 @app.post("/api/drop/text")
 @login_required
 def drop_upload_text():
@@ -1819,9 +1822,12 @@ def drop_upload_text():
                 fh.write(data)
         except OSError as e:
             return jsonify(error=f"Не удалось сохранить: {e}"), 500
+        # Имя лепим из первой строки, но обязательно с .txt на конце. Без
+        # него любая точка в тексте («1. Убрать датчики») выглядела как
+        # расширение, и переименование правило текст до этой точки.
         first = text.strip().splitlines()[0][:60] if text.strip() else "Текст"
         drop_items[item_id] = {
-            "kind": "text", "name": first, "parent": parent,
+            "kind": "text", "name": _drop_text_name(first), "parent": parent,
             "content_type": "text/plain; charset=utf-8", "size": len(data),
             "created": time.time(), "preview": text[:DROP_TEXT_PREVIEW],
             "truncated": len(text) > DROP_TEXT_PREVIEW, "share": None,
@@ -1842,6 +1848,35 @@ def drop_text_full(item_id):
             return jsonify(text=fh.read())
     except OSError:
         return jsonify(error="Файл потерян."), 404
+
+
+@app.put("/api/drop/text/<item_id>")
+@login_required
+def drop_text_update(item_id):
+    """Переписать содержимое заметки. Имя не трогаем: его пользователь мог
+    уже поправить руками, и подменять его под новый первый абзац — грубо."""
+    payload = request.get_json(silent=True) or {}
+    text = payload.get("text", "")
+    if not isinstance(text, str) or not text.strip():
+        return jsonify(error="Текст пустой."), 400
+    data = text.encode("utf-8")
+    with drop_lock:
+        item = drop_items.get(item_id)
+        if not item or item["kind"] != "text":
+            return jsonify(error="Не найдено."), 404
+        if _drop_used() - item["size"] + len(data) > DROP_QUOTA:
+            return jsonify(error="Нет места: квота исчерпана."), 507
+        try:
+            with open(_drop_path(item_id), "wb") as fh:
+                fh.write(data)
+        except OSError as e:
+            return jsonify(error=f"Не удалось сохранить: {e}"), 500
+        item["size"] = len(data)
+        item["preview"] = text[:DROP_TEXT_PREVIEW]
+        item["truncated"] = len(text) > DROP_TEXT_PREVIEW
+        item["edited"] = time.time()
+        _drop_write_index()
+    return jsonify(ok=True, size=len(data))
 
 
 @app.post("/api/drop/folder")
@@ -2204,11 +2239,18 @@ def cabinet():
         .gate-error { min-height: 18px; margin: 10px 0 0; color: #ff6ba8; font-size: .78rem; }
         .gate-close { position: absolute; top: 12px; right: 14px; padding: 5px; color: #7d8799; font-size: 1.3rem; border: 0; background: none; cursor: pointer; }
 
-        .term-overlay { position: fixed; z-index: 100; inset: 0; display: flex; flex-direction: column; background: #05070c; }
+        /* Высота задаётся переменной, а не inset:0. На телефоне экранная
+           клавиатура ужимает видимую область, но макетная остаётся прежней —
+           и шапка с рядом кнопок уезжала под клавиатуру. Теперь окно живёт
+           ровно в видимой части, а сжимается только тело терминала. */
+        .term-overlay { position: fixed; z-index: 100; left: 0; right: 0; top: 0;
+                        height: var(--term-h, 100%); display: flex; flex-direction: column;
+                        background: #05070c; transform: translateY(var(--term-top, 0px)); }
         .term-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 18px; color: #c4cad5; font-size: .82rem; background: rgba(255,255,255,.04); border-bottom: 1px solid rgba(255,255,255,.08); }
         .term-close { padding: 7px 12px; color: #dffaff; font: 700 .76rem "Cascadia Code", Consolas, monospace; border: 1px solid rgba(255,255,255,.16); background: transparent; cursor: pointer; }
         .term-close:hover { background: rgba(255,255,255,.08); }
-        .term-body { flex: 1; padding: 10px; overflow: hidden; }
+        .term-body { flex: 1 1 auto; min-height: 0; padding: 10px; overflow: hidden; }
+        .term-header, .term-tools { flex: none; }
         .term-tools { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 12px; flex: none;
                       background: rgba(255,255,255,.03); border-bottom: 1px solid rgba(255,255,255,.07); }
         .term-key { min-width: 46px; padding: 9px 12px; color: #c4cad5;
@@ -2843,6 +2885,35 @@ def cabinet():
           const termOverlay = document.getElementById("term-overlay");
           const termTitle = document.getElementById("term-title");
           const termBody = document.getElementById("term-body");
+
+          /* Подгоняем окно консоли под видимую часть экрана. На телефоне при
+             появлении клавиатуры visualViewport становится ниже, а обычный
+             resize при этом может вообще не сработать — поэтому слушаем
+             именно его. Пересчёт откладываем на кадр: во время анимации
+             выезда клавиатуры размеры меняются десятки раз подряд. */
+          let kbdWatching = false;
+          const watchKeyboard = (onFit) => {
+            const vv = window.visualViewport;
+            const apply = () => {
+              const root = termOverlay.style;
+              if (!vv) { root.removeProperty("--term-h"); root.removeProperty("--term-top"); }
+              else {
+                root.setProperty("--term-h", vv.height + "px");
+                root.setProperty("--term-top", vv.offsetTop + "px");
+              }
+              if (onFit) onFit();
+            };
+            apply();
+            if (!vv || kbdWatching) return;
+            kbdWatching = true;
+            let pending = 0;
+            const later = () => {
+              cancelAnimationFrame(pending);
+              pending = requestAnimationFrame(apply);
+            };
+            vv.addEventListener("resize", later);
+            vv.addEventListener("scroll", later);
+          };
           const termClose = document.getElementById("term-close");
 
           let consoleAuthenticated = false;
@@ -3450,6 +3521,7 @@ def cabinet():
             };
             term.onResize(() => sendResize());
             window.addEventListener("resize", () => fitAddon.fit());
+            watchKeyboard(sendResize);
           };
 
           document.querySelectorAll(".connect-btn").forEach((button) => {
@@ -5026,7 +5098,34 @@ def drop_page():
         .act.del:hover { color: #ff6b81; border-color: rgba(255,107,129,.45); background: rgba(255,107,129,.1); }
         .act.on { color: #63f5ad; border-color: rgba(99,245,173,.4); }
 
-        .txt { grid-area: body; margin-top: 8px; padding: 10px 12px; color: #b8c2d4; font-size: .76rem; white-space: pre-wrap; overflow-wrap: anywhere; border-left: 2px solid rgba(255,120,47,.5); background: rgba(4,10,20,.5); }
+        .txt { position: relative; grid-area: body; margin-top: 8px; padding: 10px 34px 10px 12px; color: #b8c2d4; font-size: .76rem; white-space: pre-wrap; overflow-wrap: anywhere; border-left: 2px solid rgba(255,120,47,.5); background: rgba(4,10,20,.5); }
+        /* Карандаш висит в правом верхнем углу самого текста, а не в общем
+           ряду кнопок: там уже живёт переименование, и два карандаша рядом
+           путали бы — этот правит содержимое, тот название. */
+        .txt-edit { position: absolute; top: 6px; right: 6px; width: 24px; height: 24px; display: grid; place-items: center;
+                    color: #ff9f45; font-size: .9rem; line-height: 1; cursor: pointer; border: 1px solid rgba(255,159,69,.35);
+                    border-radius: 4px; background: rgba(255,159,69,.08); }
+        .txt-edit:hover { color: #04060b; background: #ff9f45; border-color: #ff9f45; }
+        .txt-area { width: 100%; min-height: 160px; margin: 0; padding: 10px 12px; color: #eaf6ff; font: 400 .78rem "Cascadia Code", Consolas, monospace;
+                    line-height: 1.6; resize: vertical; border: 1px solid rgba(255,159,69,.5); outline: none; background: rgba(4,10,20,.8); }
+        .txt-bar { display: flex; gap: 8px; margin-top: 8px; }
+        .txt-bar button { height: 30px; padding: 0 14px; font: 700 .72rem "Cascadia Code", Consolas, monospace; letter-spacing: .06em;
+                          cursor: pointer; border: 1px solid rgba(255,255,255,.16); background: rgba(255,255,255,.05); color: #cfe2ee; }
+        .txt-bar button.go { color: #04060b; border-color: #ff9f45; background: #ff9f45; }
+
+        body.modal-open { overflow: hidden; }
+
+        /* Просмотр картинки во весь экран */
+        .lightbox { position: fixed; inset: 0; z-index: 300; display: grid; place-items: center; padding: 24px;
+                    background: rgba(2,5,10,.94); backdrop-filter: blur(4px); }
+        .lightbox img { max-width: 100%; max-height: 100%; object-fit: contain; border: 1px solid rgba(45,226,255,.25);
+                        box-shadow: 0 24px 70px rgba(0,0,0,.7); }
+        .lightbox .lb-close { position: absolute; top: 16px; right: 16px; width: 44px; height: 44px; display: grid; place-items: center;
+                              color: #eaf6ff; font-size: 1.5rem; line-height: 1; cursor: pointer; border: 1px solid rgba(255,255,255,.22);
+                              border-radius: 6px; background: rgba(10,16,26,.85); }
+        .lightbox .lb-close:hover { color: #04060b; background: #2de2ff; border-color: #2de2ff; }
+        .lightbox .lb-name { position: absolute; left: 16px; top: 24px; max-width: calc(100% - 90px); color: #7f93a8;
+                             font-size: .74rem; letter-spacing: .04em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .txt-more { margin-top: 6px; color: #69e8ff; font-size: .72rem; background: none; border: 0; padding: 0; cursor: pointer; }
 
         .empty { padding: 40px 0; color: #4a5060; font-size: .82rem; text-align: center; }
@@ -5128,10 +5227,52 @@ def drop_page():
           if (it.kind === "text") return `<span class="ico" style="--tint:#ff9f45">ТЕКСТ</span>`;
           const ext = extOf(it.name);
           if (it.thumb) {
-            return `<span class="ico img" style="--tint:${tintOf(ext)};background-image:url(/api/drop/thumb/${encodeURIComponent(it.id)})"></span>`;
+            // Картинку можно открыть во весь экран — по самой миниатюре
+            return `<span class="ico img" data-act="view" title="Открыть картинку"
+              style="--tint:${tintOf(ext)};background-image:url(/api/drop/thumb/${encodeURIComponent(it.id)})"></span>`;
           }
           const label = ext ? ext.slice(0, 4).toUpperCase() : "ФАЙЛ";
           return `<span class="ico" style="--tint:${tintOf(ext)}">${esc(label)}</span>`;
+        };
+
+        /* Картинка во весь экран. Закрыть можно крестиком, щелчком по фону,
+           Escape или кнопкой «назад» — последнее важно на телефоне, где
+           крестик легко не заметить и по привычке смахнуть назад. */
+        const openImage = item => {
+          const box = document.createElement("div");
+          box.className = "lightbox";
+          const img = document.createElement("img");
+          img.src = "/api/drop/download/" + encodeURIComponent(item.id);
+          img.alt = item.name;
+          const name = document.createElement("div");
+          name.className = "lb-name";
+          name.textContent = item.name;
+          const close = document.createElement("button");
+          close.className = "lb-close";
+          close.type = "button";
+          close.setAttribute("aria-label", "Закрыть картинку");
+          close.textContent = "×";
+          box.append(img, name, close);
+          document.body.appendChild(box);
+          document.body.classList.add("modal-open");
+
+          let closed = false;
+          const shut = fromBack => {
+            if (closed) return;
+            closed = true;
+            box.remove();
+            document.body.classList.remove("modal-open");
+            document.removeEventListener("keydown", onEsc);
+            window.removeEventListener("popstate", onBack);
+            if (!fromBack && history.state && history.state.lightbox) history.back();
+          };
+          const onEsc = ev => { if (ev.key === "Escape") shut(false); };
+          const onBack = () => shut(true);
+          close.addEventListener("click", () => shut(false));
+          box.addEventListener("click", ev => { if (ev.target === box) shut(false); });
+          document.addEventListener("keydown", onEsc);
+          history.pushState({ lightbox: true }, "");
+          window.addEventListener("popstate", onBack);
         };
 
         let toastTimer = null;
@@ -5179,7 +5320,8 @@ def drop_page():
             const isFolder = it.kind === "folder";
             const open = expanded.has(it.id);
             const body = isText && it.preview != null
-              ? `<div class="txt">${esc(open && it.full ? it.full : it.preview)}${
+              ? `<div class="txt"><button class="txt-edit" data-act="edit" title="Изменить текст">✎</button>${
+                   esc(open && it.full ? it.full : it.preview)}${
                    it.truncated && !open ? "…" : ""}${
                    it.truncated ? `<br><button class="txt-more" data-act="more">${open ? "свернуть" : "показать целиком"}</button>` : ""}</div>`
               : "";
@@ -5460,6 +5602,61 @@ def drop_page():
 
           if (act === "dl") { window.location.assign("/api/drop/download/" + id); return; }
 
+          if (act === "view") {
+            openImage(item);
+            return;
+          }
+
+          if (act === "edit") {
+            const box = row.querySelector(".txt");
+            if (!box || box.dataset.editing) return;
+            box.dataset.editing = "1";
+            let full = "";
+            try {
+              // Показываем всегда полный текст, а не обрезанный предпросмотр:
+              // сохранить кусок вместо целого было бы потерей данных.
+              const data = await api("/api/drop/text/" + id);
+              full = data.text;
+            } catch (err) { toast(err.message, true); delete box.dataset.editing; return; }
+            box.innerHTML = "";
+            const area = document.createElement("textarea");
+            area.className = "txt-area";
+            area.value = full;
+            const bar = document.createElement("div");
+            bar.className = "txt-bar";
+            const ok = document.createElement("button");
+            ok.className = "go"; ok.textContent = "СОХРАНИТЬ";
+            const no = document.createElement("button");
+            no.textContent = "ОТМЕНА";
+            bar.append(ok, no);
+            box.append(area, bar);
+            area.focus();
+            const stop = ev => ev.stopPropagation();
+            box.addEventListener("click", stop);
+            no.addEventListener("click", () => { delete box.dataset.editing; load(); });
+            ok.addEventListener("click", async () => {
+              const text = area.value;
+              if (!text.trim()) { toast("Текст пустой", true); return; }
+              ok.disabled = true;
+              try {
+                await api("/api/drop/text/" + id, { method: "PUT",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ text }) });
+                toast("Сохранено");
+              } catch (err) { toast(err.message, true); ok.disabled = false; return; }
+              delete box.dataset.editing;
+              expanded.delete(id);
+              load();
+            });
+            // Ctrl+Enter — сохранить, Escape — отменить: руки со сборки текста
+            // убирать не хочется.
+            area.addEventListener("keydown", ev => {
+              if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); ok.click(); }
+              if (ev.key === "Escape") { ev.preventDefault(); no.click(); }
+            });
+            return;
+          }
+
           if (act === "more") {
             if (expanded.has(id)) { expanded.delete(id); render(); return; }
             try {
@@ -5513,10 +5710,13 @@ def drop_page():
           if (act === "ren") {
             const nameEl = row.querySelector(".nm");
             // Правим только имя без расширения — менять его нельзя,
-            // иначе файл перестаёт открываться.
-            const dot = item.kind === "folder" ? -1 : item.name.lastIndexOf(".");
-            const stem = dot > 0 ? item.name.slice(0, dot) : item.name;
-            const ext = dot > 0 ? item.name.slice(dot) : "";
+            // иначе файл перестаёт открываться. Но расширением считаем
+            // лишь то, что на него похоже: точка, а за ней до восьми букв
+            // или цифр без пробелов. Иначе имя вроде «1. Убрать датчики»
+            // резалось по первой же точке, и правилась одна цифра.
+            const m = item.kind === "folder" ? null : /^(.*)(\.[A-Za-z0-9]{1,8})$/.exec(item.name);
+            const stem = m ? m[1] : item.name;
+            const ext = m ? m[2] : "";
             const input = document.createElement("input");
             input.className = "rename";
             input.value = stem;

@@ -207,8 +207,10 @@
         api.buzz([90, 60, 140]);
         api.audio.tone(200, 0.4, { type: "sawtooth", slideTo: 60, volume: 0.13 });
         if (points > 0) {
+          // Рекорд держим только на самом устройстве. В общую таблицу
+          // рулетка не идёт: колесо — генератор случайных чисел, и место в
+          // ней говорит про везение, а не про игрока.
           api.best("roulette", points);
-          if (api.record) api.record("roulette", points);
         }
         streak = 0;
         points = 0;
