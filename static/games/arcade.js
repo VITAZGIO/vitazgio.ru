@@ -226,6 +226,29 @@ window.VitazArcade = (function () {
     return ROMAN[n - 1] || String(n);
   }
 
+  /* Множитель за темп. Очки сами по себе набираются и медленной осадой:
+     сиди себе, аккуратно доигрывай уровень за уровнем — и обгонишь того,
+     кто играл лучше, но быстрее закончил. Поэтому итог умножается на то,
+     насколько бодро шла игра: набрал столько же за вдвое меньшее время —
+     получил заметно больше. Границы жёсткие, чтобы ни минутный рывок, ни
+     часовое сидение не ломали таблицу.
+
+       ref — сколько очков в минуту считается нормальным темпом
+       возвращает { mult, total } — множитель и итог */
+  var TEMPO_MIN = 0.7, TEMPO_MAX = 1.5;
+
+  function tempo(score, seconds, ref) {
+    score = Math.max(0, Math.round(score || 0));
+    if (!score || !ref) return { mult: 1, total: score };
+    // Первые полминуты не считаем: там любой темп получается запредельным
+    var mins = Math.max(0.5, (seconds || 0) / 60);
+    var rate = score / mins;
+    var mult = rate / ref;
+    if (mult < TEMPO_MIN) mult = TEMPO_MIN;
+    if (mult > TEMPO_MAX) mult = TEMPO_MAX;
+    return { mult: mult, total: Math.round(score * mult) };
+  }
+
   function formatValue(game, value) {
     var meta = board.games[game];
     if (meta && meta.unit === "cpm") return value + " зн/м";
@@ -1179,6 +1202,7 @@ window.VitazArcade = (function () {
       audio: audio,
       best: best,
       record: record,          // рекорд на сервер, с вопросом об имени
+      tempo: tempo,            // множитель за темп прохождения
       top: boardBest,          // число для строки «РЕКОРД»
       topRows: boardTop,       // сами строки таблицы, если понадобятся
       exit: showMenu,

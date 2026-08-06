@@ -173,10 +173,12 @@
     var raf = 0, last = 0;
 
     var spot, eggs, broken, score, alive, saved, spawnT, shellT, flashT, pardons;
+    var startedAt = 0, finalScore = 0, finalMult = 1;
 
     function reset() {
       spot = 1;                    // 0 лево-верх, 1 лево-низ, 2 право-верх, 3 право-низ
       eggs = []; broken = 0; score = 0; alive = true; saved = false;
+      startedAt = performance.now(); finalScore = 0; finalMult = 1;
       spawnT = 1.2; shellT = 0; flashT = 0; pardons = 0;
       hud_();
     }
@@ -324,7 +326,7 @@
         ctx.fillText("НУ, ПОГОДИ!", W / 2, H / 2 - 12);
         ctx.fillStyle = "#8fa5b8";
         ctx.font = 'bold 15px "Cascadia Code", Consolas, monospace';
-        ctx.fillText("ПОЙМАНО: " + score + (pardons ? " · ПРОЩЕНО " + pardons : ""),
+        ctx.fillText(score + " × темп " + finalMult.toFixed(2) + " = " + finalScore,
                      W / 2, H / 2 + 16);
         ctx.fillStyle = "#4a6379";
         ctx.font = 'bold 13px "Cascadia Code", Consolas, monospace';
@@ -385,8 +387,10 @@
       if (alive) step(dt);
       else if (!saved) {
         saved = true;
-        api.best("wolf", score);
-        if (score > 0) api.record("wolf", score);
+        var t = api.tempo(score, (performance.now() - startedAt) / 1000, 30);
+        finalScore = t.total; finalMult = t.mult;
+        api.best("wolf", finalScore);
+        if (finalScore > 0) api.record("wolf", finalScore);
       }
       draw(now);
     }

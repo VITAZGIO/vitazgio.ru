@@ -193,6 +193,7 @@
     var bricks, balls, drops, sparks;
     var padX, padW, level, score, lives, alive, stuck, saved;
     var slowT, wideT, held = 0, aimT = 0;
+    var startedAt = 0, finalScore = 0, finalMult = 1;
 
     function buildLevel(n) {
       var map = LEVELS[n % LEVELS.length];
@@ -222,7 +223,10 @@
     }
 
     function reset(full) {
-      if (full) { level = 0; score = 0; lives = 3; }
+      if (full) {
+        level = 0; score = 0; lives = 3;
+        startedAt = performance.now(); finalScore = 0; finalMult = 1;
+      }
       padW = 78; padX = W / 2;
       slowT = 0; wideT = 0;
       drops = []; sparks = [];
@@ -492,7 +496,8 @@
         ctx.fillText("ШАРИКИ КОНЧИЛИСЬ", W / 2, H / 2 - 12);
         ctx.fillStyle = "#8fa5b8";
         ctx.font = 'bold 15px "Cascadia Code", Consolas, monospace';
-        ctx.fillText("ОЧКОВ: " + score + " · УРОВЕНЬ " + (level + 1), W / 2, H / 2 + 16);
+        ctx.fillText(score + " × темп " + finalMult.toFixed(2) + " = " + finalScore,
+                     W / 2, H / 2 + 16);
         ctx.fillStyle = "#4a6379";
         ctx.font = 'bold 13px "Cascadia Code", Consolas, monospace';
         ctx.fillText(api.touch ? "КРАСНАЯ КНОПКА — ЗАНОВО" : "ENTER — ЗАНОВО", W / 2, H / 2 + 42);
@@ -507,8 +512,10 @@
       if (alive) step(dt);
       else if (!saved) {
         saved = true;
-        api.best("arkanoid", score);
-        if (score > 0) api.record("arkanoid", score);
+        var t = api.tempo(score, (performance.now() - startedAt) / 1000, 600);
+        finalScore = t.total; finalMult = t.mult;
+        api.best("arkanoid", finalScore);
+        if (finalScore > 0) api.record("arkanoid", finalScore);
       }
       draw(now);
     }

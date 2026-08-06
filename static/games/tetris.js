@@ -163,6 +163,7 @@
 
     var board, bag, queue, hold, holdUsed, piece, score, lines, level, combo, b2b;
     var over, paused, dropTimer, lockTimer, lockResets, clearing, message, messageTime;
+    var startedAt = 0, finalScore = 0, finalMult = 1;
     var raf = 0, last = 0;
     var keyState = {}, dasTimer = 0, arrTimer = 0, dasDir = 0;
 
@@ -199,8 +200,12 @@
       };
       if (collides(p, 0, 0, 0)) {
         over = true; api.buzz([80, 60, 180]);
-        api.best("tetris", score); flash("КОНЕЦ ИГРЫ");
-        if (api.record) api.record("tetris", score);
+        // Итог с поправкой на темп: те же очки, набранные быстрее, дороже
+        var t = api.tempo(score, (performance.now() - startedAt) / 1000, 800);
+        finalScore = t.total; finalMult = t.mult;
+        api.best("tetris", finalScore);
+        flash("КОНЕЦ ИГРЫ · " + score + " × " + t.mult.toFixed(2) + " = " + finalScore);
+        if (api.record) api.record("tetris", finalScore);
       }
       piece = p;
       holdUsed = false;
@@ -381,6 +386,7 @@
       while (queue.length < 5) queue.push(nextType());
       hold = null; holdUsed = false;
       score = 0; lines = 0; level = 1; combo = -1; b2b = false;
+      startedAt = performance.now(); finalScore = 0; finalMult = 1;
       over = false; paused = false; clearing = null;
       dropTimer = 0; lockTimer = 0; lockResets = 0;
       message = ""; messageTime = 0;

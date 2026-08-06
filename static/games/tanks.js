@@ -181,6 +181,7 @@
 
     var grid, me, foes, shots, boom, level, score, lives, alive, paused;
     var toSpawn, spawnT, baseAlive, overT, shieldT;
+    var startedAt = 0, finalScore = 0, finalMult = 1;
     var held = { x: 0, y: 0 };
 
     function buildLevel(n) {
@@ -231,7 +232,10 @@
     }
 
     function reset(full) {
-      if (full) { level = 0; score = 0; lives = 3; }
+      if (full) {
+        level = 0; score = 0; lives = 3;
+        startedAt = performance.now(); finalScore = 0; finalMult = 1;
+      }
       buildLevel(level);
       me = tank(10 * S, (N - 2) * S, 0, "me");
       foes = []; shots = []; boom = [];
@@ -527,7 +531,8 @@
         ctx.fillText(baseAlive ? "ТАНК ПОДБИТ" : "ШТАБ РАЗРУШЕН", W / 2, H / 2 - 12);
         ctx.fillStyle = "#8fa5b8";
         ctx.font = 'bold 15px "Cascadia Code", Consolas, monospace';
-        ctx.fillText("ОЧКОВ: " + score + " · УРОВЕНЬ " + (level + 1), W / 2, H / 2 + 18);
+        ctx.fillText(score + " × темп " + finalMult.toFixed(2) + " = " + finalScore,
+                     W / 2, H / 2 + 18);
         ctx.fillStyle = "#4a6379";
         ctx.font = 'bold 13px "Cascadia Code", Consolas, monospace';
         ctx.fillText(api.touch ? "КРАСНАЯ КНОПКА — ЗАНОВО" : "ENTER — ЗАНОВО", W / 2, H / 2 + 44);
@@ -552,8 +557,10 @@
         overT += dt;
         if (overT > 0.6 && !me.saved) {
           me.saved = true;
-          api.best("tanks", score);
-          if (score > 0) api.record("tanks", score);
+          var t = api.tempo(score, (performance.now() - startedAt) / 1000, 500);
+          finalScore = t.total; finalMult = t.mult;
+          api.best("tanks", finalScore);
+          if (finalScore > 0) api.record("tanks", finalScore);
         }
       }
       draw(now);

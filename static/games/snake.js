@@ -65,6 +65,7 @@
 
     var ctx = canvas.getContext("2d");
     var snake, dir, queue, food, score, alive, paused, speed, particles, shake;
+    var startedAt = 0, finalScore = 0, finalMult = 1;
     var lastStep = 0, raf = 0, prevSnake = null;
 
     function rnd(n) { return Math.floor(Math.random() * n); }
@@ -90,6 +91,7 @@
       queue = [];
       score = 0; alive = true; paused = false;
       speed = 130; particles = []; shake = 0;
+      startedAt = performance.now(); finalScore = 0; finalMult = 1;
       placeFood();
       lastStep = performance.now();
     }
@@ -121,8 +123,7 @@
           api.buzz([70, 50, 160]);
           api.audio.noise(0.35, { volume: 0.25, freq: 700, freqTo: 90, decay: 1.6 });
           api.audio.tone(180, 0.5, { type: "sawtooth", slideTo: 40, volume: 0.14 });
-          api.best("snake", score);
-          if (api.record) api.record("snake", score);
+          finishRun();
           return;
         }
       }
@@ -230,10 +231,11 @@
         ctx.fillText("КОНЕЦ ИГРЫ", W / 2, H / 2 - 16);
         ctx.fillStyle = "#dfeffa";
         ctx.font = '600 17px "Cascadia Code", Consolas, monospace';
-        ctx.fillText("Очков: " + score + "   ·   Рекорд: " + api.best("snake"), W / 2, H / 2 + 18);
+        ctx.fillText(score + " × темп " + finalMult.toFixed(2) + " = " + finalScore,
+                     W / 2, H / 2 + 18);
         ctx.fillStyle = "#4a6379";
         ctx.font = '600 13px "Cascadia Code", Consolas, monospace';
-        ctx.fillText("ENTER — заново    ESCAPE — в меню", W / 2, H / 2 + 48);
+        ctx.fillText("Рекорд: " + api.best("snake") + "    ENTER — заново", W / 2, H / 2 + 44);
       } else if (paused) {
         ctx.fillStyle = "rgba(4,6,11,.7)";
         ctx.fillRect(0, 0, W, H);
@@ -258,6 +260,17 @@
       }
       var alpha = alive && !paused ? Math.min(1, (now - lastStep) / speed) : 1;
       draw(alpha, now);
+    }
+
+    /* Итог считаем с поправкой на темп: та же сотня очков, набранная вдвое
+       быстрее, стоит дороже. Иначе выгоднее всего играть медленно и нудно. */
+    function finishRun() {
+      var secs = (performance.now() - startedAt) / 1000;
+      var t = api.tempo(score, secs, 200);
+      finalScore = t.total;
+      finalMult = t.mult;
+      api.best("snake", finalScore);
+      if (api.record) api.record("snake", finalScore);
     }
 
     var DIRS = {
