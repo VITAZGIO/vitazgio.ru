@@ -6335,9 +6335,19 @@ def home():
         @media (max-width: 700px) {
           .page { justify-content: flex-start; }
           .hero { margin-bottom: 22px; }
-          .cyber-terminal { min-height: 126px; padding-inline: 18px; }
-          .terminal-prompt { margin-right: .2em; }
-          .cyber-text { letter-spacing: -.08em; }
+          /* На узком экране размер, привязанный к ширине окна, схлопывался
+             до упора: «DOMAIN CONTROL» становился мельче подписи под ним,
+             хотя места в рамке оставалось на две таких строки. Здесь у
+             надписей свои, более щедрые размеры; на широком экране всё
+             остаётся как было. Потолок подобран по самой длинной из трёх
+             строк — «VITAZGIO NETWORK», шестнадцать знаков. */
+          .cyber-terminal { min-height: 112px; padding-inline: 12px; }
+          .terminal-prompt { margin-right: .18em; font-size: clamp(1.6rem, 7.9vw, 2.7rem); }
+          .cyber-text { letter-spacing: -.08em; font-size: clamp(1.6rem, 8.8vw, 2.9rem); }
+          .eyebrow { margin-bottom: 18px; font-size: .95rem; letter-spacing: .12em; }
+          .eyebrow::before { width: 9px; height: 9px; }
+          .arcade-bar-line { font-size: .86rem; letter-spacing: .26em; }
+          footer { font-size: .95rem; }
           .services { grid-template-columns: repeat(5, 78vw); min-width: max-content; }
           .service { min-height: 280px; scroll-snap-align: center; }
           .services-wrap { scroll-snap-type: x mandatory; }
