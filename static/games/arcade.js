@@ -72,6 +72,25 @@ window.VitazArcade = (function () {
     hold: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" ' +
           'stroke-linejoin="round"><rect x="4" y="6" width="10" height="12" rx="1.5"/>' +
           '<path d="M17 9v9M20 9v9"/></svg>',
+    // Нота — музыка, динамик с волнами — звуки самой игры. Их нарочно
+    // не путаем: выключают их по разным поводам.
+    note: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+          'stroke-linecap="round" stroke-linejoin="round">' +
+          '<path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3" fill="currentColor" stroke="none"/>' +
+          '<circle cx="17" cy="16" r="3" fill="currentColor" stroke="none"/></svg>',
+    noteOff: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+             'stroke-linecap="round" stroke-linejoin="round">' +
+             '<path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3" fill="currentColor" stroke="none"/>' +
+             '<circle cx="17" cy="16" r="3" fill="currentColor" stroke="none"/>' +
+             '<path d="M3 3l18 18" stroke-width="2.6"/></svg>',
+    sfx: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+         'stroke-linecap="round" stroke-linejoin="round">' +
+         '<path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor"/>' +
+         '<path d="M16.5 8.5a5 5 0 0 1 0 7"/><path d="M19.5 5.5a9 9 0 0 1 0 13"/></svg>',
+    sfxOff: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+            'stroke-linecap="round" stroke-linejoin="round">' +
+            '<path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor"/>' +
+            '<path d="M17 9.5l5 5M22 9.5l-5 5" stroke-width="2.6"/></svg>',
     pause: '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4.4" height="16" rx="1"/>' +
            '<rect x="13.6" y="4" width="4.4" height="16" rx="1"/></svg>',
     replay: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" ' +
@@ -376,8 +395,8 @@ window.VitazArcade = (function () {
     return loaded[src];
   }
 
-  var MODULES = ["snake", "tetris", "tanks", "arkanoid", "wolf", "doom",
-                 "chess", "roulette", "typing-texts", "typing"];
+  var MODULES = ["music", "snake", "tetris", "tanks", "arkanoid", "wolf", "doom",
+                 "chess", "roulette", "typing-texts", "typing", "tracks"];
 
   function loadAll() {
     return Promise.all(MODULES.map(function (name) {
@@ -662,6 +681,10 @@ window.VitazArcade = (function () {
       "background-image:repeating-linear-gradient(90deg,rgba(255,255,255,.03) 0 2px,",
       "transparent 2px 4px),linear-gradient(180deg,#3c444f,#20262d)}",
       ".dbtn.wide svg{width:20px;height:20px}",
+      /* Выключенный звук — кнопка гаснет, чтобы состояние читалось с одного
+         взгляда, без подписи «выкл» */
+      ".dbtn.off{color:#5a6a7a;border-color:rgba(255,255,255,.07)}",
+      ".deck-sys .dbtn[data-sys=music],.deck-sys .dbtn[data-sys=sound]{min-width:60px;padding:0}",
       ".dbtn.icon-text{display:flex;flex-direction:column;gap:2px}",
       ".dbtn.icon-text svg{width:19px;height:19px}",
       ".dbtn.icon-text span{font-size:.52rem;letter-spacing:.04em}",
@@ -706,7 +729,8 @@ window.VitazArcade = (function () {
       '<div id="arcade-bar">' +
         '<h2>АР<b>КАДА</b></h2>' +
         '<button class="arcade-btn" id="arcade-back" type="button" hidden>В меню</button>' +
-        '<button class="arcade-btn" id="arcade-sound" type="button">Звук: вкл</button>' +
+        '<button class="arcade-btn" id="arcade-music" type="button">Музыка: вкл</button>' +
+        '<button class="arcade-btn" id="arcade-sound" type="button">Звуки: вкл</button>' +
         '<button class="arcade-btn" id="arcade-exit" type="button">Выход</button>' +
         '<span class="hint">Escape — назад</span>' +
       '</div>' +
@@ -720,7 +744,10 @@ window.VitazArcade = (function () {
     var soundBtn = overlay.querySelector("#arcade-sound");
     soundBtn.addEventListener("click", function () {
       audio.muted = !audio.muted;
-      soundBtn.textContent = "Звук: " + (audio.muted ? "выкл" : "вкл");
+      syncSound();
+    });
+    overlay.querySelector("#arcade-music").addEventListener("click", function () {
+      setMusicMuted(!musicMuted());
       syncSound();
     });
 
@@ -752,12 +779,49 @@ window.VitazArcade = (function () {
     document.addEventListener("keydown", onKey, true);
   }
 
+  /* ── Музыка ──────────────────────────────────────────────────────────
+     Живёт в music.js, здесь только привязка к играм и переключатель.
+     Поменять тему у игры — одна строка в таблице ниже; null означает
+     «без музыки»: в шахматах, рулетке и печати она мешает думать. */
+  var MUSIC_FOR = {
+    snake: 0, tetris: 3, tanks: 9, arkanoid: 11, wolf: 8,
+    doom: 13, chess: null, roulette: null, typing: null, tracks: null,
+  };
+  var MENU_TRACK = 15;                 // в меню играют «Титры»
+
+  function music() { return window.VitazMusic || null; }
+  function musicMuted() {
+    var m = music();
+    return m ? m.muted : true;
+  }
+  function setMusicMuted(on) {
+    var m = music();
+    if (!m) return;
+    m.setMuted(on);
+    try { localStorage.setItem("vitaz-music-off", on ? "1" : ""); } catch (e) {}
+  }
+  function musicFor(gameId) {
+    var m = music();
+    if (!m) return;
+    var idx = gameId === undefined ? MENU_TRACK : MUSIC_FOR[gameId];
+    if (idx == null) m.stop(); else m.play(idx, audio);
+  }
+
   function syncSound() {
-    if (!deckEl) return;
-    var b = deckEl.querySelector('[data-sys="sound"]');
-    if (b) b.querySelector("span").textContent = audio.muted ? "ЗВУК ВЫКЛ" : "ЗВУК ВКЛ";
+    var b = deckEl && deckEl.querySelector('[data-sys="sound"]');
+    if (b) {
+      b.innerHTML = ICONS[audio.muted ? "sfxOff" : "sfx"];
+      b.classList.toggle("off", audio.muted);
+    }
+    var mb = deckEl && deckEl.querySelector('[data-sys="music"]');
+    if (mb) {
+      mb.innerHTML = ICONS[musicMuted() ? "noteOff" : "note"];
+      mb.classList.toggle("off", musicMuted());
+    }
     var top = overlay && overlay.querySelector("#arcade-sound");
-    if (top) top.textContent = "Звук: " + (audio.muted ? "выкл" : "вкл");
+    if (top) top.textContent = "Звуки: " + (audio.muted ? "выкл" : "вкл");
+    var topM = overlay && overlay.querySelector("#arcade-music");
+    if (topM) topM.textContent = "Музыка: " + (musicMuted() ? "выкл" : "вкл");
   }
 
   /* ── Кнопки панели ───────────────────────────────────────────────────── */
@@ -950,11 +1014,21 @@ window.VitazArcade = (function () {
       toMenu.dataset.sys = "menu";
       row.appendChild(toMenu);
     }
+    // Раздельно: нота гасит музыку, динамик — звуки самой игры.
+    var music = makeButton({
+      icon: musicMuted() ? "noteOff" : "note", aria: "музыка", wide: true,
+      down: function () { setMusicMuted(!musicMuted()); syncSound(); },
+    });
+    music.dataset.sys = "music";
+    if (musicMuted()) music.classList.add("off");
+    row.appendChild(music);
+
     var sound = makeButton({
-      label: audio.muted ? "ЗВУК ВЫКЛ" : "ЗВУК ВКЛ", wide: true,
+      icon: audio.muted ? "sfxOff" : "sfx", aria: "звуки игры", wide: true,
       down: function () { audio.muted = !audio.muted; syncSound(); },
     });
     sound.dataset.sys = "sound";
+    if (audio.muted) sound.classList.add("off");
     row.appendChild(sound);
     var exit = makeButton({ label: "ВЫХОД", wide: true, down: close });
     exit.dataset.sys = "exit";
@@ -1187,6 +1261,7 @@ window.VitazArcade = (function () {
       running = null;
     }
     overlay.querySelector("#arcade-back").hidden = true;
+    musicFor();                       // в меню своя тема
     stage.innerHTML = '<div id="arcade-menu">' +
       '<div id="arcade-board"></div><div id="arcade-grid"></div></div>';
     menuDeck();
@@ -1230,6 +1305,10 @@ window.VitazArcade = (function () {
     stopMenuAnimation();
     if (running) { try { running.destroy(); } catch (e) {} running = null; }
     audio.ensure();                       // жест пользователя уже был — звук разрешён
+    if (music()) {
+      try { music().setMuted(localStorage.getItem("vitaz-music-off") === "1"); }
+      catch (e) {}
+    }
     stage.innerHTML = "";
     if (deckInner) deckInner.innerHTML = "";
     overlay.querySelector("#arcade-back").hidden = false;
@@ -1241,6 +1320,7 @@ window.VitazArcade = (function () {
     // снизу — картинка встаёт чуть выше середины, как раз под большой палец.
     // Распорки живут в ::before/::after и берут только СВОБОДНОЕ место: если
     // игра и так во весь экран, они схлопываются в ноль и ничего не жмут.
+    musicFor(game.id);                // тема этой игры, либо тишина
     root.className = "game-root";
     root.style.cssText = TOUCH
       ? "position:absolute;inset:0;display:flex;flex-direction:column;" +
@@ -1279,6 +1359,7 @@ window.VitazArcade = (function () {
   }
 
   function close() {
+    if (window.VitazMusic) window.VitazMusic.stop();
     stopMenuAnimation();
     if (running) { try { running.destroy(); } catch (e) {} running = null; }
     document.removeEventListener("keydown", onKey, true);
