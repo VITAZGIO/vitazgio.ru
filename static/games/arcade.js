@@ -96,6 +96,13 @@ window.VitazArcade = (function () {
     replay: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" ' +
             'stroke-linecap="round" stroke-linejoin="round">' +
             '<path d="M20 12a8 8 0 1 1-2.5-5.8"/><path d="M20 3.2V9h-5.8"/></svg>',
+    /* «Крутить» в рулетке: почти замкнутое кольцо со стрелкой по часовой —
+       ровно туда же, куда уходит барабан. От «заново» отличается тем, что
+       круг сомкнут, а наконечник крупный и залитый. */
+    spin: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" ' +
+          'stroke-linecap="round">' +
+          '<path d="M15.8 18.6A7.6 7.6 0 1 1 19.6 12"/>' +
+          '<path d="M19.6 17.4 16.1 10.5h7Z" fill="currentColor" stroke="none"/></svg>',
     fire: '<svg viewBox="0 0 24 24" fill="currentColor">' +
           '<path d="M12 2c.8 3.2 3.2 4.4 4.4 7 1.6 3.4-.4 8-4.4 8s-6-4.6-4.4-8c.5-1 1.2-1.7 1.8-2.4' +
           '.2 1.3.8 2.2 1.6 2.6-.4-2.6.2-5 1-7.2z"/>' +
@@ -584,10 +591,10 @@ window.VitazArcade = (function () {
       /* Сетка «угол — центр — угол». Высота одна на все игры, чтобы экран
          не прыгал при переходе между ними. */
       ".deck-main{display:grid;grid-template-columns:54px minmax(0,1fr) 54px;gap:10px;",
-      "align-items:center;min-height:clamp(178px,27vh,214px)}",
+      "align-items:center;min-height:calc(var(--ctl,300px) + 14px)}",
       ".deck-main.slim{grid-template-columns:minmax(0,1fr);min-height:0}",
       ".deck-main.no-corners{grid-template-columns:minmax(0,1fr)}",
-      ".deck-main.tall{min-height:calc(clamp(178px,27vh,214px) + 48px)}",
+      ".deck-main.tall{min-height:calc(var(--ctl,300px) + 62px)}",
       ".deck-corner{display:flex;flex-direction:column;gap:8px;align-items:center;",
       "justify-content:center}",
       /* Мелочь по углам: вдвое меньше прочих кнопок и подальше от крестовины */
@@ -597,7 +604,7 @@ window.VitazArcade = (function () {
       "flex-wrap:nowrap;min-width:0}",
       /* В DOOM между ручкой и огнём просвет побольше: там кнопка крупная,
          и вплотную к ручке большой палец задевал её при развороте. */
-      ".deck-center.airy{gap:30px}",
+      ".deck-center.airy{gap:46px}",
       ".deck-actions{display:flex;gap:10px;align-items:center;flex-wrap:nowrap;",
       "justify-content:center}",
 
@@ -620,10 +627,10 @@ window.VitazArcade = (function () {
       ".deck-stick.on .stick-knob{transition:none;",
       "box-shadow:0 3px 7px rgba(0,0,0,.6),inset 0 -3px 7px rgba(0,0,0,.45),",
       "inset 0 2px 5px rgba(255,255,255,.35),0 0 0 2px rgba(45,226,255,.35)}",
-      ".dbtn.huge{width:112px;height:112px;font-size:.6rem}",
-      ".dbtn.huge svg{width:44px;height:44px}",
-      ".dbtn.giant{width:132px;height:132px;font-size:.66rem}",
-      ".dbtn.giant svg{width:54px;height:54px}",
+      ".dbtn.huge,.dbtn.round.huge{width:150px;height:150px;font-size:.6rem}",
+      ".dbtn.huge svg,.dbtn.round.huge svg{width:60px;height:60px}",
+      ".dbtn.giant,.dbtn.round.giant{width:180px;height:180px;font-size:.66rem}",
+      ".dbtn.giant svg,.dbtn.round.giant svg{width:74px;height:74px}",
       /* Широкие кнопки в узкой полосе — одинаковые прямоугольники */
       ".deck-row .dbtn.wide{flex:1 1 0;min-width:120px;max-width:260px;height:44px}",
       /* Крестовина и ручка одного размера во всех играх: палец привыкает к
@@ -636,9 +643,9 @@ window.VitazArcade = (function () {
       "@media (max-width:430px){",
       ".deck-row .dbtn.wide{min-width:0;padding:0 6px;height:38px;min-height:38px;font-size:.55rem}",
       ".deck-row .dbtn.wide svg{width:16px;height:16px}",
-      ".dbtn.huge{width:84px;height:84px}",
-      ".dbtn.huge svg{width:34px;height:34px}",
-      ".deck-center.airy{gap:20px}",
+      ".dbtn.huge,.dbtn.round.huge{width:112px;height:112px}",
+      ".dbtn.huge svg,.dbtn.round.huge svg{width:46px;height:46px}",
+      ".deck-center.airy{gap:30px}",
       ".deck-main{grid-template-columns:44px minmax(0,1fr) 44px;gap:5px}",
       ".deck-corner .dbtn{width:42px;height:34px}",
       ".deck-center{gap:10px}}",
@@ -676,7 +683,7 @@ window.VitazArcade = (function () {
       "@keyframes deckRing{from{opacity:.85;transform:scale(.84)}to{opacity:0;transform:scale(1.16)}}",
 
       /* круглые кнопки как на автомате: глянец сверху, тень снизу */
-      ".dbtn.round{border-radius:50%;width:64px;height:64px;font-size:.58rem;",
+      ".dbtn.round{border-radius:50%;width:96px;height:96px;font-size:.58rem;",
       "border:2px solid rgba(0,0,0,.5);color:#0d1218;text-shadow:0 1px 0 rgba(255,255,255,.35);",
       "background:",
       "radial-gradient(circle at 34% 26%,rgba(255,255,255,.62),rgba(255,255,255,0) 46%),",
@@ -687,11 +694,11 @@ window.VitazArcade = (function () {
       ".dbtn.round svg{width:46%;height:46%}",
       ".dbtn.round.on{transform:translateY(5px);color:#0d1218;",
       "box-shadow:0 1px 0 rgba(0,0,0,.5),inset 0 4px 10px rgba(0,0,0,.45)}",
-      ".dbtn.round.big{width:84px;height:84px;font-size:.66rem}",
+      ".dbtn.round.big{width:126px;height:126px;font-size:.66rem}",
       ".dbtn.round.big svg{width:44%;height:44%}",
       /* Средний размер: крупнее обычной круглой, но три штуки в ряд ещё
          помещаются рядом с крестовиной. */
-      ".dbtn.round.mid{width:76px;height:76px;font-size:.62rem}",
+      ".dbtn.round.mid{width:114px;height:114px;font-size:.62rem}",
       ".dbtn.round.mid svg{width:46%;height:46%}",
 
       ".dbtn.wide{min-width:78px;padding:0 13px;height:40px;min-height:40px;font-size:.62rem;",
@@ -721,23 +728,27 @@ window.VitazArcade = (function () {
          где рядом с крестовиной стоят три круглые, — укладывалась в ширину
          телефона без переносов. */
       ".deck-pad,.deck-pad.big,.deck-stick,.deck-stick.big{",
-      "width:var(--ctl,200px);height:var(--ctl,200px);flex:none}",
-      ".deck-stick .stick-knob{width:calc(var(--ctl,200px) * .42);",
-      "height:calc(var(--ctl,200px) * .42);margin:0;left:29%;top:29%}",
-      "@media (max-width:430px){#arcade-deck{--ctl:156px}",
-      ".dbtn.round{width:52px;height:52px}",
-      ".dbtn.round.mid{width:54px;height:54px}",
-      ".dbtn.round.big{width:58px;height:58px}",
-      ".dbtn.round.big.icon-text{width:auto;min-width:58px;padding:0 6px}",
-      ".dbtn.giant{width:112px;height:112px}",
-      ".dbtn.giant svg{width:46px;height:46px}",
+      "width:var(--ctl,300px);height:var(--ctl,300px);flex:none}",
+      ".deck-stick .stick-knob{width:calc(var(--ctl,300px) * .42);",
+      "height:calc(var(--ctl,300px) * .42);margin:0;left:29%;top:29%}",
+      /* На узком экране круглые кнопки встают столбиком рядом с крестовиной,
+         а не строкой: втроём в строку они с подросшей крестовиной уже не
+         помещаются, а вниз места сколько угодно. */
+      "@media (max-width:560px){.deck-actions{flex-direction:column}}",
+      "@media (max-width:430px){#arcade-deck{--ctl:212px}",
+      ".dbtn.round{width:66px;height:66px}",
+      ".dbtn.round.mid{width:68px;height:68px}",
+      ".dbtn.round.big{width:74px;height:74px}",
+      ".dbtn.round.big.icon-text{width:auto;min-width:74px;padding:0 6px}",
+      ".dbtn.giant,.dbtn.round.giant{width:108px;height:108px}",
+      ".dbtn.giant svg,.dbtn.round.giant svg{width:54px;height:54px}",
       ".deck-actions{gap:8px}}",
-      "@media (max-width:380px){#arcade-deck{--ctl:140px}",
-      ".dbtn.round{width:48px;height:48px}",
-      ".dbtn.round.mid{width:50px;height:50px}",
-      ".dbtn.round.big{width:54px;height:54px}",
-      ".dbtn.giant{width:98px;height:98px}",
-      ".deck-actions{gap:6px}.deck-center{gap:10px}.deck-center.airy{gap:16px}}",
+      "@media (max-width:380px){#arcade-deck{--ctl:200px}",
+      ".dbtn.round{width:60px;height:60px}",
+      ".dbtn.round.mid{width:62px;height:62px}",
+      ".dbtn.round.big{width:66px;height:66px}",
+      ".dbtn.giant,.dbtn.round.giant{width:98px;height:98px}",
+      ".deck-actions{gap:6px}.deck-center{gap:10px}.deck-center.airy{gap:22px}}",
       "@media (max-width:560px){#arcade-bar{padding:8px 10px;gap:8px}",
       "#arcade-bar .hint{display:none}",
       "#arcade-menu{grid-template-columns:1fr;gap:10px;padding:10px}",

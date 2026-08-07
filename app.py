@@ -267,7 +267,7 @@ threading.Thread(target=_metrics_loop, daemon=True).start()
 DROP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "drop_data")
 DROP_TMP_DIR = os.path.join(DROP_DIR, "tmp")
 DROP_INDEX_PATH = os.path.join(DROP_DIR, "index.json")
-DROP_QUOTA = 20 * 1024 * 1024 * 1024      # 20 ГБ на весь дроп
+DROP_QUOTA = 30 * 1024 * 1024 * 1024      # 30 ГБ на весь дроп
 DROP_MAX_SIZE = 2 * 1024 * 1024 * 1024    # 2 ГБ на один файл
 DROP_CHUNK_TTL = 6 * 3600                 # брошенные недокачки убираем через 6 ч
 DROP_TEXT_PREVIEW = 400
@@ -302,6 +302,43 @@ def _drop_used():
 def _drop_children(parent):
     """Прямые потомки папки. Вызывать под drop_lock."""
     return [k for k, v in drop_items.items() if v.get("parent") == parent]
+
+
+# Значки папок. Имя из этого списка сохраняется в индексе, а рисует его
+# уже страница — так на сервере не лежит ни байта разметки.
+DROP_FOLDER_ICONS = (
+    "folder", "warn", "clock", "tree", "monitor", "phone",
+    "claude", "vitaz", "star", "lock", "music", "photo",
+)
+
+
+def _drop_folder_stats(item_id, memo=None):
+    """Сколько папка весит, сколько в ней всего и когда её трогали в последний
+    раз — считая по всему содержимому вглубь. Вызывать под drop_lock.
+
+    Свежесть папки берём по самому свежему файлу внутри: на Windows папка
+    считается изменённой, когда правишь её содержимое, и сортировка «сначала
+    новые» без этого выглядит враньём."""
+    memo = {} if memo is None else memo
+    if item_id in memo:
+        return memo[item_id]
+    memo[item_id] = (0, 0.0, 0)                       # заглушка от петли в индексе
+    size = 0
+    touched = drop_items.get(item_id, {}).get("created", 0.0)
+    count = 0
+    for child in _drop_children(item_id):
+        node = drop_items[child]
+        count += 1
+        if node["kind"] == "folder":
+            sub_size, sub_touched, sub_count = _drop_folder_stats(child, memo)
+            size += sub_size
+            count += sub_count
+            touched = max(touched, sub_touched)
+        else:
+            size += node.get("size", 0)
+            touched = max(touched, node.get("created", 0.0))
+    memo[item_id] = (size, touched, count)
+    return memo[item_id]
 
 
 def _drop_discard(item_id):
@@ -2047,16 +2084,34 @@ def drop_list_api():
     with drop_lock:
         if parent and parent not in drop_items:
             parent = None
-        items = [
-            {"id": k, "kind": v["kind"], "name": v["name"], "size": v.get("size", 0),
-             "created": v["created"], "preview": v.get("preview"),
-             "truncated": v.get("truncated", False),
-             "thumb": _drop_can_thumb(v),
-             "share": bool(v.get("share")),
-             "share_expires": (v.get("share") or {}).get("expires")}
-            for k, v in drop_items.items() if v.get("parent") == parent
-        ]
-        items.sort(key=lambda x: (x["kind"] != "folder", -x["created"]))
+        memo = {}
+        items = []
+        for k, v in drop_items.items():
+            if v.get("parent") != parent:
+                continue
+            row = {
+                "id": k, "kind": v["kind"], "name": v["name"], "size": v.get("size", 0),
+                "created": v["created"], "preview": v.get("preview"),
+                "truncated": v.get("truncated", False),
+                "thumb": _drop_can_thumb(v),
+                "share": bool(v.get("share")),
+                "share_expires": (v.get("share") or {}).get("expires"),
+                # Ссылку отдаём готовой: страница должна уметь показать её
+                # ещё раз, а не только выдать один раз при создании.
+                "share_url": (url_for("drop_public", token=v["share"]["token"], _external=True)
+                              if v.get("share") else None),
+                # По этой отметке страница сортирует. У файла это его время,
+                # у папки — время самого свежего файла внутри.
+                "touched": v["created"],
+            }
+            if v["kind"] == "folder":
+                size, touched, count = _drop_folder_stats(k, memo)
+                row["size"] = size
+                row["count"] = count
+                row["touched"] = touched
+                row["icon"] = v.get("icon") or "folder"
+            items.append(row)
+        items.sort(key=lambda x: -x["touched"])
         return jsonify(
             items=items,
             breadcrumbs=_drop_path_to_root(parent),
@@ -2094,6 +2149,13 @@ def drop_update(item_id):
                 if old_ext:
                     name = os.path.splitext(name)[0] + old_ext
             item["name"] = name
+        if "icon" in payload:
+            if item["kind"] != "folder":
+                return jsonify(error="Значок меняется только у папок."), 400
+            icon = payload.get("icon") or "folder"
+            if icon not in DROP_FOLDER_ICONS:
+                return jsonify(error="Нет такого значка."), 400
+            item["icon"] = icon
         if "parent" in payload:
             target = payload.get("parent") or None
             if target and drop_items.get(target, {}).get("kind") != "folder":
@@ -5129,8 +5191,10 @@ def drop_page():
                background: color-mix(in srgb, var(--tint, #7d8798) 12%, transparent); }
         .ico.img { border-style: solid; background-size: cover; background-position: center; font-size: 0; }
         /* Та же ширина, что у бейджей, иначе значок папки съезжает на пару пикселей. */
-        .ico.dir { width: 34px; height: 28px; border: 0; border-radius: 0; background: none; }
-        .ico.dir svg { width: 34px; height: 28px; }
+        .ico.dir { width: 34px; height: 34px; border: 0; border-radius: 0; background: none;
+                   cursor: pointer; transition: transform .16s; }
+        .ico.dir svg { width: 32px; height: 32px; }
+        .ico.dir:hover { transform: scale(1.12); }
 
         .nm { grid-area: name; min-width: 0; color: #dfe7f3; font-size: .84rem; overflow-wrap: anywhere; }
         .meta { grid-area: meta; color: #6b7385; font-size: .68rem; }
@@ -5176,6 +5240,33 @@ def drop_page():
                      letter-spacing: .06em; cursor: pointer; color: #cfe2ee;
                      border: 1px solid rgba(255,255,255,.16); background: rgba(255,255,255,.05); }
         .share-btns button.go { color: #04121c; border-color: #2de2ff; background: #2de2ff; }
+        .share-btns button.bad { color: #ff8f8f; border-color: rgba(255,90,90,.4); }
+
+        /* Карточка папки: сколько весит и каким значком её пометить */
+        .fi-stat { margin: 0 0 16px; color: #7f93a8; font-size: .76rem; line-height: 1.7; }
+        .fi-stat b { color: #cfe2ee; font-weight: 700; }
+        .fi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 16px; }
+        .fi-cell { display: grid; place-items: center; height: 56px; cursor: pointer;
+                   border: 1px solid rgba(255,255,255,.12); background: rgba(255,255,255,.03); }
+        .fi-cell svg { width: 27px; height: 27px; }
+        .fi-cell:hover { border-color: rgba(45,226,255,.5); background: rgba(45,226,255,.09); }
+        .fi-cell.on { border-color: #2de2ff; background: rgba(45,226,255,.16); }
+
+        /* Выданная раньше ссылка — её надо уметь показать и скопировать снова */
+        .lk-url { margin: 0 0 14px; padding: 11px; color: #9fd7e8; font-size: .72rem;
+                  word-break: break-all; line-height: 1.55;
+                  border: 1px solid rgba(255,255,255,.1); background: rgba(4,10,20,.6); }
+
+        /* Меню сортировки */
+        .sort-wrap { position: relative; }
+        .sort-menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 40; min-width: 200px;
+                     padding: 5px; border: 1px solid rgba(45,226,255,.3);
+                     background: rgba(10,16,26,.99); box-shadow: 0 18px 50px rgba(0,0,0,.6); }
+        .sort-menu button { display: block; width: 100%; padding: 10px 12px; text-align: left; cursor: pointer;
+                     color: #cfe2ee; font: 600 .76rem "Cascadia Code", Consolas, monospace;
+                     border: 0; background: transparent; }
+        .sort-menu button:hover { background: rgba(45,226,255,.12); }
+        .sort-menu button.on { color: #2de2ff; }
 
         /* Просмотр картинки во весь экран */
         .lightbox { position: fixed; inset: 0; z-index: 300; display: grid; place-items: center; padding: 24px;
@@ -5224,7 +5315,7 @@ def drop_page():
           <button class="btn" id="from-clip" type="button">Из буфера</button>
           <button class="btn" id="mkdir" type="button">Новая папка</button>
           <input class="search" id="search" type="search" placeholder="Поиск в этой папке…">
-          <button class="btn" id="sort" type="button">Сначала новые</button>
+          <div class="sort-wrap"><button class="btn" id="sort" type="button">Сначала новые</button></div>
           <!-- accept обязателен: без него Android показывает только камеру и галерею -->
           <input type="file" id="file-input" accept="*/*" multiple hidden>
         </div>
@@ -5250,8 +5341,20 @@ def drop_page():
 
         let parent = null;
         let items = [];
-        let newestFirst = true;
         const expanded = new Set();
+
+        /* Сортировка одна на папки и файлы вперемешку — как в проводнике,
+           когда столбец «Изменён» уже нажат. Свежесть папки сервер считает
+           по самому свежему файлу внутри: правишь содержимое — папка
+           поднимается наверх. */
+        const SORTS = {
+          new: ["Сначала новые", (a, b) => b.touched - a.touched],
+          old: ["Сначала старые", (a, b) => a.touched - b.touched],
+          az:  ["По алфавиту А→Я", (a, b) => a.name.localeCompare(b.name, "ru")],
+          za:  ["По алфавиту Я→А", (a, b) => b.name.localeCompare(a.name, "ru")],
+        };
+        let sortKey = localStorage.getItem("vitaz-drop-sort") || "new";
+        if (!SORTS[sortKey]) sortKey = "new";
 
         const fmtSize = b => {
           if (b < 1024) return b + " Б";
@@ -5279,12 +5382,60 @@ def drop_page():
         const extOf = name => (name.includes(".") ? name.split(".").pop() : "").toLowerCase();
         const tintOf = ext => (TINTS.find(([list]) => list.includes(ext)) || [null, "#7d8798"])[1];
 
+        /* Значки папок. Рисуем сами, а не эмодзи: те на каждой системе
+           выглядят по-своему, а тут всё должно быть в одном стиле. Имя
+           значка хранится в индексе, вся отрисовка — здесь. */
+        const FOLDER_ICONS = {
+          folder:  ["Папка", "#f5c344",
+            '<path d="M3 7a2 2 0 0 1 2-2h6l3 3h13a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" fill="currentColor" fill-opacity=".2"/>' +
+            '<path d="M3 7a2 2 0 0 1 2-2h6l3 3h13a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/>'],
+          warn:    ["Внимание", "#ff8f4a",
+            '<path d="M16 4.5 29.5 27.5H2.5L16 4.5Z" fill="currentColor" fill-opacity=".2"/>' +
+            '<path d="M16 4.5 29.5 27.5H2.5L16 4.5Z"/><path d="M16 13v6"/><path d="M16 23.2h.01"/>'],
+          clock:   ["Часы", "#4ec8ff",
+            '<circle cx="16" cy="16" r="12.5" fill="currentColor" fill-opacity=".18"/>' +
+            '<circle cx="16" cy="16" r="12.5"/><path d="M16 8.5V16l5.5 3.2"/>'],
+          tree:    ["Дерево", "#56d97f",
+            '<path d="M16 3.5 25 15.5h-4.5l6 8H5.5l6-8H7l9-12Z" fill="currentColor" fill-opacity=".2"/>' +
+            '<path d="M16 3.5 25 15.5h-4.5l6 8H5.5l6-8H7l9-12Z"/><path d="M16 23.5v5.5"/>'],
+          monitor: ["Компьютер", "#9aa6b8",
+            '<rect x="2.5" y="5" width="27" height="17.5" rx="2" fill="currentColor" fill-opacity=".18"/>' +
+            '<rect x="2.5" y="5" width="27" height="17.5" rx="2"/><path d="M16 22.5v5M11 27.5h10"/>'],
+          phone:   ["Телефон", "#b57cff",
+            '<rect x="9" y="2.5" width="14" height="27" rx="3" fill="currentColor" fill-opacity=".18"/>' +
+            '<rect x="9" y="2.5" width="14" height="27" rx="3"/><path d="M14.2 6h3.6"/><path d="M16 25.6h.01"/>'],
+          claude:  ["Клод", "#d97757",
+            '<g stroke-width="2.7"><path d="M16 3.5v9M16 19.5v9M3.5 16h9M19.5 16h9' +
+            'M7.2 7.2l6.4 6.4M18.4 18.4l6.4 6.4M24.8 7.2l-6.4 6.4M13.6 18.4l-6.4 6.4"/></g>'],
+          vitaz:   ["Vitaz Gio", "#ff2fa0",
+            '<path d="M4 7.5 9.5 25 15 7.5"/><path d="M27.5 12.2A7.6 7.6 0 1 0 27.5 20.4V16.2h-4"/>'],
+          star:    ["Звезда", "#ffd84a",
+            '<path d="m16 3.5 3.9 8.4 9.2 1.1-6.8 6.3 1.8 9.1-8.1-4.5-8.1 4.5 1.8-9.1-6.8-6.3 9.2-1.1L16 3.5Z" fill="currentColor" fill-opacity=".2"/>' +
+            '<path d="m16 3.5 3.9 8.4 9.2 1.1-6.8 6.3 1.8 9.1-8.1-4.5-8.1 4.5 1.8-9.1-6.8-6.3 9.2-1.1L16 3.5Z"/>'],
+          lock:    ["Замок", "#ff5a5a",
+            '<rect x="6" y="14" width="20" height="15" rx="3" fill="currentColor" fill-opacity=".18"/>' +
+            '<rect x="6" y="14" width="20" height="15" rx="3"/><path d="M11 14V9.6a5 5 0 0 1 10 0V14"/>'],
+          music:   ["Музыка", "#35e0f0",
+            '<path d="M12.5 23.5V7l14-3v16.5"/>' +
+            '<circle cx="8.5" cy="24" r="4.2" fill="currentColor" fill-opacity=".22"/><circle cx="8.5" cy="24" r="4.2"/>' +
+            '<circle cx="22.5" cy="20.5" r="4.2" fill="currentColor" fill-opacity=".22"/><circle cx="22.5" cy="20.5" r="4.2"/>'],
+          photo:   ["Фото", "#63f5ad",
+            '<rect x="3" y="6" width="26" height="20" rx="2" fill="currentColor" fill-opacity=".18"/>' +
+            '<rect x="3" y="6" width="26" height="20" rx="2"/><circle cx="10.5" cy="13" r="2.6"/>' +
+            '<path d="m4.5 23.5 7.5-7.5 5 5 4-3.2 6 6.2"/>'],
+        };
+
+        const folderSvg = name => {
+          const [, tint, body] = FOLDER_ICONS[name] || FOLDER_ICONS.folder;
+          return `<svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round" style="color:${tint}"
+            aria-hidden="true">${body}</svg>`;
+        };
+
         const iconHtml = it => {
           if (it.kind === "folder") {
-            return `<span class="ico dir"><svg viewBox="0 0 38 30" fill="none" aria-hidden="true">
-              <path d="M1 5a3 3 0 0 1 3-3h9l4 4h17a3 3 0 0 1 3 3v18a3 3 0 0 1-3 3H4a3 3 0 0 1-3-3V5Z" fill="#f5c344" fill-opacity=".22"/>
-              <path d="M1 5a3 3 0 0 1 3-3h9l4 4h17a3 3 0 0 1 3 3v18a3 3 0 0 1-3 3H4a3 3 0 0 1-3-3V5Z" stroke="#f5c344" stroke-width="2"/>
-            </svg></span>`;
+            return `<span class="ico dir" data-act="icon" title="Значок и размер папки">${
+              folderSvg(it.icon || "folder")}</span>`;
           }
           if (it.kind === "text") return `<span class="ico" style="--tint:#ff9f45">ТЕКСТ</span>`;
           const ext = extOf(it.name);
@@ -5345,6 +5496,96 @@ def drop_page():
           box.addEventListener("click", ev => { if (ev.target === box) shut(null); });
           document.addEventListener("keydown", onKey);
         });
+
+        /* Общая обёртка для окошек: тёмный фон, панель, Escape и щелчок мимо
+           закрывают. Раньше это дублировалось в каждом окне отдельно. */
+        const modal = html => {
+          const box = document.createElement("div");
+          box.className = "lightbox share-ask";
+          box.innerHTML = '<div class="share-panel">' + html + "</div>";
+          document.body.appendChild(box);
+          document.body.classList.add("modal-open");
+          const shut = () => {
+            box.remove();
+            document.body.classList.remove("modal-open");
+            document.removeEventListener("keydown", onKey);
+          };
+          const onKey = ev => { if (ev.key === "Escape") shut(); };
+          box.addEventListener("click", ev => { if (ev.target === box) shut(); });
+          document.addEventListener("keydown", onKey);
+          return { box: box, shut: shut };
+        };
+
+        /* Карточка папки: сколько она занимает на диске, сколько внутри всего
+           и каким значком её пометить. Открывается тычком по самому значку —
+           тычок по имени по-прежнему заходит внутрь. */
+        const folderCard = item => {
+          const cells = Object.keys(FOLDER_ICONS).map(key => {
+            const [label] = FOLDER_ICONS[key];
+            const on = (item.icon || "folder") === key ? " on" : "";
+            return `<button type="button" class="fi-cell${on}" data-icon="${key}"
+              title="${esc(label)}" aria-label="${esc(label)}">${folderSvg(key)}</button>`;
+          }).join("");
+          const m = modal(
+            "<h3>" + esc(item.name) + "</h3>" +
+            '<p class="fi-stat">На диске: <b>' + fmtSize(item.size || 0) + "</b><br>" +
+            "Внутри: <b>" + (item.count || 0) + "</b> " + plural(item.count || 0,
+              ["объект", "объекта", "объектов"]) + "<br>" +
+            "Последняя правка: <b>" + fmtDate(item.touched || item.created) + "</b></p>" +
+            '<p class="share-note">Значок папки</p>' +
+            '<div class="fi-grid">' + cells + "</div>" +
+            '<div class="share-btns"><button type="button" id="fi-no">ЗАКРЫТЬ</button></div>');
+          m.box.querySelector("#fi-no").addEventListener("click", m.shut);
+          m.box.querySelectorAll(".fi-cell").forEach(cell => {
+            cell.addEventListener("click", async () => {
+              const icon = cell.dataset.icon;
+              try {
+                await api("/api/drop/" + item.id, { method: "PATCH",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ icon }) });
+              } catch (err) { toast(err.message, true); return; }
+              m.shut();
+              load();
+            });
+          });
+        };
+
+        // «объект / объекта / объектов» — без этого счётчик читается коряво
+        const plural = (n, forms) => {
+          const a = Math.abs(n) % 100, b = a % 10;
+          if (a > 10 && a < 20) return forms[2];
+          if (b > 1 && b < 5) return forms[1];
+          return b === 1 ? forms[0] : forms[2];
+        };
+
+        /* Ссылка уже выдана: показываем её саму, даём скопировать ещё раз и
+           отозвать. Раньше повторный тык по цепочке умел только отзывать, и
+           узнать адрес заново было неоткуда. */
+        const linkMenu = item => {
+          const url = item.share_url || "";
+          const life = item.share_expires
+            ? "истекает " + fmtDate(item.share_expires)
+            : "без срока — открывается прямо в браузере";
+          const m = modal(
+            "<h3>Ссылка активна</h3>" +
+            '<div class="lk-url">' + esc(url) + "</div>" +
+            '<p class="share-note">' + esc(life) + "</p>" +
+            '<div class="share-btns">' +
+              '<button type="button" class="go" id="lk-copy">⧉ КОПИРОВАТЬ</button>' +
+              '<button type="button" class="bad" id="lk-del">УДАЛИТЬ ССЫЛКУ</button>' +
+            "</div>");
+          m.box.querySelector("#lk-copy").addEventListener("click", async () => {
+            try { await navigator.clipboard.writeText(url); toast("Ссылка скопирована"); }
+            catch { prompt("Ссылка:", url); }
+            m.shut();
+          });
+          m.box.querySelector("#lk-del").addEventListener("click", async () => {
+            try { await api("/api/drop/share/" + item.id, { method: "DELETE" }); toast("Ссылка отозвана"); }
+            catch (err) { toast(err.message, true); return; }
+            m.shut();
+            load();
+          });
+        };
 
         /* Картинка во весь экран. Закрыть можно крестиком, щелчком по фону,
            Escape или кнопкой «назад» — последнее важно на телефоне, где
@@ -5419,8 +5660,8 @@ def drop_page():
         const render = () => {
           const needle = $("search").value.trim().toLowerCase();
           let list = items.filter(it => !needle || it.name.toLowerCase().includes(needle));
-          list.sort((a, b) => (a.kind !== "folder") - (b.kind !== "folder")
-            || (newestFirst ? b.created - a.created : a.created - b.created));
+          list.sort(SORTS[sortKey][1]);
+          $("sort").textContent = SORTS[sortKey][0];
 
           if (!list.length) {
             $("items").innerHTML = '<p class="empty">' + (needle ? "Ничего не нашлось" : "Пусто. Перетащи файлы сюда или вставь через Ctrl+V") + "</p>";
@@ -5436,8 +5677,9 @@ def drop_page():
                    it.truncated && !open ? "…" : ""}${
                    it.truncated ? `<br><button class="txt-more" data-act="more">${open ? "свернуть" : "показать целиком"}</button>` : ""}</div>`
               : "";
-            const meta = isFolder ? "папка · " + fmtDate(it.created)
-                                  : fmtSize(it.size) + " · " + fmtDate(it.created);
+            const meta = isFolder
+              ? "папка · " + fmtSize(it.size || 0) + " · " + fmtDate(it.touched || it.created)
+              : fmtSize(it.size) + " · " + fmtDate(it.created);
             return `<div class="item ${it.kind}" data-id="${esc(it.id)}" draggable="true">
               ${iconHtml(it)}
               <span class="nm">${esc(it.name)}</span>
@@ -5687,10 +5929,30 @@ def drop_page():
         $("text-area").addEventListener("keydown", e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) sendText(); });
 
         $("search").addEventListener("input", render);
-        $("sort").addEventListener("click", () => {
-          newestFirst = !newestFirst;
-          $("sort").textContent = newestFirst ? "Сначала новые" : "Сначала старые";
-          render();
+        // Раньше кнопка просто переключала «новые ⇄ старые». Теперь она
+        // роняет меню со всеми порядками, а выбор запоминается.
+        $("sort").addEventListener("click", e => {
+          e.stopPropagation();
+          const old = document.querySelector(".sort-menu");
+          if (old) { old.remove(); return; }
+          const menu = document.createElement("div");
+          menu.className = "sort-menu";
+          menu.innerHTML = Object.keys(SORTS).map(k =>
+            `<button type="button" data-sort="${k}"${k === sortKey ? ' class="on"' : ""}>${
+              SORTS[k][0]}</button>`).join("");
+          $("sort").parentNode.appendChild(menu);
+          menu.addEventListener("click", ev => {
+            const btn = ev.target.closest("button");
+            if (!btn) return;
+            sortKey = btn.dataset.sort;
+            localStorage.setItem("vitaz-drop-sort", sortKey);
+            menu.remove();
+            render();
+          });
+        });
+        document.addEventListener("click", () => {
+          const menu = document.querySelector(".sort-menu");
+          if (menu) menu.remove();
         });
 
         $("crumbs").addEventListener("click", e => {
@@ -5746,7 +6008,11 @@ def drop_page():
           if (!row) return;
           const id = row.dataset.id;
           const item = items.find(i => i.id === id);
-          const act = e.target.dataset.act;
+          // closest, а не сам e.target: у значка папки внутри лежит svg,
+          // и щелчок прилетает из его path — без подъёма вверх действие
+          // терялось и вместо окна открывалась сама папка.
+          const hit = e.target.closest("[data-act]");
+          const act = hit && row.contains(hit) ? hit.dataset.act : null;
 
           if (!act) {
             if (item && item.kind === "folder") { parent = id; expanded.clear(); load(); }
@@ -5754,6 +6020,8 @@ def drop_page():
           }
 
           if (act === "dl") { window.location.assign("/api/drop/download/" + id); return; }
+
+          if (act === "icon") { folderCard(item); return; }
 
           if (act === "view") {
             openImage(item);
@@ -5831,12 +6099,9 @@ def drop_page():
           }
 
           if (act === "share") {
-            if (item.share) {
-              if (!confirm("Отозвать ссылку?")) return;
-              try { await api("/api/drop/share/" + id, { method: "DELETE" }); toast("Ссылка отозвана"); load(); }
-              catch (err) { toast(err.message, true); }
-              return;
-            }
+            // Ссылка уже есть — показываем её и даём выбор: скопировать
+            // ещё раз или отозвать.
+            if (item.share) { linkMenu(item); return; }
             const choice = await askShare();
             if (!choice) return;
             try {

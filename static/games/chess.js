@@ -632,11 +632,27 @@
       }, 30);
     }
 
+    /* На компьютере холст растянут на всю ширину панели, а картинка вписана
+       в него через object-fit:contain — значит по бокам остаются пустые
+       поля. Мерить клик от края бокса нельзя: доска уезжает вбок, и палец
+       попадает в соседнюю клетку. Считаем настоящий прямоугольник картинки. */
+    function boardBox() {
+      var r = canvas.getBoundingClientRect();
+      var bw = canvas.clientWidth || r.width;   // без рамки
+      var bh = canvas.clientHeight || r.height;
+      var s = Math.min(bw / W, bh / H) || 1;
+      return {
+        x: r.left + canvas.clientLeft + (bw - W * s) / 2,
+        y: r.top + canvas.clientTop + (bh - H * s) / 2,
+        s: s,
+      };
+    }
+
     function onClick(e) {
       if (over || thinking || state.side < 0) return;
-      var r = canvas.getBoundingClientRect();
-      var x = (e.clientX - r.left) / r.width * W - PAD;
-      var y = (e.clientY - r.top) / r.height * H - PAD;
+      var box = boardBox();
+      var x = (e.clientX - box.x) / box.s - PAD;
+      var y = (e.clientY - box.y) / box.s - PAD;
       if (x < 0 || y < 0 || x >= SIZE || y >= SIZE) return;
       var f = Math.floor(x / CELL), rr = Math.floor(y / CELL);
       var sq = sq120(f, rr);

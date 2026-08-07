@@ -638,16 +638,20 @@
 
     api.deck({
       pad: { up: hold(0, -1), down: hold(0, 1), left: hold(-1, 0), right: hold(1, 0) },
+      // Просвет между крестовиной и огнём: вплотную большой палец задевал
+      // курок, пока разворачивал танк.
+      airy: true,
       actions: [
         { icon: "fire", aria: "огонь", label: "ОГОНЬ", color: "#ff3fa4", big: true,
           down: function () { if (alive && !paused) fire(me); else restart(); } },
       ],
-      corners: [
-        { icon: "pause", aria: "пауза", down: function () { if (alive) paused = !paused; } },
-        { icon: "replay", aria: "заново", down: restart },
-      ],
+      // Пауза и «заново» подняты в верхний ряд: по бокам они отнимали у
+      // крестовины ширину, а нужны раз в партию.
       extra: [
         { icon: "hold", label: "КАРТА", aria: "выбрать карту", down: pickLevel },
+        { icon: "pause", label: "ПАУЗА", aria: "пауза",
+          down: function () { if (alive) paused = !paused; } },
+        { icon: "replay", label: "ЗАНОВО", aria: "заново", down: restart },
       ],
     });
 
