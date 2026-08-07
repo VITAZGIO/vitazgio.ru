@@ -595,8 +595,11 @@ window.VitazArcade = (function () {
       ".deck-main.slim{grid-template-columns:minmax(0,1fr);min-height:0}",
       ".deck-main.no-corners{grid-template-columns:minmax(0,1fr)}",
       ".deck-main.tall{min-height:calc(var(--ctl,300px) + 62px)}",
+      /* Пауза и «заново» жмутся к самому верху панели, к винтам: посреди
+         высоты они оказывались ровно под большим пальцем и ловили случайные
+         нажатия во время игры. */
       ".deck-corner{display:flex;flex-direction:column;gap:8px;align-items:center;",
-      "justify-content:center}",
+      "justify-content:flex-start;align-self:start}",
       /* Мелочь по углам: вдвое меньше прочих кнопок и подальше от крестовины */
       ".deck-corner .dbtn{width:48px;height:38px;min-width:0;min-height:0;border-radius:7px}",
       ".deck-corner .dbtn svg{width:17px;height:17px}",
