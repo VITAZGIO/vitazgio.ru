@@ -2263,6 +2263,7 @@ def cabinet():
       <meta name="viewport" content="width=device-width, initial-scale=1">
       <meta name="robots" content="noindex, nofollow">
       <title>Личный кабинет · vitazgio.ru</title>
+      __ICONLINKS__
       <link rel="manifest" href="/manifest.webmanifest">
       <meta name="theme-color" content="#0d1321">
       <style>
@@ -4148,7 +4149,8 @@ def cabinet():
     </body>
     </html>
     """
-    return html.replace("{{DEVICE_ITEMS}}", device_items)
+    return html.replace("{{DEVICE_ITEMS}}", device_items) \
+               .replace("__ICONLINKS__", ICON_LINKS)
 
 
 @app.get("/manifest.webmanifest")
@@ -4170,8 +4172,12 @@ def manifest():
             "icons": [
                 {"src": f"/icon-192.png?v={ICON_VERSION}", "sizes": "192x192", "type": "image/png"},
                 {"src": f"/icon-512.png?v={ICON_VERSION}", "sizes": "512x512", "type": "image/png"},
-                {"src": f"/icon-512.png?v={ICON_VERSION}", "sizes": "512x512", "type": "image/png",
-                 "purpose": "maskable"},
+                # Маскируемый — отдельным рисунком с запасом по краям, а не
+                # тем же файлом: круглая обрезка съедала бы углы знака.
+                {"src": f"/icon-maskable-512.png?v={ICON_VERSION}", "sizes": "512x512",
+                 "type": "image/png", "purpose": "maskable"},
+                {"src": f"/icon-maskable-192.png?v={ICON_VERSION}", "sizes": "192x192",
+                 "type": "image/png", "purpose": "maskable"},
             ],
             "share_target": {
                 "action": "/share-target",
@@ -4443,147 +4449,60 @@ _GAME_ICONS = {
 }
 
 
-# ---- Иконка приложения: монограмма VG ---------------------------------------
-# Левая палочка V упирается в общую стойку, она же служит левым боком G,
-# а сама G нарисована квадратной спиралью. Координаты в поле 100x100.
+# ---- Иконка приложения ------------------------------------------------------
+# Знак VG вычерчен хозяином в КОМПАСе и залит мелким процедурным зерном.
+# Исходник лежит в static/icons/vg.svg, рядом с ним готовые png на все
+# ходовые размеры: рисовать монограмму кодом больше не нужно.
 #
-# Знак рисуется не линиями со скруглёнными торцами, а сплошными фигурами:
-# стыки острые (miter), торцы отрезаны плоско. Косая палочка V получает
-# горизонтальные срезы — выходит параллелограмм с острыми углами, а у G все
-# концы обрублены поперёк, то есть тупые, под 90 градусов.
-_MONOGRAM_V = [(12, 16), (44, 80)]                       # диагональ V
-_MONOGRAM_G_TOP = [(86, 16), (50, 16), (44, 80)]         # верхняя перекладина и стойка
-# Язычок G укорочен до 80% (было до x=66): длинный подходил слишком близко
-# к общей стойке, и знак начинал читаться как цифра 6.
-_MONOGRAM_G_BOWL = [(44, 80), (86, 80), (86, 50), (70, 50)]
-# G разрезана на две фигуры нарочно: если вести её одной ломаной, стык стойки
-# с нижней перекладиной даёт острый угол, который вылезает левее диагонали V
-# маленьким язычком. Так низ слева целиком принадлежит V и сходится в остриё,
-# а обрубленные торцы G прячутся внутри знака.
-_MONOGRAM_SCALE = 0.62      # знак занимает ~62% поля, вокруг остаётся воздух
-_MONOGRAM_STROKE = 11
-_MONOGRAM_SLANT = 12        # курсив, градусы: верх знака уезжает вправо
-_MONOGRAM_INK = "#2de2ff"
-_MONOGRAM_BG = "#0d1321"
+# Маскируемый вариант отдельным файлом: Android режет значок в круг, и знак
+# в нём ужат до 62% поля, иначе углы обкусывает.
+ICON_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "icons")
+ICON_SIZES = (16, 32, 48, 64, 96, 128, 152, 180, 192, 256, 384, 512)
+ICON_MASKABLE_SIZES = (192, 512)
 
-# Поднимать при смене рисунка: попадает и в имя файла на диске, и в адрес
-# в манифесте — иначе браузер продолжит показывать иконку из кэша.
-ICON_VERSION = "vg4"
+# Поднимать при смене рисунка: версия попадает в адреса в манифесте и в
+# разметке, иначе браузер продолжит показывать иконку из кэша.
+ICON_VERSION = "vg5"
+
+# Одни и те же ссылки в head всех страниц. Версия в адресе обязательна:
+# браузер держит иконку в кэше и на смену картинки не смотрит.
+ICON_LINKS = (
+    f'<link rel="icon" href="/icon-32.png?v={ICON_VERSION}" sizes="32x32" type="image/png">'
+    f'<link rel="icon" href="/icon-192.png?v={ICON_VERSION}" sizes="192x192" type="image/png">'
+    f'<link rel="apple-touch-icon" href="/icon-180.png?v={ICON_VERSION}">'
+)
 
 
-def _line_cross(p, pd, q, qd):
-    """Пересечение прямых, заданных точкой и направлением."""
-    den = pd[0] * qd[1] - pd[1] * qd[0]
-    if abs(den) < 1e-9:     # параллельны — такого в знаке нет, но пусть не падает
-        return p
-    t = ((q[0] - p[0]) * qd[1] - (q[1] - p[1]) * qd[0]) / den
-    return (p[0] + pd[0] * t, p[1] + pd[1] * t)
-
-
-def _stroke_polygon(points, half, cap_start=None, cap_end=None):
-    """Осевая линия -> контур полосы шириной 2*half.
-
-    Углы считаются как miter: обе стороны продолжаются до пересечения, так что
-    стык остаётся острым. cap_* — прямая среза торца в виде (точка, направление);
-    None означает обычный срез поперёк линии через её конец."""
-    dirs = []
-    for i in range(len(points) - 1):
-        dx = points[i + 1][0] - points[i][0]
-        dy = points[i + 1][1] - points[i][1]
-        length = math.hypot(dx, dy) or 1.0
-        dirs.append((dx / length, dy / length))
-
-    last = len(dirs) - 1
-    cut_start = cap_start or (points[0], (-dirs[0][1], dirs[0][0]))
-    cut_end = cap_end or (points[-1], (-dirs[last][1], dirs[last][0]))
-
-    sides = []
-    for sign in (1, -1):
-        def shifted(seg, idx):
-            dx, dy = dirs[seg]
-            return (points[idx][0] - dy * half * sign,
-                    points[idx][1] + dx * half * sign)
-
-        edge = [_line_cross(shifted(0, 0), dirs[0], *cut_start)]
-        for i in range(1, len(points) - 1):
-            edge.append(_line_cross(shifted(i - 1, i), dirs[i - 1],
-                                    shifted(i, i), dirs[i]))
-        edge.append(_line_cross(shifted(last, last + 1), dirs[last], *cut_end))
-        sides.append(edge)
-
-    return sides[0] + sides[1][::-1]
-
-
-def _render_monogram(size, ink=_MONOGRAM_INK, bg=_MONOGRAM_BG):
-    from PIL import Image, ImageDraw
-
-    # Рисуем вчетверо крупнее и уменьшаем: у PIL заливка без сглаживания,
-    # и на косой палочке V иначе видна лесенка.
-    ss = 4
-    big = size * ss
-    image = Image.new("RGB", (big, big), bg)
-    draw = ImageDraw.Draw(image)
-
-    half = _MONOGRAM_STROKE / 2.0
-
-    # Косую палочку V режем не поперёк, а по верхней и нижней границе знака:
-    # тогда её торцы встают вровень с перекладинами G, а углы выходят острыми.
-    top, bottom = 16 - half, 80 + half
-    shapes = [
-        _stroke_polygon(_MONOGRAM_V, half,
-                        cap_start=((0, top), (1, 0)),
-                        cap_end=((0, bottom), (1, 0))),
-        _stroke_polygon(_MONOGRAM_G_TOP, half),
-        _stroke_polygon(_MONOGRAM_G_BOWL, half),
-    ]
-
-    if _MONOGRAM_SLANT:
-        # Настоящий курсив: горизонтальные срезы остаются горизонтальными,
-        # вертикальные едут вбок — все торцы так и остаются плоскими.
-        tilt = math.tan(math.radians(_MONOGRAM_SLANT))
-        shapes = [[(x + (80 - y) * tilt, y) for x, y in poly] for poly in shapes]
-
-    # Вписываем по настоящим габаритам знака, а не по условному полю 100x100:
-    # от наклона и толщины штриха они плывут, а иконка должна быть одного
-    # оптического размера и по центру.
-    points = [p for poly in shapes for p in poly]
-    x0, x1 = min(p[0] for p in points), max(p[0] for p in points)
-    y0, y1 = min(p[1] for p in points), max(p[1] for p in points)
-    scale = _MONOGRAM_SCALE * big / max(x1 - x0, y1 - y0)
-    dx = big / 2 - (x0 + x1) / 2 * scale
-    dy = big / 2 - (y0 + y1) / 2 * scale
-
-    for poly in shapes:
-        draw.polygon([(x * scale + dx, y * scale + dy) for x, y in poly], fill=ink)
-
-    return image.resize((size, size), Image.LANCZOS)
-
-
-@app.get("/favicon.ico")
-def favicon():
-    """Браузеры просят его сами, без всяких ссылок в разметке. Отдаём ту же
-    иконку, что и приложению, — иначе в логах вечный 404."""
-    return redirect(url_for("app_icon", size=192, v=ICON_VERSION))
-
-
-@app.get("/icon-<int:size>.png")
-def app_icon(size):
-    if size not in (192, 512):
-        return "", 404
-    # Версия в имени: у старой иконки был другой рисунок, и без неё браузер
-    # с телефоном продолжали бы показывать закэшированную картинку.
-    path = os.path.join(DATA_DIR, f"icon-{size}-{ICON_VERSION}.png")
+def _icon_response(name):
+    path = os.path.join(ICON_DIR, name)
     if not os.path.exists(path):
-        try:
-            image = _render_monogram(size)
-            image.save(path, "PNG", optimize=True)
-        except Exception:
-            return "", 404
-    response = send_file(path, mimetype="image/png", conditional=True)
+        return "", 404
+    response = send_file(path, conditional=True)
     # Сутки — достаточно, чтобы не дёргать сервер, и мало, чтобы не залипло
     # навсегда, если версию поднять забудут.
     response.headers["Cache-Control"] = "public, max-age=86400"
     return response
+
+
+@app.get("/favicon.ico")
+def favicon():
+    """Браузеры просят его сами, без всяких ссылок в разметке. Внутри три
+    размера — 16, 32 и 48, — иначе на разных экранах видно лесенку."""
+    return _icon_response("favicon.ico")
+
+
+@app.get("/icon-<int:size>.png")
+def app_icon(size):
+    if size not in ICON_SIZES:
+        return "", 404
+    return _icon_response(f"icon-{size}.png")
+
+
+@app.get("/icon-maskable-<int:size>.png")
+def app_icon_maskable(size):
+    if size not in ICON_MASKABLE_SIZES:
+        return "", 404
+    return _icon_response(f"maskable-{size}.png")
 
 
 @app.post("/share-target")
@@ -5112,13 +5031,14 @@ def themes_page():
     </body>
     </html>
     """
-    return html.replace("__NODES__", "".join(cards))
+    return html.replace("__NODES__", "".join(cards)) \
+               .replace("__ICONLINKS__", ICON_LINKS)
 
 
 @app.get("/drop")
 @login_required
 def drop_page():
-    return """
+    html = """
     <!DOCTYPE html>
     <html lang="ru">
     <head>
@@ -5126,6 +5046,7 @@ def drop_page():
       <meta name="viewport" content="width=device-width, initial-scale=1">
       <meta name="robots" content="noindex, nofollow">
       <meta name="theme-color" content="#0d1321">
+      __ICONLINKS__
       <link rel="manifest" href="/manifest.webmanifest">
       <title>Личный дроп · vitazgio.ru</title>
       <style>
@@ -6172,6 +6093,7 @@ def drop_page():
     </body>
     </html>
     """
+    return html.replace("__ICONLINKS__", ICON_LINKS)
 
 
 @app.route("/")
@@ -6184,6 +6106,7 @@ def home():
       <meta name="viewport" content="width=device-width, initial-scale=1">
       <meta name="theme-color" content="#080b12">
       <meta name="description" content="Витрина сервисов vitazgio.ru">
+      __ICONLINKS__
       <link rel="manifest" href="/manifest.webmanifest">
       <title>vitazgio.ru — мои сервисы</title>
       <style>
@@ -6871,6 +6794,7 @@ def home():
     """
     for name, svg in _GAME_ICONS.items():
         html = html.replace("__ICON_%s__" % name.upper(), svg)
+    html = html.replace("__ICONLINKS__", ICON_LINKS)
     return html
 
 
