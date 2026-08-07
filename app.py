@@ -5963,6 +5963,9 @@ def drop_page():
           document.body.classList.toggle("has-clip", !!clip);
           document.querySelectorAll(".item").forEach(row => {
             row.classList.toggle("picked", picked.has(row.dataset.id));
+            // Заодно снимаем следы перетаскивания. На телефоне событие его
+            // окончания не приходит вовсе, и строка оставалась бледной.
+            row.classList.remove("dragging", "drag-over");
           });
           drawSelbar();
         };
@@ -6128,15 +6131,23 @@ def drop_page():
 
         // Долгий тык по строке — вход в режим. На мышке та же роль у правой
         // кнопки: держать её секунду никто не станет.
-        let holdTimer = null, holdFrom = null;
+        let holdTimer = null, holdFrom = null, touching = false;
         const holdStart = (id, x, y) => {
           clearTimeout(holdTimer);
           holdFrom = { x, y };
           holdTimer = setTimeout(() => { holdTimer = null; if (!picking) startPicking(id); }, 420);
         };
-        const holdStop = () => { clearTimeout(holdTimer); holdTimer = null; holdFrom = null; };
+        const holdStop = () => {
+          clearTimeout(holdTimer);
+          holdTimer = null;
+          holdFrom = null;
+          touching = false;
+          document.querySelectorAll(".item.dragging, .item.drag-over")
+            .forEach(r => r.classList.remove("dragging", "drag-over"));
+        };
 
         $("items").addEventListener("touchstart", e => {
+          touching = true;
           const row = e.target.closest(".item");
           if (!row || picking) return;
           if (e.target.closest("[data-act]")) return;     // кнопки строки не трогаем
@@ -6422,6 +6433,10 @@ def drop_page():
         $("items").addEventListener("dragstart", e => {
           const row = e.target.closest(".item");
           if (!row) return;
+          // На касаниях встроенное перетаскивание браузера только мешает:
+          // работать оно всё равно не работает, а строку глушит до 40%
+          // прозрачности и обратно не возвращает — события конца нет.
+          if (touching) { e.preventDefault(); return; }
           dragId = row.dataset.id;
           row.classList.add("dragging");
           e.dataTransfer.effectAllowed = "move";
