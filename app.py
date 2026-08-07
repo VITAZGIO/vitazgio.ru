@@ -5312,36 +5312,68 @@ def drop_page():
         /* В нём тык по строке не открывает папку, а ставит и снимает галку.
            Чтобы это было видно сразу, строки в этом режиме подсвечены рамкой,
            а выделенные — ещё и заливкой с галочкой слева. */
-        body.picking .item { cursor: pointer; border-color: rgba(45,226,255,.16); }
-        body.picking .item .acts { opacity: .25; pointer-events: none; }
-        .item.picked { border-color: #2de2ff; background: rgba(45,226,255,.12); }
-        .item.picked::after { content: "✓"; position: absolute; left: 6px; top: 6px;
-                width: 19px; height: 19px; display: grid; place-items: center;
-                color: #04121c; font-size: .72rem; font-weight: 800;
-                background: #2de2ff; border-radius: 3px; }
-        body.picking .item { position: relative; }
+        body.picking .item { cursor: pointer; border-color: rgba(45,226,255,.16);
+                position: relative; }
+        /* Кнопки строки в этом режиме убираем совсем, а не приглушаем: на
+           телефоне они занимают отдельную строку, и список раздувался вдвое
+           ровно там, где нужно видеть побольше файлов сразу. */
+        body.picking .item .acts { display: none; }
+        .item.picked { border-color: #2de2ff; background: rgba(45,226,255,.12);
+                box-shadow: inset 0 0 0 1px rgba(45,226,255,.25); }
+        /* Галка уголком у самого края рамки, а не поверх значка файла */
+        .item.picked::after { content: "✓"; position: absolute; left: -1px; top: -1px;
+                width: 22px; height: 20px; display: grid; place-items: center;
+                color: #04121c; font-size: .74rem; font-weight: 800; line-height: 1;
+                background: #2de2ff; border-radius: 0 0 7px 0; }
         /* Место под панель действий, иначе она накрывает последнюю строку */
-        body.picking .wrap, body.has-clip .wrap { padding-bottom: 96px; }
+        body.picking .wrap, body.has-clip .wrap { padding-bottom: 132px; }
 
         .selbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 120;
-                  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
-                  padding: 11px 14px calc(11px + env(safe-area-inset-bottom));
+                  display: flex; align-items: center; gap: 12px;
+                  padding: 10px 52px 10px 14px;
+                  padding-bottom: calc(10px + env(safe-area-inset-bottom));
                   border-top: 1px solid rgba(45,226,255,.35);
-                  background: rgba(8,14,24,.98);
+                  background: linear-gradient(180deg, rgba(12,20,33,.99), rgba(7,12,20,.99));
                   box-shadow: 0 -14px 40px rgba(0,0,0,.6); }
-        .selbar .count { margin-right: auto; color: #2de2ff;
-                  font: 700 .78rem "Cascadia Code", Consolas, monospace; letter-spacing: .04em; }
+        .selbar .count { flex: none; color: #2de2ff;
+                  font: 700 .76rem "Cascadia Code", Consolas, monospace; letter-spacing: .04em; }
         .selbar .count b { color: #eafcff; }
         .selbar .count i { display: block; margin-top: 3px; color: #6b7c8f;
-                  font-style: normal; font-size: .68rem; letter-spacing: .02em; }
-        .selbar button { height: 36px; padding: 0 13px; cursor: pointer; color: #cfe2ee;
-                  font: 700 .72rem "Cascadia Code", Consolas, monospace; letter-spacing: .05em;
-                  border: 1px solid rgba(255,255,255,.16); background: rgba(255,255,255,.05); }
-        .selbar button:hover:not([disabled]) { border-color: rgba(45,226,255,.5);
-                  background: rgba(45,226,255,.12); }
-        .selbar button.go { color: #04121c; border-color: #2de2ff; background: #2de2ff; }
-        .selbar button.bad { color: #ff8f8f; border-color: rgba(255,90,90,.4); }
-        .selbar button[disabled] { opacity: .3; cursor: default; }
+                  font-style: normal; font-size: .66rem; letter-spacing: .02em; }
+        .selbar .row { flex: 1; display: flex; justify-content: flex-end; gap: 8px; }
+
+        /* Кнопки: значок плюс подпись, подпись никогда не вылезает наружу —
+           её режет overflow, а не удача с длиной слова. */
+        .selbar button { display: inline-flex; align-items: center; justify-content: center;
+                  gap: 7px; height: 40px; padding: 0 14px; cursor: pointer; color: #cfe2ee;
+                  font: 700 .70rem "Cascadia Code", Consolas, monospace; letter-spacing: .04em;
+                  white-space: nowrap; overflow: hidden; border-radius: 9px;
+                  border: 1px solid rgba(255,255,255,.14);
+                  background: linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,.03));
+                  transition: border-color .16s, background .16s, transform .1s; }
+        .selbar button svg { width: 15px; height: 15px; flex: none; }
+        .selbar button span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+        .selbar button:hover:not([disabled]) { border-color: rgba(45,226,255,.55);
+                  background: linear-gradient(180deg, rgba(45,226,255,.2), rgba(45,226,255,.07)); }
+        .selbar button:active:not([disabled]) { transform: translateY(1px); }
+        .selbar button.go { color: #04121c; border-color: #2de2ff;
+                  background: linear-gradient(180deg, #6df0ff, #21c8e6); }
+        .selbar button.go:hover:not([disabled]) { background: linear-gradient(180deg, #8af5ff, #2de2ff); }
+        .selbar button.bad { color: #ffb3b3; border-color: rgba(255,90,90,.38);
+                  background: linear-gradient(180deg, rgba(255,90,90,.16), rgba(255,90,90,.05)); }
+        .selbar button.bad:hover:not([disabled]) { border-color: rgba(255,90,90,.7);
+                  background: linear-gradient(180deg, rgba(255,90,90,.28), rgba(255,90,90,.1)); }
+        .selbar button[disabled] { opacity: .28; cursor: default; }
+
+        /* Крестик закрытия — в углу самой панели, как у окошек в браузере.
+           Отдельной кнопкой в ряду он съедал место у четырёх нужных. */
+        .selbar .shut { position: absolute; right: 10px; top: 8px; width: 30px; height: 30px;
+                  padding: 0; gap: 0; border-radius: 8px; color: #7f93a8;
+                  border-color: transparent; background: transparent; }
+        .selbar .shut svg { width: 15px; height: 15px; }
+        .selbar .shut:hover:not([disabled]) { color: #eafcff;
+                  border-color: rgba(255,255,255,.18);
+                  background: rgba(255,255,255,.07); }
 
         /* Полоса хода дела — показываем только когда работа затянулась */
         .oplane { position: fixed; left: 0; right: 0; bottom: 0; z-index: 130;
@@ -5353,9 +5385,22 @@ def drop_page():
         .oplane .fill { height: 100%; width: 0; background: linear-gradient(90deg,#2de2ff,#63f5ad);
                   transition: width .2s ease; }
 
-        @media (max-width: 560px) {
-          .selbar .count { width: 100%; margin: 0 0 2px; }
-          .selbar button { flex: 1 1 0; min-width: 0; padding: 0 4px; font-size: .64rem; }
+        /* На телефоне панель в два ряда: сверху счётчик, снизу кнопки сеткой
+           по три. В одну строку пять кнопок с подписями не влезают — слова
+           вроде «ПЕРЕМЕСТИТЬ» вылезали за рамку. */
+        @media (max-width: 620px) {
+          .selbar { flex-direction: column; align-items: stretch; gap: 9px;
+                    padding-right: 14px; }
+          .selbar .count { width: 100%; padding-right: 38px; }
+          .selbar .row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; }
+          .selbar button { padding: 0 5px; font-size: .60rem; gap: 5px; letter-spacing: 0; }
+          .selbar button svg { width: 14px; height: 14px; }
+          .selbar .shut { padding: 0; }
+        }
+        @media (max-width: 380px) {
+          .selbar .row { gap: 6px; }
+          .selbar button { font-size: .55rem; gap: 3px; padding: 0 3px; }
+          .selbar button svg { width: 12px; height: 12px; }
         }
 
         .ico { grid-area: ico; justify-self: center; width: 34px; height: 42px; display: grid; place-items: center;
@@ -5943,6 +5988,26 @@ def drop_page():
           paintPicks();
         };
 
+        /* Значки на кнопках панели. Рисуем сами по той же причине, что и
+           значки папок: эмодзи на каждой системе выглядят по-своему. */
+        const OP_ICONS = {
+          copy: '<rect x="6.5" y="6.5" width="11" height="13" rx="2"/>' +
+                '<path d="M13.5 6.5V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h1.5"/>',
+          cut:  '<path d="M3 6h6l2 2h9a1 1 0 0 1 1 1v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7"/>' +
+                '<path d="M9 13.5h6"/><path d="M12.5 11l2.5 2.5-2.5 2.5"/>',
+          paste:'<rect x="4.5" y="4" width="15" height="17" rx="2"/>' +
+                '<path d="M9 4V2.8A1.3 1.3 0 0 1 10.3 1.5h3.4A1.3 1.3 0 0 1 15 2.8V4"/>' +
+                '<path d="M8.5 12h7M8.5 16h4.5"/>',
+          del:  '<path d="M4 6.5h16"/><path d="M9 6.5V4.2A1.2 1.2 0 0 1 10.2 3h3.6A1.2 1.2 0 0 1 15 4.2v2.3"/>' +
+                '<path d="M6 6.5 7 20a1.5 1.5 0 0 0 1.5 1.4h7A1.5 1.5 0 0 0 17 20l1-13.5"/>' +
+                '<path d="M10 10.5v7M14 10.5v7"/>',
+          off:  '<path d="M6 6l12 12M18 6 6 18"/>',
+        };
+        const opIcon = name =>
+          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" ' +
+          'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+          OP_ICONS[name] + "</svg>";
+
         function drawSelbar() {
           let bar = document.querySelector(".selbar");
           if (!picking && !clip) { if (bar) bar.remove(); return; }
@@ -5958,13 +6023,21 @@ def drop_page():
               plural(clip.ids.length, ["штука", "штуки", "штук"]) +
               (clip.mode === "move" ? " на перенос" : " на копию") + "</i>"
             : "";
+          const btn = (op, label, cls, off) =>
+            '<button type="button" data-op="' + op + '"' +
+            (cls ? ' class="' + cls + '"' : "") + (off ? " disabled" : "") +
+            ' aria-label="' + label + '">' + opIcon(op) +
+            "<span>" + label + "</span></button>";
           bar.innerHTML =
             '<span class="count">Выделено <b>' + n + "</b>" + clipNote + "</span>" +
-            '<button type="button" data-op="copy"' + (n ? "" : " disabled") + ">КОПИРОВАТЬ</button>" +
-            '<button type="button" data-op="cut"' + (n ? "" : " disabled") + ">ПЕРЕМЕСТИТЬ</button>" +
-            '<button type="button" class="go" data-op="paste"' + (clip ? "" : " disabled") + ">ВСТАВИТЬ</button>" +
-            '<button type="button" class="bad" data-op="del"' + (n ? "" : " disabled") + ">УДАЛИТЬ</button>" +
-            '<button type="button" data-op="off">ОТМЕНА</button>';
+            '<span class="row">' +
+              btn("copy", "КОПИЯ", "", !n) +
+              btn("cut", "ПЕРЕНОС", "", !n) +
+              btn("paste", "ВСТАВИТЬ", "go", !clip) +
+              btn("del", "УДАЛИТЬ", "bad", !n) +
+            "</span>" +
+            '<button type="button" class="shut" data-op="off" title="Выйти из режима" ' +
+            'aria-label="Выйти из режима выделения">' + opIcon("off") + "</button>";
         }
 
         /* Полоса хода дела. Появляется только если работа затянулась дольше
