@@ -2167,6 +2167,203 @@ def drop_update(item_id):
     return jsonify(ok=True)
 
 
+# ---- Пакетные действия: копирование, перенос, удаление -----------------------
+# Копирование гигабайтной папки занимает секунды, а то и минуты, поэтому работа
+# уходит в отдельный поток, а страница спрашивает о ходе дела по номеру задачи.
+# Диск трогаем вне drop_lock: под ним весь дроп встал бы на всё время копии.
+drop_jobs: dict = {}
+drop_jobs_lock = threading.Lock()
+DROP_JOB_TTL = 900              # доделанную задачу держим ещё четверть часа
+DROP_COPY_CHUNK = 4 * 1024 * 1024
+
+
+def _drop_job_set(job_id, **fields):
+    with drop_jobs_lock:
+        job = drop_jobs.get(job_id)
+        if job:
+            job.update(fields)
+
+
+def _drop_jobs_sweep():
+    """Выкидываем задачи, о которых уже не спросят. Под drop_jobs_lock."""
+    edge = time.time() - DROP_JOB_TTL
+    for key in [k for k, v in drop_jobs.items()
+                if v["state"] != "run" and v["ended"] < edge]:
+        drop_jobs.pop(key, None)
+
+
+def _drop_unique_name(name, parent, extra=()):
+    """«файл.txt» рядом с таким же становится «файл (2).txt». Под drop_lock.
+
+    extra — имена, которых в папке ещё нет, но они там вот-вот появятся:
+    при копировании план строится целиком заранее, и без этого списка две
+    одинаковые копии в одной пачке получили бы одно и то же имя."""
+    taken = {drop_items[k]["name"] for k in _drop_children(parent)} | set(extra)
+    if name not in taken:
+        return name
+    stem, ext = os.path.splitext(name)
+    for n in range(2, 1000):
+        candidate = f"{stem} ({n}){ext}"
+        if candidate not in taken:
+            return candidate
+    return f"{stem} ({uuid.uuid4().hex[:6]}){ext}"
+
+
+def _drop_copy_plan(ids, target):
+    """Разворачивает выделенное в плоский список работ. Под drop_lock.
+
+    Порядок обхода такой, что папка всегда идёт раньше своего содержимого —
+    значит к моменту создания ребёнка его новый родитель уже существует."""
+    plan, total, claimed = [], 0, set()
+
+    def walk(item_id, parent, rename):
+        nonlocal total
+        item = drop_items.get(item_id)
+        if not item:
+            return
+        new_id = str(uuid.uuid4())
+        if rename:
+            name = _drop_unique_name(item["name"], parent, claimed)
+            claimed.add(name)
+        else:
+            name = item["name"]
+        plan.append({"src": item_id, "new": new_id, "parent": parent,
+                     "name": name, "kind": item["kind"],
+                     "size": item.get("size", 0)})
+        total += item.get("size", 0)
+        if item["kind"] == "folder":
+            for child in _drop_children(item_id):
+                walk(child, new_id, False)
+
+    for item_id in ids:
+        walk(item_id, target, True)
+    return plan, total
+
+
+def _drop_copy_file(src_id, new_id, job_id):
+    """Копирует тело файла кусками, отмечая пройденные байты."""
+    src, dst = _drop_path(src_id), _drop_path(new_id)
+    with open(src, "rb") as fin, open(dst, "wb") as fout:
+        while True:
+            chunk = fin.read(DROP_COPY_CHUNK)
+            if not chunk:
+                break
+            fout.write(chunk)
+            with drop_jobs_lock:
+                job = drop_jobs.get(job_id)
+                if not job:
+                    raise RuntimeError("задача отменена")
+                job["bytes"] += len(chunk)
+    thumb = _drop_thumb_path(src_id)
+    if os.path.exists(thumb):
+        try:
+            shutil.copyfile(thumb, _drop_thumb_path(new_id))
+        except OSError:
+            pass
+
+
+def _drop_run_copy(job_id, ids, target):
+    with drop_lock:
+        plan, total_bytes = _drop_copy_plan(ids, target)
+        free = DROP_QUOTA - _drop_used()
+    if total_bytes > free:
+        raise RuntimeError("Не хватает места: нужно "
+                           f"{total_bytes // 1048576} МБ, свободно {max(free, 0) // 1048576} МБ.")
+    _drop_job_set(job_id, total=len(plan), bytes_total=total_bytes)
+    for step in plan:
+        if step["kind"] != "folder":
+            _drop_copy_file(step["src"], step["new"], job_id)
+        with drop_lock:
+            src = drop_items.get(step["src"])
+            if not src:                       # исчез, пока копировали
+                continue
+            copy = dict(src)
+            copy.update({"name": step["name"], "parent": step["parent"],
+                         "created": time.time(), "share": None})
+            drop_items[step["new"]] = copy
+            _drop_write_index()
+        with drop_jobs_lock:
+            job = drop_jobs.get(job_id)
+            if job:
+                job["done"] += 1
+
+
+def _drop_run_move(job_id, ids, target):
+    with drop_lock:
+        if target and drop_items.get(target, {}).get("kind") != "folder":
+            raise RuntimeError("Такой папки нет.")
+        for item_id in ids:
+            if target and _drop_is_descendant(item_id, target):
+                raise RuntimeError("Нельзя переложить папку внутрь себя.")
+        _drop_job_set(job_id, total=len(ids))
+        for item_id in ids:
+            item = drop_items.get(item_id)
+            if not item or item.get("parent") == target:
+                with drop_jobs_lock:
+                    drop_jobs[job_id]["done"] += 1
+                continue
+            # Имя подбираем до перекладывания: после него элемент уже лежит
+            # в приёмнике и считает тёзкой сам себя — папка «Склад» так
+            # переезжала и становилась «Склад (2)».
+            item["name"] = _drop_unique_name(item["name"], target)
+            item["parent"] = target
+            with drop_jobs_lock:
+                drop_jobs[job_id]["done"] += 1
+        _drop_write_index()
+
+
+def _drop_run_delete(job_id, ids, _target):
+    with drop_lock:
+        _drop_job_set(job_id, total=len(ids))
+        for item_id in ids:
+            _drop_discard(item_id)
+            with drop_jobs_lock:
+                drop_jobs[job_id]["done"] += 1
+        _drop_write_index()
+
+
+DROP_OPS = {"copy": _drop_run_copy, "move": _drop_run_move, "delete": _drop_run_delete}
+
+
+@app.post("/api/drop/op")
+@login_required
+def drop_op_start():
+    payload = request.get_json(silent=True) or {}
+    op = payload.get("op")
+    ids = [str(i) for i in (payload.get("ids") or [])][:2000]
+    target = payload.get("parent") or None
+    if op not in DROP_OPS:
+        return jsonify(error="Неизвестное действие."), 400
+    if not ids:
+        return jsonify(error="Ничего не выбрано."), 400
+
+    job_id = str(uuid.uuid4())
+    with drop_jobs_lock:
+        _drop_jobs_sweep()
+        drop_jobs[job_id] = {"state": "run", "op": op, "done": 0, "total": len(ids),
+                             "bytes": 0, "bytes_total": 0, "error": "", "ended": 0.0}
+
+    def work():
+        try:
+            DROP_OPS[op](job_id, ids, target)
+            _drop_job_set(job_id, state="done", ended=time.time())
+        except Exception as e:                      # noqa: BLE001 — причину показываем как есть
+            _drop_job_set(job_id, state="fail", error=str(e), ended=time.time())
+
+    threading.Thread(target=work, daemon=True).start()
+    return jsonify(job=job_id)
+
+
+@app.get("/api/drop/op/<job_id>")
+@login_required
+def drop_op_status(job_id):
+    with drop_jobs_lock:
+        job = drop_jobs.get(job_id)
+        if not job:
+            return jsonify(error="Задача не найдена."), 404
+        return jsonify(**{k: v for k, v in job.items() if k != "ended"})
+
+
 @app.post("/api/drop/share/<item_id>")
 @login_required
 def drop_share_create(item_id):
@@ -5111,6 +5308,56 @@ def drop_page():
         .item.drag-over { border-color: #63f5ad; background: rgba(99,245,173,.1); }
         .item.dragging { opacity: .4; }
 
+        /* ── Режим выделения ─────────────────────────────────────────── */
+        /* В нём тык по строке не открывает папку, а ставит и снимает галку.
+           Чтобы это было видно сразу, строки в этом режиме подсвечены рамкой,
+           а выделенные — ещё и заливкой с галочкой слева. */
+        body.picking .item { cursor: pointer; border-color: rgba(45,226,255,.16); }
+        body.picking .item .acts { opacity: .25; pointer-events: none; }
+        .item.picked { border-color: #2de2ff; background: rgba(45,226,255,.12); }
+        .item.picked::after { content: "✓"; position: absolute; left: 6px; top: 6px;
+                width: 19px; height: 19px; display: grid; place-items: center;
+                color: #04121c; font-size: .72rem; font-weight: 800;
+                background: #2de2ff; border-radius: 3px; }
+        body.picking .item { position: relative; }
+        /* Место под панель действий, иначе она накрывает последнюю строку */
+        body.picking .wrap, body.has-clip .wrap { padding-bottom: 96px; }
+
+        .selbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 120;
+                  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+                  padding: 11px 14px calc(11px + env(safe-area-inset-bottom));
+                  border-top: 1px solid rgba(45,226,255,.35);
+                  background: rgba(8,14,24,.98);
+                  box-shadow: 0 -14px 40px rgba(0,0,0,.6); }
+        .selbar .count { margin-right: auto; color: #2de2ff;
+                  font: 700 .78rem "Cascadia Code", Consolas, monospace; letter-spacing: .04em; }
+        .selbar .count b { color: #eafcff; }
+        .selbar .count i { display: block; margin-top: 3px; color: #6b7c8f;
+                  font-style: normal; font-size: .68rem; letter-spacing: .02em; }
+        .selbar button { height: 36px; padding: 0 13px; cursor: pointer; color: #cfe2ee;
+                  font: 700 .72rem "Cascadia Code", Consolas, monospace; letter-spacing: .05em;
+                  border: 1px solid rgba(255,255,255,.16); background: rgba(255,255,255,.05); }
+        .selbar button:hover:not([disabled]) { border-color: rgba(45,226,255,.5);
+                  background: rgba(45,226,255,.12); }
+        .selbar button.go { color: #04121c; border-color: #2de2ff; background: #2de2ff; }
+        .selbar button.bad { color: #ff8f8f; border-color: rgba(255,90,90,.4); }
+        .selbar button[disabled] { opacity: .3; cursor: default; }
+
+        /* Полоса хода дела — показываем только когда работа затянулась */
+        .oplane { position: fixed; left: 0; right: 0; bottom: 0; z-index: 130;
+                  padding: 14px 16px calc(14px + env(safe-area-inset-bottom));
+                  border-top: 1px solid rgba(45,226,255,.35); background: rgba(6,11,20,.99); }
+        .oplane .txt { display: flex; justify-content: space-between; margin-bottom: 8px;
+                  color: #9fd7e8; font: 700 .72rem "Cascadia Code", Consolas, monospace; }
+        .oplane .bar { height: 6px; background: rgba(255,255,255,.08); }
+        .oplane .fill { height: 100%; width: 0; background: linear-gradient(90deg,#2de2ff,#63f5ad);
+                  transition: width .2s ease; }
+
+        @media (max-width: 560px) {
+          .selbar .count { width: 100%; margin: 0 0 2px; }
+          .selbar button { flex: 1 1 0; min-width: 0; padding: 0 4px; font-size: .64rem; }
+        }
+
         .ico { grid-area: ico; justify-self: center; width: 34px; height: 42px; display: grid; place-items: center;
                color: var(--tint, #7d8798); font-size: .5rem; font-weight: 800; letter-spacing: .02em;
                border: 2px solid var(--tint, #7d8798); border-radius: 5px;
@@ -5268,6 +5515,14 @@ def drop_page():
         let parent = null;
         let items = [];
         const expanded = new Set();
+
+        /* Выделение нескольких штук сразу. picking — в режиме мы или нет,
+           picked — что отмечено, clip — что лежит в буфере после «копировать»
+           или «переместить». Буфер переживает переход в другую папку: в этом
+           и весь смысл — набрал здесь, вставил там. */
+        let picking = false;
+        const picked = new Set();
+        let clip = null;             // { mode: "copy" | "move", ids: [...] }
 
         /* Сортировка одна на папки и файлы вперемешку — как в проводнике,
            когда столбец «Изменён» уже нажат. Свежесть папки сервер считает
@@ -5606,6 +5861,7 @@ def drop_page():
 
           if (!list.length) {
             $("items").innerHTML = '<p class="empty">' + (needle ? "Ничего не нашлось" : "Пусто. Перетащи файлы сюда или вставь через Ctrl+V") + "</p>";
+            paintPicks();          // панель нужна и в пустой папке: сюда вставляют
             return;
           }
           $("items").innerHTML = list.map(it => {
@@ -5635,6 +5891,8 @@ def drop_page():
               ${body}
             </div>`;
           }).join("");
+          // Разметку строк перерисовали заново — вернуть галки на место
+          paintPicks();
         };
 
         const load = async () => {
@@ -5649,6 +5907,188 @@ def drop_page():
             render();
           } catch (e) { toast(e.message, true); }
         };
+
+        /* ── Выделение, буфер и пакетные действия ─────────────────────────
+           Как в проводнике: долгий тык включает режим, дальше обычные тычки
+           ставят и снимают галки. Сняли всё — режим выключился сам, и папки
+           снова открываются одним касанием. */
+
+        const paintPicks = () => {
+          document.body.classList.toggle("picking", picking);
+          document.body.classList.toggle("has-clip", !!clip);
+          document.querySelectorAll(".item").forEach(row => {
+            row.classList.toggle("picked", picked.has(row.dataset.id));
+          });
+          drawSelbar();
+        };
+
+        const stopPicking = () => {
+          picking = false;
+          picked.clear();
+          paintPicks();
+        };
+
+        const togglePick = id => {
+          if (picked.has(id)) picked.delete(id); else picked.add(id);
+          // Сняли последнюю галку — выходим из режима, чтобы не гадать,
+          // откроется папка от тычка или нет.
+          if (!picked.size) picking = false;
+          paintPicks();
+        };
+
+        const startPicking = id => {
+          picking = true;
+          picked.add(id);
+          if (navigator.vibrate) navigator.vibrate(12);
+          paintPicks();
+        };
+
+        function drawSelbar() {
+          let bar = document.querySelector(".selbar");
+          if (!picking && !clip) { if (bar) bar.remove(); return; }
+          if (!bar) {
+            bar = document.createElement("div");
+            bar.className = "selbar";
+            document.body.appendChild(bar);
+            bar.addEventListener("click", onSelbarClick);
+          }
+          const n = picked.size;
+          const clipNote = clip
+            ? '<i>в буфере ' + clip.ids.length + " " +
+              plural(clip.ids.length, ["штука", "штуки", "штук"]) +
+              (clip.mode === "move" ? " на перенос" : " на копию") + "</i>"
+            : "";
+          bar.innerHTML =
+            '<span class="count">Выделено <b>' + n + "</b>" + clipNote + "</span>" +
+            '<button type="button" data-op="copy"' + (n ? "" : " disabled") + ">КОПИРОВАТЬ</button>" +
+            '<button type="button" data-op="cut"' + (n ? "" : " disabled") + ">ПЕРЕМЕСТИТЬ</button>" +
+            '<button type="button" class="go" data-op="paste"' + (clip ? "" : " disabled") + ">ВСТАВИТЬ</button>" +
+            '<button type="button" class="bad" data-op="del"' + (n ? "" : " disabled") + ">УДАЛИТЬ</button>" +
+            '<button type="button" data-op="off">ОТМЕНА</button>';
+        }
+
+        /* Полоса хода дела. Появляется только если работа затянулась дольше
+           секунды: на мелочи она мигала бы и раздражала. */
+        const runOp = async (op, ids, target, title) => {
+          let data;
+          try {
+            data = await api("/api/drop/op", { method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ op, ids, parent: target }) });
+          } catch (err) { toast(err.message, true); return false; }
+
+          const started = Date.now();
+          let lane = null;
+          const showLane = st => {
+            if (!lane) {
+              lane = document.createElement("div");
+              lane.className = "oplane";
+              lane.innerHTML = '<div class="txt"><span>' + esc(title) +
+                '</span><span data-pct>0%</span></div>' +
+                '<div class="bar"><div class="fill"></div></div>';
+              document.body.appendChild(lane);
+            }
+            // Если известен объём в байтах, считаем по нему: одна большая
+            // папка иначе висела бы на нуле до самого конца.
+            const pct = st.bytes_total
+              ? st.bytes / st.bytes_total * 100
+              : (st.total ? st.done / st.total * 100 : 0);
+            lane.querySelector(".fill").style.width = Math.min(pct, 100).toFixed(1) + "%";
+            lane.querySelector("[data-pct]").textContent = Math.round(pct) + "%";
+          };
+
+          for (;;) {
+            await new Promise(r => setTimeout(r, 250));
+            let st;
+            try { st = await api("/api/drop/op/" + data.job); }
+            catch (err) { toast(err.message, true); break; }
+            if (Date.now() - started > 1000 && st.state === "run") showLane(st);
+            if (st.state !== "run") {
+              if (lane) { showLane(st); await new Promise(r => setTimeout(r, 180)); }
+              if (st.state === "fail") toast(st.error || "Не получилось", true);
+              break;
+            }
+          }
+          if (lane) lane.remove();
+          return true;
+        };
+
+        async function onSelbarClick(e) {
+          const btn = e.target.closest("button");
+          if (!btn || btn.disabled) return;
+          const op = btn.dataset.op;
+
+          if (op === "off") { clip = null; stopPicking(); return; }
+
+          if (op === "copy" || op === "cut") {
+            clip = { mode: op === "copy" ? "copy" : "move", ids: [...picked] };
+            picking = false;
+            picked.clear();
+            paintPicks();
+            toast(clip.mode === "copy" ? "Скопировано в буфер — открой папку и вставь"
+                                       : "Взято на перенос — открой папку и вставь");
+            return;
+          }
+
+          if (op === "paste") {
+            const job = clip;
+            if (!job) return;
+            await runOp(job.mode, job.ids, parent,
+                        job.mode === "copy" ? "Копирую" : "Переношу");
+            // Перенос буфер опустошает: то же самое второй раз уже не вставить.
+            if (job.mode === "move") clip = null;
+            paintPicks();
+            load();
+            return;
+          }
+
+          if (op === "del") {
+            const n = picked.size;
+            if (!confirm("Удалить " + n + " " + plural(n, ["штуку", "штуки", "штук"]) +
+                         "? Папки удалятся со всем содержимым.")) return;
+            const ids = [...picked];
+            stopPicking();
+            await runOp("delete", ids, null, "Удаляю");
+            load();
+          }
+        }
+
+        // Долгий тык по строке — вход в режим. На мышке та же роль у правой
+        // кнопки: держать её секунду никто не станет.
+        let holdTimer = null, holdFrom = null;
+        const holdStart = (id, x, y) => {
+          clearTimeout(holdTimer);
+          holdFrom = { x, y };
+          holdTimer = setTimeout(() => { holdTimer = null; if (!picking) startPicking(id); }, 420);
+        };
+        const holdStop = () => { clearTimeout(holdTimer); holdTimer = null; holdFrom = null; };
+
+        $("items").addEventListener("touchstart", e => {
+          const row = e.target.closest(".item");
+          if (!row || picking) return;
+          if (e.target.closest("[data-act]")) return;     // кнопки строки не трогаем
+          holdStart(row.dataset.id, e.touches[0].clientX, e.touches[0].clientY);
+        }, { passive: true });
+        $("items").addEventListener("touchmove", e => {
+          if (!holdFrom) return;
+          const t = e.touches[0];
+          // Уехал пальцем — значит листает, а не держит
+          if (Math.abs(t.clientX - holdFrom.x) > 12 || Math.abs(t.clientY - holdFrom.y) > 12) holdStop();
+        }, { passive: true });
+        $("items").addEventListener("touchend", holdStop);
+        $("items").addEventListener("touchcancel", holdStop);
+
+        $("items").addEventListener("contextmenu", e => {
+          const row = e.target.closest(".item");
+          if (!row) return;
+          e.preventDefault();
+          if (picking) togglePick(row.dataset.id); else startPicking(row.dataset.id);
+        });
+
+        // Escape выходит из режима — привычка из проводника
+        document.addEventListener("keydown", e => {
+          if (e.key === "Escape" && (picking || clip)) { clip = null; stopPicking(); }
+        });
 
         // ── Загрузка кусками ──
         const queue = [];
@@ -5934,13 +6374,14 @@ def drop_page():
           e.preventDefault();
           e.stopPropagation();
           const target = row.dataset.id;
-          const moved = dragId;
+          // Тащат отмеченную строку — переносим всю пачку разом, как в
+          // проводнике. Тащат постороннюю — только её одну.
+          const bunch = picked.has(dragId) ? [...picked] : [dragId];
           dragId = null;
-          try {
-            await api("/api/drop/" + moved, { method: "PATCH", headers: { "Content-Type": "application/json" },
-                                              body: JSON.stringify({ parent: target }) });
-            load();
-          } catch (err) { toast(err.message, true); }
+          if (bunch.includes(target)) { toast("Папка не может лежать в себе самой", true); return; }
+          stopPicking();
+          await runOp("move", bunch, target, "Переношу");
+          load();
         });
 
         // ── Действия над элементами ──
@@ -5954,6 +6395,10 @@ def drop_page():
           // терялось и вместо окна открывалась сама папка.
           const hit = e.target.closest("[data-act]");
           const act = hit && row.contains(hit) ? hit.dataset.act : null;
+
+          // В режиме выделения строка целиком работает галкой: ни папки не
+          // открываются, ни кнопки строки не срабатывают.
+          if (picking) { togglePick(id); return; }
 
           if (!act) {
             if (item && item.kind === "folder") { parent = id; expanded.clear(); load(); }
