@@ -1270,7 +1270,13 @@ window.VitazArcade = (function () {
     if (!host) return;
     var mine = rememberedName();
 
-    var cols = games.map(function (game) {
+    // В таблицу идут только те игры, у которых рекорды вообще ведутся:
+    // сервер отдаёт их списком в board.games. Рулетка и треки в него не
+    // входят — в рулетке всё решает случай, а треки не игра вовсе, и
+    // столбцы с вечным «пусто» только зря занимали место.
+    var scored = games.filter(function (game) { return board.games[game.id]; });
+
+    var cols = scored.map(function (game) {
       var rows = boardTop(game.id);
       var body = rows.length
         ? rows.map(function (r, i) {
@@ -1292,7 +1298,10 @@ window.VitazArcade = (function () {
     host.innerHTML =
       '<div class="bhead"><b>РЕКОРДЫ</b><i></i>' +
         (board.admin ? '<span class="badmin">режим чистки</span>' : "") +
-      '</div><div class="bcols">' + cols + '</div>' +
+      '</div><div class="bcols">' +
+        (cols || '<div class="bcol"><div class="empty">' +
+          (board.loaded ? "рекордов пока нет" : "загружаю рекорды…") + "</div></div>") +
+      '</div>' +
       '<button id="arcade-mod" type="button" tabindex="-1" aria-hidden="true"></button>';
 
     host.querySelector("#arcade-mod").addEventListener("click", openModTools);
