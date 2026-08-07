@@ -4159,8 +4159,10 @@ def manifest():
     после установки дроп появляется в системном меню отправки любого файла."""
     return Response(
         json.dumps({
-            "name": "vitazgio.ru",
-            "short_name": "vitazgio",
+            # Под ярлыком на телефоне подписывается short_name, и места там
+            # мало: длинное имя оболочка обрежет многоточием.
+            "name": "Vitaz Gio",
+            "short_name": "Vitaz Gio",
             "start_url": "/",
             "scope": "/",
             "display": "standalone",
@@ -4470,6 +4472,9 @@ ICON_LINKS = (
     f'<link rel="icon" href="/icon-32.png?v={ICON_VERSION}" sizes="32x32" type="image/png">'
     f'<link rel="icon" href="/icon-192.png?v={ICON_VERSION}" sizes="192x192" type="image/png">'
     f'<link rel="apple-touch-icon" href="/icon-180.png?v={ICON_VERSION}">'
+    # Айфон манифест не читает и подписывает ярлык по этой метке, а без неё
+    # берёт <title> страницы — вышло бы «Личный кабинет · vitazgio.ru».
+    '<meta name="apple-mobile-web-app-title" content="Vitaz Gio">'
 )
 
 
