@@ -7247,14 +7247,20 @@ def home():
            подменяли копии — и подмена посреди инерции оставляла пустое
            место, потому что перерисовать уехавшее он не успевал.
 
-           Теперь всё просто: есть одно число — на сколько лента сдвинута.
-           Оно живёт в пределах длины набора, а перевалило — заворачивается
-           обратно. Копий набора столько, чтобы окно всегда было закрыто
-           карточками при любом сдвиге. Двигаем через transform: он не
-           заставляет браузер пересчитывать раскладку, поэтому идёт гладко.
+           Как устроено. Есть одно число — на сколько лента сдвинута. Для
+           показа оно заворачивается в пределы одного набора: дальше картинка
+           всё равно повторяется. Копий набора столько, чтобы окно было
+           закрыто карточками при любом сдвиге. Двигаем через transform: он
+           не заставляет браузер пересчитывать раскладку.
 
-           Скорость ограничена: самый резкий мах разгоняет ленту не сильнее
-           MAX_SPEED, иначе за карточками не уследить глазом. */
+           Отпустил палец — лента не просто гаснет, а доезжает до карточки и
+           встаёт так, чтобы та стояла у левого края, ровно как при загрузке.
+           Куда именно доехать, считаем заранее: прикидываем, куда унесло бы
+           по инерции, и округляем до ближайшей карточки. Поэтому мах всегда
+           заканчивается ровной раскладкой, а не половинкой карточки в углу.
+
+           Скорость ограничена: за один мах лента проезжает не больше
+           MAX_CARDS карточек, иначе за ними не уследить глазом. */
         (() => {
           const wrap = document.querySelector(".services-wrap");
           const row = document.querySelector(".services");
@@ -7262,13 +7268,15 @@ def home():
 
           const GAP = 14;
           const MAX_SPEED = 2.4;      // пикселей на миллисекунду, потолок разгона
-          const FRICTION = 0.94;      // сколько скорости остаётся за кадр
-          const STOP = 0.02;          // ниже этого считаем, что лента встала
+          const THROW = 170;          // на сколько миллисекунд «продлеваем» мах
+          const MAX_CARDS = 3;        // больше этого за один мах не проедем
+          const MAX_GLIDE = 3.4;      // потолок скорости доводки, px за мс
           const DRAG_SLOP = 8;        // сдвиг, после которого это уже не тык
 
           const originals = Array.prototype.slice.call(row.children);
           let clones = [];
           let setWidth = 0;
+          let pitch = 0;              // шаг: карточка вместе с зазором
           let offset = 0;             // на сколько лента сдвинута влево
           let speed = 0;
           let alive = false;
@@ -7288,33 +7296,63 @@ def home():
             });
           };
 
+          /* Само число сдвига не трогаем — заворачиваем только то, что
+             показываем. Иначе доводка до карточки спотыкалась бы каждый раз,
+             когда лента переваливает через конец набора. */
           const place = () => {
-            // Сдвиг держим в пределах одного набора: дальше картинка всё
-            // равно повторяется, и незачем уезжать в бесконечность.
-            offset = ((offset % setWidth) + setWidth) % setWidth;
-            row.style.transform = "translate3d(" + (-offset).toFixed(2) + "px,0,0)";
+            const shown = ((offset % setWidth) + setWidth) % setWidth;
+            row.style.transform = "translate3d(" + (-shown).toFixed(2) + "px,0,0)";
           };
 
-          const tick = () => {
+          const stopMotion = () => {
+            if (raf) cancelAnimationFrame(raf);
             raf = 0;
-            if (!alive) return;
-            offset += speed * 16;
-            speed *= FRICTION;
-            if (Math.abs(speed) < STOP) speed = 0;
-            place();
-            if (speed) raf = requestAnimationFrame(tick);
+            speed = 0;
           };
 
-          const glide = () => { if (!raf && speed) raf = requestAnimationFrame(tick); };
+          /* Доводка: едем к цели с замедлением к концу. Время подбираем по
+             расстоянию, но в разумных пределах — на длинном махе иначе
+             получалась бы неспешная поездка. */
+          const easeTo = (target) => {
+            const from = offset;
+            const dist = target - from;
+            if (Math.abs(dist) < 0.5) { offset = target; place(); return; }
+            // Время подбираем так, чтобы доводка не разгонялась выше потолка.
+            // У плавного замедления скорость наибольшая в самом начале и
+            // втрое выше средней — отсюда тройка в формуле.
+            const way = Math.abs(dist);
+            const time = Math.min(900, Math.max(240 + way * 0.45, 3 * way / MAX_GLIDE));
+            const t0 = performance.now();
+            const step = (now) => {
+              const k = Math.min(1, (now - t0) / time);
+              const ease = 1 - Math.pow(1 - k, 3);
+              offset = from + dist * ease;
+              place();
+              raf = k < 1 ? requestAnimationFrame(step) : 0;
+            };
+            stopMotion();
+            raf = requestAnimationFrame(step);
+          };
+
+          /* Куда встать после маха: прикидываем, куда унесло бы по инерции,
+             округляем до карточки и не даём улететь дальше MAX_CARDS. */
+          const settle = () => {
+            if (!alive || !pitch) return;
+            const guess = offset + speed * THROW;
+            const limit = pitch * MAX_CARDS;
+            const capped = Math.max(offset - limit, Math.min(offset + limit, guess));
+            easeTo(Math.round(capped / pitch) * pitch);
+          };
 
           const build = () => {
             clones.forEach((twin) => twin.remove());
             clones = [];
+            stopMotion();
             alive = false;
-            speed = 0;
             offset = 0;
             row.style.transform = "";
             setWidth = measure();
+            pitch = originals[0].getBoundingClientRect().width + GAP;
             // Видимая ширина — без боковых полей. По полной ширине блока
             // считать нельзя: на мониторе 2560 поля съедают по 590 пикселей,
             // и лента в 1932 казалась помещающейся, хотя видно от неё 1380.
@@ -7324,8 +7362,8 @@ def home():
             // Всё влезло — крутить нечего.
             if (setWidth - GAP <= room + 1) return;
             // Копий столько, чтобы окно было закрыто при любом сдвиге:
-            // видно участок от offset до offset+room, а offset меньше
-            // длины набора. Одна лишняя копия — на всякий случай.
+            // видно участок от сдвига до сдвига плюс ширина окна, а сдвиг
+            // меньше длины набора. Одна лишняя копия — на всякий случай.
             const need = Math.ceil((setWidth + room) / setWidth) + 1;
             for (let i = 1; i < need; i++) addCopy();
             alive = true;
@@ -7346,10 +7384,10 @@ def home():
             lastX = e.clientX;
             lastT = e.timeStamp;
             travelled = 0;
-            speed = 0;
+            stopMotion();
             wrap.classList.add("dragging");
-            // Захват указателя нужен, чтобы палец, уехавший за пределы полосы,
-            // всё равно продолжал крутить ленту. Иногда браузер отказывает —
+            // Захват нужен, чтобы палец, уехавший за пределы полосы, всё
+            // равно продолжал крутить ленту. Иногда браузер отказывает —
             // например, когда событие пришло не от живого указателя.
             try { wrap.setPointerCapture(pointer); } catch (err) { /* обойдёмся */ }
           };
@@ -7374,7 +7412,7 @@ def home():
             dragging = false;
             wrap.classList.remove("dragging");
             try { wrap.releasePointerCapture(pointer); } catch (err) { /* уже отпущен */ }
-            glide();
+            settle();
           };
 
           wrap.addEventListener("pointerdown", onDown);
@@ -7387,15 +7425,20 @@ def home():
             if (travelled > DRAG_SLOP) { e.preventDefault(); e.stopPropagation(); }
           }, true);
 
-          // Колесо: вбок крутим ленту, вниз оставляем странице.
+          // Колесо: вбок крутим ленту, вниз оставляем странице. Доводку
+          // запускаем, когда колесо замерло, — иначе она мешала бы крутить.
+          let wheelIdle = 0;
           wrap.addEventListener("wheel", (e) => {
             if (!alive) return;
             const dx = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX
                      : (e.shiftKey ? e.deltaY : 0);
             if (!dx) return;
             e.preventDefault();
+            stopMotion();
             offset += dx;
             place();
+            clearTimeout(wheelIdle);
+            wheelIdle = setTimeout(() => { speed = 0; settle(); }, 140);
           }, { passive: false });
 
           /* Переход табом по ссылкам: своей прокрутки у полосы нет, поэтому
@@ -7406,10 +7449,10 @@ def home():
             if (!card) return;
             const box = card.getBoundingClientRect();
             const view = wrap.getBoundingClientRect();
-            if (box.left >= view.left && box.right <= view.right) return;
-            offset += box.left - view.left - 20;
+            const pad = parseFloat(getComputedStyle(wrap).paddingLeft);
+            if (box.left >= view.left + pad - 1 && box.right <= view.right) return;
             speed = 0;
-            place();
+            easeTo(Math.round((offset + box.left - view.left - pad) / pitch) * pitch);
           });
 
           build();
