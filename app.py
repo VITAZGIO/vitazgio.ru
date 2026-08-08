@@ -6838,14 +6838,17 @@ def home():
           scrollbar-color: rgba(255,255,255,.22) transparent;
         }
 
+        /* Не сетка, а лента: карточки одной ширины идут в строку и
+           прокручиваются по кругу, как барабан. Ужимать их под число
+           сервисов больше не нужно — добавится восьмой, просто станет
+           на один оборот длиннее. Сама закольцовка живёт в скрипте. */
         .services {
-          display: grid;
-          grid-template-columns: repeat(5, minmax(210px, 1fr));
+          display: flex;
           gap: 14px;
-          min-width: 1110px;
-          max-width: 1380px;
+          width: max-content;
           margin: 0 auto;
         }
+        .service { flex: none; width: 264px; }
 
         .service {
           --accent: #6c8cff;
@@ -6895,6 +6898,10 @@ def home():
         .service--jellyfin { --accent: #aa5cc3; --glow: rgba(170,92,195,.22); }
         .service--npm { --accent: #f04477; --glow: rgba(240,68,119,.2); }
         .service--qb { --accent: #4fa8e8; --glow: rgba(79,168,232,.22); }
+        /* Знак GitHub официально чёрно-белый; на тёмной подложке
+           используется белый, поэтому и оттенок карточки светлый. */
+        .service--github { --accent: #dfe6ee; --glow: rgba(223,230,238,.16); }
+        .service--gitea { --accent: #609926; --glow: rgba(96,153,38,.24); }
 
         .service-top { display: flex; align-items: flex-start; justify-content: space-between; }
 
@@ -6930,7 +6937,11 @@ def home():
         .service-copy { margin-top: auto; }
         .service h2 { margin: 0 0 8px; font-size: 1.42rem; letter-spacing: -.035em; }
         .service p { min-height: 44px; margin: 0 0 18px; color: var(--muted); line-height: 1.45; }
-        .domain { color: var(--accent); font-size: .74rem; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }
+        /* Адрес в одну строку: рвать его посреди слова нельзя, читается
+           как ошибка. Если вдруг не влезет — обрежется многоточием. */
+        .domain { display: block; color: var(--accent); font-size: .74rem; font-weight: 750;
+                 letter-spacing: .08em; text-transform: uppercase;
+                 white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
         /* Подпись прижата к самому левому нижнему углу окна. Раньше она
            жила в общей колонке шириной 1380px и на широком мониторе
@@ -7092,8 +7103,7 @@ def home():
           .eyebrow::before { width: 9px; height: 9px; }
           .arcade-bar-line { font-size: .86rem; letter-spacing: .26em; }
           footer { font-size: .95rem; }
-          .services { grid-template-columns: repeat(5, 78vw); min-width: max-content; }
-          .service { min-height: 280px; scroll-snap-align: center; }
+          .service { width: 78vw; min-height: 280px; scroll-snap-align: center; }
           .services-wrap { scroll-snap-type: x mandatory; }
           footer { flex-direction: column; }
           .auth-panel { padding: 34px 25px 28px; }
@@ -7165,6 +7175,24 @@ def home():
               </div>
               <div class="service-copy"><h2>qBittorrent</h2><p>Веб-интерфейс торрент-клиента</p><span class="domain">qb.vitazgio.ru</span></div>
             </a>
+
+            <a class="service service--github" href="https://github.com/VITAZGIO"
+               target="_blank" rel="noopener" aria-label="Открыть GitHub">
+              <div class="service-top">
+                <span class="logo" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg></span>
+                <span class="arrow" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M7 17 17 7m0 0H8m9 0v9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+              </div>
+              <div class="service-copy"><h2>GitHub</h2><p>Исходники проектов и история правок</p><span class="domain">github.com</span></div>
+            </a>
+
+            <a class="service service--gitea" href="https://git.vitazgio.ru"
+               target="_blank" rel="noopener" aria-label="Открыть Gitea">
+              <div class="service-top">
+                <span class="logo" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M4.209 4.603c-.247 0-.525.02-.84.088-.333.07-1.28.283-2.054 1.027C-.403 7.25.035 9.685.089 10.052c.065.446.263 1.687 1.21 2.768 1.749 2.141 5.513 2.092 5.513 2.092s.462 1.103 1.168 2.119c.955 1.263 1.936 2.248 2.89 2.367 2.406 0 7.212-.004 7.212-.004s.458.004 1.08-.394c.535-.324 1.013-.893 1.013-.893s.492-.527 1.18-1.73c.21-.37.385-.729.538-1.068 0 0 2.107-4.471 2.107-8.823-.042-1.318-.367-1.55-.443-1.627-.156-.156-.366-.153-.366-.153s-4.475.252-6.792.306c-.508.011-1.012.023-1.512.027v4.474l-.634-.301c0-1.39-.004-4.17-.004-4.17-1.107.016-3.405-.084-3.405-.084s-5.399-.27-5.987-.324c-.187-.011-.401-.032-.648-.032zm.354 1.832h.111s.271 2.269.6 3.597C5.549 11.147 6.22 13 6.22 13s-.996-.119-1.641-.348c-.99-.324-1.409-.714-1.409-.714s-.73-.511-1.096-1.52C1.444 8.73 2.021 7.7 2.021 7.7s.32-.859 1.47-1.145c.395-.106.863-.12 1.072-.12zm8.33 2.554c.26.003.509.127.509.127l.868.422-.529 1.075a.686.686 0 0 0-.614.359.685.685 0 0 0 .072.756l-.939 1.924a.69.69 0 0 0-.66.527.687.687 0 0 0 .347.763.686.686 0 0 0 .867-.206.688.688 0 0 0-.069-.882l.916-1.874a.667.667 0 0 0 .237-.02.657.657 0 0 0 .271-.137 8.826 8.826 0 0 1 1.016.512.761.761 0 0 1 .286.282c.073.21-.073.569-.073.569-.087.29-.702 1.55-.702 1.55a.692.692 0 0 0-.676.477.681.681 0 1 0 1.157-.252c.073-.141.141-.282.214-.431.19-.397.515-1.16.515-1.16.035-.066.218-.394.103-.814-.095-.435-.48-.638-.48-.638-.467-.301-1.116-.58-1.116-.58s0-.156-.042-.27a.688.688 0 0 0-.148-.241l.516-1.062 2.89 1.401s.48.218.583.619c.073.282-.019.534-.069.657-.24.587-2.1 4.317-2.1 4.317s-.232.554-.748.588a1.065 1.065 0 0 1-.393-.045l-.202-.08-4.31-2.1s-.417-.218-.49-.596c-.083-.31.104-.691.104-.691l2.073-4.272s.183-.37.466-.497a.855.855 0 0 1 .35-.077z"/></svg></span>
+                <span class="arrow" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M7 17 17 7m0 0H8m9 0v9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+              </div>
+              <div class="service-copy"><h2>Gitea</h2><p>Свой git на домашнем сервере</p><span class="domain">git.vitazgio.ru</span></div>
+            </a>
           </div>
         </nav>
 
@@ -7205,6 +7233,85 @@ def home():
         </section>
       </div>
       <script>
+        /* Лента сервисов крутится по кругу, как барабан: докрутил до конца —
+           и снова пошли первые карточки, без упора в край.
+
+           Делается это подменой: рядом с настоящим набором лежат две его
+           копии, слева и справа. Пока смотришь на середину — всё честно.
+           Как только уехал на копию, прокрутка перескакивает на ровно одну
+           длину набора назад или вперёд. Картинка при этом не меняется —
+           карточки-то те же, — поэтому глазу перескок не виден.
+
+           Копии закрыты от чтения с экрана и от перехода табом: ссылки в
+           них те же самые, и без этого каждая читалась бы трижды. */
+        (() => {
+          const wrap = document.querySelector(".services-wrap");
+          const row = document.querySelector(".services");
+          if (!wrap || !row) return;
+
+          const GAP = 14;
+          const originals = Array.prototype.slice.call(row.children);
+          let clones = [];
+          let setWidth = 0;
+          let looping = false;
+
+          const measure = () => originals.reduce(
+            (sum, card) => sum + card.getBoundingClientRect().width + GAP, 0);
+
+          const makeCopy = () => {
+            const copy = document.createDocumentFragment();
+            originals.forEach((card) => {
+              const twin = card.cloneNode(true);
+              twin.setAttribute("aria-hidden", "true");
+              twin.setAttribute("tabindex", "-1");
+              twin.dataset.twin = "1";
+              copy.appendChild(twin);
+              clones.push(twin);
+            });
+            return copy;
+          };
+
+          const dropCopies = () => {
+            clones.forEach((twin) => twin.remove());
+            clones = [];
+          };
+
+          const wrapAround = () => {
+            if (!looping) return;
+            const x = wrap.scrollLeft;
+            // Порог в половину набора: перескакиваем задолго до края, иначе
+            // на резком рывке палец успевает доехать до самого конца ленты.
+            if (x < setWidth * 0.5) wrap.scrollLeft = x + setWidth;
+            else if (x > setWidth * 1.5) wrap.scrollLeft = x - setWidth;
+          };
+
+          const build = () => {
+            dropCopies();
+            looping = false;
+            setWidth = measure();
+            // Влезло ли — спрашиваем у самой прокрутки. Считать по ширине
+            // блока нельзя: по бокам у него широкие поля, и лента в 1736
+            // пикселей на мониторе 1920 выглядела бы помещающейся, хотя
+            // видно от неё только 1380.
+            if (wrap.scrollWidth <= wrap.clientWidth + 1) { wrap.scrollLeft = 0; return; }
+            row.insertBefore(makeCopy(), row.firstChild);
+            row.appendChild(makeCopy());
+            looping = true;
+            wrap.scrollLeft = setWidth;          // встаём на настоящий набор
+          };
+
+          build();
+          wrap.addEventListener("scroll", wrapAround, { passive: true });
+
+          // Ширина карточек на телефоне задана в долях экрана, так что при
+          // повороте набор меняет длину — пересобираем.
+          let resizeTimer = 0;
+          window.addEventListener("resize", () => {
+            clearTimeout(resizeTimer);
+            resizeTimer = setTimeout(build, 180);
+          });
+        })();
+
         (() => {
           const output = document.getElementById("cyber-text");
           const phrases = ["МОИ ВЕБ-СЕРВИСЫ", "VITAZGIO NETWORK", "DOMAIN CONTROL"];
