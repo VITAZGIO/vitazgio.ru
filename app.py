@@ -6830,13 +6830,20 @@ def home():
           96% { opacity: 0; }
         }
 
+        /* Барабан крутит скрипт, а не браузер: своей прокрутки у полосы нет.
+           С нативной не выходило гладко — она доводит ленту до карточки после
+           каждого маха, а поверх этого шла подмена копий, и вместе получалось
+           дёрганье. pan-y оставляет браузеру вертикаль: страница листается
+           пальцем как обычно, вбок распоряжаемся мы. */
         .services-wrap {
           width: 100%;
-          overflow-x: auto;
+          overflow: hidden;
           padding: 14px max(20px, calc((100vw - 1380px) / 2)) 36px;
-          scrollbar-width: thin;
-          scrollbar-color: rgba(255,255,255,.22) transparent;
+          touch-action: pan-y;
+          cursor: grab;
         }
+        .services-wrap.dragging { cursor: grabbing; }
+        .services { will-change: transform; }
 
         /* Не сетка, а лента: карточки одной ширины идут в строку и
            прокручиваются по кругу, как барабан. Ужимать их под число
@@ -7103,8 +7110,7 @@ def home():
           .eyebrow::before { width: 9px; height: 9px; }
           .arcade-bar-line { font-size: .86rem; letter-spacing: .26em; }
           footer { font-size: .95rem; }
-          .service { width: 78vw; min-height: 280px; scroll-snap-align: center; }
-          .services-wrap { scroll-snap-type: x mandatory; }
+          .service { width: 78vw; min-height: 280px; }
           footer { flex-direction: column; }
           .auth-panel { padding: 34px 25px 28px; }
         }
@@ -7233,78 +7239,181 @@ def home():
         </section>
       </div>
       <script>
-        /* Лента сервисов крутится по кругу, как барабан: докрутил до конца —
-           и снова пошли первые карточки, без упора в край.
+        /* Барабан сервисов: лента бесконечно едет вбок, а прокрутку ей
+           даём мы сами, а не браузер.
 
-           Делается это подменой: рядом с настоящим набором лежат две его
-           копии, слева и справа. Пока смотришь на середину — всё честно.
-           Как только уехал на копию, прокрутка перескакивает на ровно одну
-           длину набора назад или вперёд. Картинка при этом не меняется —
-           карточки-то те же, — поэтому глазу перескок не виден.
+           Почему сами. С нативной прокруткой лента дёргалась: браузер после
+           каждого маха доводил её до ближайшей карточки, а мы поверх этого
+           подменяли копии — и подмена посреди инерции оставляла пустое
+           место, потому что перерисовать уехавшее он не успевал.
 
-           Копии закрыты от чтения с экрана и от перехода табом: ссылки в
-           них те же самые, и без этого каждая читалась бы трижды. */
+           Теперь всё просто: есть одно число — на сколько лента сдвинута.
+           Оно живёт в пределах длины набора, а перевалило — заворачивается
+           обратно. Копий набора столько, чтобы окно всегда было закрыто
+           карточками при любом сдвиге. Двигаем через transform: он не
+           заставляет браузер пересчитывать раскладку, поэтому идёт гладко.
+
+           Скорость ограничена: самый резкий мах разгоняет ленту не сильнее
+           MAX_SPEED, иначе за карточками не уследить глазом. */
         (() => {
           const wrap = document.querySelector(".services-wrap");
           const row = document.querySelector(".services");
           if (!wrap || !row) return;
 
           const GAP = 14;
+          const MAX_SPEED = 2.4;      // пикселей на миллисекунду, потолок разгона
+          const FRICTION = 0.94;      // сколько скорости остаётся за кадр
+          const STOP = 0.02;          // ниже этого считаем, что лента встала
+          const DRAG_SLOP = 8;        // сдвиг, после которого это уже не тык
+
           const originals = Array.prototype.slice.call(row.children);
           let clones = [];
           let setWidth = 0;
-          let looping = false;
+          let offset = 0;             // на сколько лента сдвинута влево
+          let speed = 0;
+          let alive = false;
+          let raf = 0;
 
           const measure = () => originals.reduce(
             (sum, card) => sum + card.getBoundingClientRect().width + GAP, 0);
 
-          const makeCopy = () => {
-            const copy = document.createDocumentFragment();
+          const addCopy = () => {
             originals.forEach((card) => {
               const twin = card.cloneNode(true);
               twin.setAttribute("aria-hidden", "true");
               twin.setAttribute("tabindex", "-1");
               twin.dataset.twin = "1";
-              copy.appendChild(twin);
+              row.appendChild(twin);
               clones.push(twin);
             });
-            return copy;
           };
 
-          const dropCopies = () => {
-            clones.forEach((twin) => twin.remove());
-            clones = [];
+          const place = () => {
+            // Сдвиг держим в пределах одного набора: дальше картинка всё
+            // равно повторяется, и незачем уезжать в бесконечность.
+            offset = ((offset % setWidth) + setWidth) % setWidth;
+            row.style.transform = "translate3d(" + (-offset).toFixed(2) + "px,0,0)";
           };
 
-          const wrapAround = () => {
-            if (!looping) return;
-            const x = wrap.scrollLeft;
-            // Порог в половину набора: перескакиваем задолго до края, иначе
-            // на резком рывке палец успевает доехать до самого конца ленты.
-            if (x < setWidth * 0.5) wrap.scrollLeft = x + setWidth;
-            else if (x > setWidth * 1.5) wrap.scrollLeft = x - setWidth;
+          const tick = () => {
+            raf = 0;
+            if (!alive) return;
+            offset += speed * 16;
+            speed *= FRICTION;
+            if (Math.abs(speed) < STOP) speed = 0;
+            place();
+            if (speed) raf = requestAnimationFrame(tick);
           };
+
+          const glide = () => { if (!raf && speed) raf = requestAnimationFrame(tick); };
 
           const build = () => {
-            dropCopies();
-            looping = false;
+            clones.forEach((twin) => twin.remove());
+            clones = [];
+            alive = false;
+            speed = 0;
+            offset = 0;
+            row.style.transform = "";
             setWidth = measure();
-            // Влезло ли — спрашиваем у самой прокрутки. Считать по ширине
-            // блока нельзя: по бокам у него широкие поля, и лента в 1736
-            // пикселей на мониторе 1920 выглядела бы помещающейся, хотя
-            // видно от неё только 1380.
-            if (wrap.scrollWidth <= wrap.clientWidth + 1) { wrap.scrollLeft = 0; return; }
-            row.insertBefore(makeCopy(), row.firstChild);
-            row.appendChild(makeCopy());
-            looping = true;
-            wrap.scrollLeft = setWidth;          // встаём на настоящий набор
+            // Видимая ширина — без боковых полей. По полной ширине блока
+            // считать нельзя: на мониторе 2560 поля съедают по 590 пикселей,
+            // и лента в 1932 казалась помещающейся, хотя видно от неё 1380.
+            const pad = getComputedStyle(wrap);
+            const room = wrap.clientWidth
+              - parseFloat(pad.paddingLeft) - parseFloat(pad.paddingRight);
+            // Всё влезло — крутить нечего.
+            if (setWidth - GAP <= room + 1) return;
+            // Копий столько, чтобы окно было закрыто при любом сдвиге:
+            // видно участок от offset до offset+room, а offset меньше
+            // длины набора. Одна лишняя копия — на всякий случай.
+            const need = Math.ceil((setWidth + room) / setWidth) + 1;
+            for (let i = 1; i < need; i++) addCopy();
+            alive = true;
+            place();
           };
 
-          build();
-          wrap.addEventListener("scroll", wrapAround, { passive: true });
+          /* ── Палец и мышь ──────────────────────────────────────────── */
+          let dragging = false;
+          let lastX = 0;
+          let lastT = 0;
+          let travelled = 0;
+          let pointer = 0;
 
-          // Ширина карточек на телефоне задана в долях экрана, так что при
-          // повороте набор меняет длину — пересобираем.
+          const onDown = (e) => {
+            if (!alive || e.button > 0) return;
+            dragging = true;
+            pointer = e.pointerId;
+            lastX = e.clientX;
+            lastT = e.timeStamp;
+            travelled = 0;
+            speed = 0;
+            wrap.classList.add("dragging");
+            // Захват указателя нужен, чтобы палец, уехавший за пределы полосы,
+            // всё равно продолжал крутить ленту. Иногда браузер отказывает —
+            // например, когда событие пришло не от живого указателя.
+            try { wrap.setPointerCapture(pointer); } catch (err) { /* обойдёмся */ }
+          };
+
+          const onMove = (e) => {
+            if (!dragging) return;
+            const dx = e.clientX - lastX;
+            const dt = Math.max(1, e.timeStamp - lastT);
+            offset -= dx;
+            travelled += Math.abs(dx);
+            // Скорость считаем по последнему отрезку, но с оглядкой на
+            // прежнюю: от одного дёрганого кадра лента не должна улетать.
+            const raw = -dx / dt;
+            speed = Math.max(-MAX_SPEED, Math.min(MAX_SPEED, speed * 0.4 + raw * 0.6));
+            lastX = e.clientX;
+            lastT = e.timeStamp;
+            place();
+          };
+
+          const onUp = () => {
+            if (!dragging) return;
+            dragging = false;
+            wrap.classList.remove("dragging");
+            try { wrap.releasePointerCapture(pointer); } catch (err) { /* уже отпущен */ }
+            glide();
+          };
+
+          wrap.addEventListener("pointerdown", onDown);
+          wrap.addEventListener("pointermove", onMove);
+          wrap.addEventListener("pointerup", onUp);
+          wrap.addEventListener("pointercancel", onUp);
+
+          // Протащил ленту — значит не по карточке жал, переход отменяем.
+          wrap.addEventListener("click", (e) => {
+            if (travelled > DRAG_SLOP) { e.preventDefault(); e.stopPropagation(); }
+          }, true);
+
+          // Колесо: вбок крутим ленту, вниз оставляем странице.
+          wrap.addEventListener("wheel", (e) => {
+            if (!alive) return;
+            const dx = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX
+                     : (e.shiftKey ? e.deltaY : 0);
+            if (!dx) return;
+            e.preventDefault();
+            offset += dx;
+            place();
+          }, { passive: false });
+
+          /* Переход табом по ссылкам: своей прокрутки у полосы нет, поэтому
+             подводим ленту к карточке сами, иначе фокус уезжал бы за экран. */
+          wrap.addEventListener("focusin", (e) => {
+            if (!alive) return;
+            const card = e.target.closest(".service");
+            if (!card) return;
+            const box = card.getBoundingClientRect();
+            const view = wrap.getBoundingClientRect();
+            if (box.left >= view.left && box.right <= view.right) return;
+            offset += box.left - view.left - 20;
+            speed = 0;
+            place();
+          });
+
+          build();
+
           let resizeTimer = 0;
           window.addEventListener("resize", () => {
             clearTimeout(resizeTimer);
