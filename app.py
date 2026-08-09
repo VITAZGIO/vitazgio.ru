@@ -456,13 +456,21 @@ trusted_devices: dict = {}
 devices_lock = threading.Lock()
 os.makedirs(DATA_DIR, exist_ok=True)
 
-# ---- Музыка для плеера в кабинете ------------------------------------------
+# ---- Музыка ----------------------------------------------------------------
 # Файлы лежат под своими именами в data/music — так их можно просто закинуть
 # в папку по SSH, и плеер подхватит сам, разобрав «Исполнитель - Название».
+#
+# Записей может быть больше, чем файлов: один и тот же трек нередко нужен в
+# нескольких папках — в «Роке» и в «Любимом». Хранить его дважды глупо,
+# поэтому запись — это ссылка на файл, а файл удаляется, когда на него не
+# осталось ни одной ссылки. Одинаковость определяем по содержимому, а не по
+# имени: два файла с разными названиями, но одинаковыми байтами — один трек.
 MUSIC_DIR = os.path.join(DATA_DIR, "music")
 MUSIC_INDEX_PATH = os.path.join(DATA_DIR, "music.json")
 MUSIC_MAX_SIZE = 40 * 1024 * 1024
 MUSIC_QUOTA = 2 * 1024 * 1024 * 1024
+MUSIC_CHUNK = 1024 * 1024
+MUSIC_MAX_DEPTH = 6
 MUSIC_EXTS = {".mp3", ".m4a", ".aac", ".ogg", ".opus", ".flac", ".wav", ".webm"}
 MUSIC_MIMES = {
     ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".aac": "audio/aac",
@@ -471,6 +479,7 @@ MUSIC_MIMES = {
 }
 
 music_items: dict = {}
+music_folders: dict = {}
 music_lock = threading.Lock()
 os.makedirs(MUSIC_DIR, exist_ok=True)
 
@@ -498,10 +507,84 @@ def _music_write_index():
     try:
         tmp = MUSIC_INDEX_PATH + ".tmp"
         with open(tmp, "w", encoding="utf-8") as fh:
-            json.dump(music_items, fh, ensure_ascii=False)
+            json.dump({"items": music_items, "folders": music_folders},
+                      fh, ensure_ascii=False)
         os.replace(tmp, MUSIC_INDEX_PATH)
     except OSError:
         pass
+
+
+def _music_digest(fname):
+    """Отпечаток содержимого файла. Читаем кусками: трек может быть на
+    десятки мегабайт, а держать его целиком в памяти незачем."""
+    digest = hashlib.sha256()
+    try:
+        with open(os.path.join(MUSIC_DIR, fname), "rb") as fh:
+            while True:
+                chunk = fh.read(MUSIC_CHUNK)
+                if not chunk:
+                    break
+                digest.update(chunk)
+    except OSError:
+        return ""
+    return digest.hexdigest()
+
+
+def _music_twin(size, digest):
+    """Имя уже лежащего файла с тем же содержимым, иначе пусто.
+
+    Считать отпечатки всей фонотеки при каждой загрузке было бы расточительно,
+    поэтому сначала отсеиваем по размеру: совпал размер — только тогда читаем
+    байты, и посчитанное запоминаем в записи. Вызывать под music_lock."""
+    for track in music_items.values():
+        if track.get("size") != size:
+            continue
+        if not track.get("hash"):
+            track["hash"] = _music_digest(track["file"])
+        if track["hash"] and track["hash"] == digest:
+            return track["file"]
+    return ""
+
+
+def _music_used():
+    """Занято на диске. Копии в других папках ничего не стоят, поэтому
+    считаем по разным файлам, а не по записям. Вызывать под music_lock."""
+    seen = {}
+    for track in music_items.values():
+        seen[track["file"]] = track.get("size", 0)
+    return sum(seen.values())
+
+
+def _music_drop_file(fname):
+    """Убрать файл с диска, если на него больше никто не ссылается.
+    Вызывать под music_lock."""
+    if any(t["file"] == fname for t in music_items.values()):
+        return
+    try:
+        os.remove(os.path.join(MUSIC_DIR, fname))
+    except OSError:
+        pass
+
+
+def _music_folder_depth(folder_id):
+    """Сколько папок над этой. Заодно страхует от закольцованного дерева:
+    длиннее MUSIC_MAX_DEPTH подниматься не станем. Вызывать под music_lock."""
+    depth, seen = 0, set()
+    while folder_id and folder_id in music_folders and folder_id not in seen:
+        seen.add(folder_id)
+        folder_id = music_folders[folder_id].get("parent", "")
+        depth += 1
+    return depth
+
+
+def _music_subtree(folder_id):
+    """Папка и всё, что под ней. Вызывать под music_lock."""
+    found = {folder_id}
+    while True:
+        grown = {k for k, v in music_folders.items() if v.get("parent") in found}
+        if grown <= found:
+            return found
+        found |= grown
 
 
 def _music_scan():
@@ -516,6 +599,14 @@ def _music_scan():
     for track_id in [k for k, v in music_items.items() if v["file"] not in on_disk]:
         music_items.pop(track_id, None)
 
+    # Папка исчезла — её содержимое всплывает наверх, а не пропадает из виду.
+    for track in music_items.values():
+        if track.get("folder") and track["folder"] not in music_folders:
+            track["folder"] = ""
+    for folder in music_folders.values():
+        if folder.get("parent") and folder["parent"] not in music_folders:
+            folder["parent"] = ""
+
     known = {v["file"] for v in music_items.values()}
     for fname in sorted(on_disk - known):
         artist, title = _music_split(os.path.splitext(fname)[0])
@@ -525,16 +616,25 @@ def _music_scan():
             continue
         music_items[str(uuid.uuid4())] = {
             "file": fname, "artist": artist, "title": title,
-            "size": size, "added": time.time(),
+            "size": size, "added": time.time(), "folder": "", "hash": "",
         }
 
 
 def _music_load():
     try:
         with open(MUSIC_INDEX_PATH, encoding="utf-8") as fh:
-            music_items.update(json.load(fh))
+            saved = json.load(fh)
     except (OSError, ValueError):
-        pass
+        saved = {}
+    # До появления папок индекс был просто «запись → трек». Такой файл узнаём
+    # по значениям: у трека есть «file», у нового раздела — нет.
+    if isinstance(saved, dict) and "items" not in saved:
+        saved = {"items": saved, "folders": {}}
+    music_items.update(saved.get("items") or {})
+    music_folders.update(saved.get("folders") or {})
+    for track in music_items.values():
+        track.setdefault("folder", "")
+        track.setdefault("hash", "")
     _music_scan()
     _music_write_index()
 
@@ -1588,24 +1688,45 @@ def arcade_score_delete():
         return jsonify(scores=_arcade_public())
 
 
+def music_editor_required(view):
+    """Слушать может каждый, менять — только из-под пароля кабинета.
+    Отвечаем кодом, а не переадресацией: это разбирает скрипт страницы."""
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if not session.get("authenticated"):
+            fresh = _device_check(request.cookies.get(DEVICE_COOKIE))
+            if not fresh:
+                return jsonify(error="Нужен расширенный режим."), 403
+            session["authenticated"] = True
+            g.new_device_cookie = fresh
+            _log_login("доверенное устройство")
+        return view(*args, **kwargs)
+
+    return wrapped
+
+
 @app.get("/api/music")
-@login_required
 def music_list_api():
     with music_lock:
         _music_scan()
         _music_write_index()
-        used = sum(t["size"] for t in music_items.values())
+        used = _music_used()
         tracks = [
             {"id": k, "artist": v["artist"], "title": v["title"],
-             "size": v["size"], "added": v["added"]}
+             "size": v["size"], "added": v["added"], "folder": v.get("folder", "")}
             for k, v in sorted(music_items.items(),
                                key=lambda x: (x[1]["artist"].lower(), x[1]["title"].lower()))
         ]
-    return jsonify(tracks=tracks, used=used, quota=MUSIC_QUOTA)
+        folders = [
+            {"id": k, "name": v["name"], "parent": v.get("parent", "")}
+            for k, v in sorted(music_folders.items(), key=lambda x: x[1]["name"].lower())
+        ]
+    return jsonify(tracks=tracks, folders=folders, used=used, quota=MUSIC_QUOTA,
+                   limit=MUSIC_MAX_SIZE, can_edit=bool(session.get("authenticated")))
 
 
 @app.post("/api/music")
-@login_required
+@music_editor_required
 def music_upload_api():
     f = request.files.get("file")
     if not f:
@@ -1617,10 +1738,13 @@ def music_upload_api():
     if request.content_length and request.content_length > MUSIC_MAX_SIZE + 8192:
         return jsonify(error="Трек больше 40 МБ."), 413
 
+    folder = (request.form.get("folder") or "").strip()
     with music_lock:
         _music_scan()
-        if sum(t["size"] for t in music_items.values()) > MUSIC_QUOTA:
+        if _music_used() > MUSIC_QUOTA:
             return jsonify(error="Места под музыку больше нет."), 507
+        if folder and folder not in music_folders:
+            folder = ""
         taken = {t["file"] for t in music_items.values()}
 
     stem, suffix = os.path.splitext(name)
@@ -1629,30 +1753,58 @@ def music_upload_api():
         candidate = f"{stem} ({counter}){suffix}"
         counter += 1
 
-    path = os.path.join(MUSIC_DIR, candidate)
+    # Пишем во временный файл и считаем отпечаток на лету: если такой трек уже
+    # лежит, лишние байты на диск не попадут вовсе.
+    temp = os.path.join(MUSIC_DIR, f".upload-{uuid.uuid4().hex}")
+    digest = hashlib.sha256()
+    size = 0
     try:
-        f.save(path)
-        size = os.path.getsize(path)
-    except OSError as e:
-        return jsonify(error=f"Не удалось сохранить: {e}"), 500
-    if size > MUSIC_MAX_SIZE:
-        try:
-            os.remove(path)
-        except OSError:
-            pass
+        with open(temp, "wb") as out:
+            while True:
+                chunk = f.stream.read(MUSIC_CHUNK)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > MUSIC_MAX_SIZE:
+                    raise ValueError("big")
+                digest.update(chunk)
+                out.write(chunk)
+    except ValueError:
+        _music_unlink(temp)
         return jsonify(error="Трек больше 40 МБ."), 413
+    except OSError as e:
+        _music_unlink(temp)
+        return jsonify(error=f"Не удалось сохранить: {e}"), 500
 
     artist, title = _music_split(os.path.splitext(candidate)[0])
     track_id = str(uuid.uuid4())
     with music_lock:
+        twin = _music_twin(size, digest.hexdigest())
+        if twin:
+            _music_unlink(temp)
+            candidate = twin
+        else:
+            try:
+                os.replace(temp, os.path.join(MUSIC_DIR, candidate))
+            except OSError as e:
+                _music_unlink(temp)
+                return jsonify(error=f"Не удалось сохранить: {e}"), 500
         music_items[track_id] = {"file": candidate, "artist": artist, "title": title,
-                                 "size": size, "added": time.time()}
+                                 "size": size, "added": time.time(),
+                                 "folder": folder, "hash": digest.hexdigest()}
         _music_write_index()
-    return jsonify(id=track_id, artist=artist, title=title)
+    return jsonify(id=track_id, artist=artist, title=title, folder=folder, twin=bool(twin))
+
+
+def _music_unlink(path):
+    try:
+        os.remove(path)
+    except OSError:
+        pass
 
 
 @app.patch("/api/music/<track_id>")
-@login_required
+@music_editor_required
 def music_rename_api(track_id):
     payload = request.get_json(silent=True) or {}
     with music_lock:
@@ -1666,26 +1818,124 @@ def music_rename_api(track_id):
             if not title:
                 return jsonify(error="Название пустое."), 400
             track["title"] = title
+        if "folder" in payload:
+            folder = (payload.get("folder") or "").strip()
+            track["folder"] = folder if folder in music_folders else ""
         _music_write_index()
-        return jsonify(ok=True, artist=track["artist"], title=track["title"])
+        return jsonify(ok=True, artist=track["artist"], title=track["title"],
+                       folder=track.get("folder", ""))
 
 
 @app.delete("/api/music/<track_id>")
-@login_required
+@music_editor_required
 def music_delete_api(track_id):
     with music_lock:
         track = music_items.pop(track_id, None)
         if track:
-            try:
-                os.remove(os.path.join(MUSIC_DIR, track["file"]))
-            except OSError:
-                pass
+            _music_drop_file(track["file"])
             _music_write_index()
     return jsonify(ok=True)
 
 
+@app.post("/api/music/folder")
+@music_editor_required
+def music_folder_create_api():
+    payload = request.get_json(silent=True) or {}
+    name = (payload.get("name") or "").strip()[:60] or "Новая папка"
+    parent = (payload.get("parent") or "").strip()
+    with music_lock:
+        if parent and parent not in music_folders:
+            parent = ""
+        if _music_folder_depth(parent) >= MUSIC_MAX_DEPTH:
+            return jsonify(error="Глубже вкладывать некуда."), 400
+        folder_id = str(uuid.uuid4())
+        music_folders[folder_id] = {"name": name, "parent": parent, "added": time.time()}
+        _music_write_index()
+    return jsonify(id=folder_id, name=name, parent=parent)
+
+
+@app.patch("/api/music/folder/<folder_id>")
+@music_editor_required
+def music_folder_patch_api(folder_id):
+    payload = request.get_json(silent=True) or {}
+    with music_lock:
+        folder = music_folders.get(folder_id)
+        if not folder:
+            return jsonify(error="Папка не найдена."), 404
+        if "name" in payload:
+            name = (payload.get("name") or "").strip()[:60]
+            if not name:
+                return jsonify(error="Имя пустое."), 400
+            folder["name"] = name
+        if "parent" in payload:
+            parent = (payload.get("parent") or "").strip()
+            if parent and parent not in music_folders:
+                parent = ""
+            # Папку нельзя убрать внутрь самой себя — дерево бы замкнулось.
+            if parent in _music_subtree(folder_id):
+                return jsonify(error="Папку нельзя вложить в саму себя."), 400
+            folder["parent"] = parent
+        _music_write_index()
+        return jsonify(ok=True, name=folder["name"], parent=folder.get("parent", ""))
+
+
+@app.delete("/api/music/folder/<folder_id>")
+@music_editor_required
+def music_folder_delete_api(folder_id):
+    with music_lock:
+        if folder_id not in music_folders:
+            return jsonify(error="Папка не найдена."), 404
+        doomed = _music_subtree(folder_id)
+        gone = [k for k, v in music_items.items() if v.get("folder") in doomed]
+        files = {music_items[k]["file"] for k in gone}
+        for k in gone:
+            music_items.pop(k, None)
+        for k in doomed:
+            music_folders.pop(k, None)
+        for fname in files:
+            _music_drop_file(fname)
+        _music_write_index()
+    return jsonify(ok=True, tracks=len(gone), folders=len(doomed))
+
+
+@app.post("/api/music/op")
+@music_editor_required
+def music_op_api():
+    """Пачкой: скопировать, перенести или удалить треки.
+
+    Копия — это новая запись на тот же файл, поэтому она мгновенная и места
+    не занимает. Никакой очереди с полосой тут не нужно."""
+    payload = request.get_json(silent=True) or {}
+    op = payload.get("op")
+    ids = [str(i) for i in (payload.get("ids") or [])][:2000]
+    target = (payload.get("target") or "").strip()
+    if op not in {"copy", "move", "delete"}:
+        return jsonify(error="Неизвестное действие."), 400
+
+    done = 0
+    with music_lock:
+        if op != "delete" and target and target not in music_folders:
+            return jsonify(error="Папка не найдена."), 404
+        for track_id in ids:
+            track = music_items.get(track_id)
+            if not track:
+                continue
+            if op == "copy":
+                twin = dict(track)
+                twin["folder"] = target
+                twin["added"] = time.time()
+                music_items[str(uuid.uuid4())] = twin
+            elif op == "move":
+                track["folder"] = target
+            else:
+                music_items.pop(track_id, None)
+                _music_drop_file(track["file"])
+            done += 1
+        _music_write_index()
+    return jsonify(ok=True, done=done)
+
+
 @app.get("/api/music/file/<track_id>")
-@login_required
 def music_file_api(track_id):
     with music_lock:
         track = music_items.get(track_id)
@@ -4603,6 +4853,24 @@ _GAME_ICONS = {
         "B": ("#3d4757", None), "w": ("#cdd8e6", None), "r": ("#ff5a6e", None),
         "L": ("#63f5ad", "px-blink"),
     }),
+    # Динамик — значок музыкальной вкладки. Волн две: ближняя горит всегда,
+    # дальняя мигает, поэтому значок дышит «одна волна — две» и без наведения.
+    "speaker": _pixel_svg([
+        "......hh......",
+        ".....hcc..W...",
+        "....hccc.wW...",
+        "hhhhcccc.wW...",
+        "hccccccc.wW...",
+        "hccccccc.wW...",
+        "hccccccc.wW...",
+        "hhhhcccc.wW...",
+        "....hccc.wW...",
+        ".....hcc..W...",
+        "......hh......",
+    ], {
+        "h": ("#48566b", None), "c": ("#2f3846", None),
+        "w": ("#2de2ff", None), "W": ("#2de2ff", "px-blink2"),
+    }),
     # 4. Космический захватчик
     "invader": _pixel_svg([
         "..g.....g..",
@@ -6649,6 +6917,954 @@ def drop_page():
     return html.replace("__ICONLINKS__", ICON_LINKS)
 
 
+@app.get("/music")
+def music_page():
+    """Фонотека. Слушать может кто угодно, менять — из-под пароля кабинета.
+
+    Разделение простое: страница всегда рисует одно и то же, а кнопки правки
+    появляются, только когда сервер в ответе на список сказал can_edit. Сам
+    запрет живёт на сервере, здесь лишь чтобы не мозолить глаза."""
+    html = """<!doctype html>
+    <html lang="ru">
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <meta name="theme-color" content="#080b12">
+      <meta name="description" content="Фонотека vitazgio.ru">
+      __ICONLINKS__
+      <link rel="manifest" href="/manifest.webmanifest">
+      <title>vitazgio.ru — музыка</title>
+      <style>
+        :root {
+          color-scheme: dark;
+          --bg: #0d1321;
+          --surface: rgba(25, 32, 48, 0.82);
+          --line: rgba(255, 255, 255, 0.1);
+          --text: #f7f8fc;
+          --muted: #989fb2;
+          --pc: #2de2ff;
+        }
+        * { box-sizing: border-box; }
+        body {
+          margin: 0; min-width: 320px;
+          font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+          background:
+            radial-gradient(circle at 12% 8%, rgba(57, 126, 255, .22), transparent 32rem),
+            radial-gradient(circle at 88% 78%, rgba(149, 65, 255, .18), transparent 34rem),
+            var(--bg);
+          color: var(--text);
+          /* Запас под стопку внизу, пока скрипт не померил её точно:
+             она висит поверх и иначе накрыла бы последний трек в списке. */
+          padding-bottom: 140px;
+        }
+        .mpage { width: min(1380px, calc(100% - 40px)); margin: 0 auto;
+                 padding: clamp(20px, 4vw, 44px) 0 24px; }
+
+        .mtop { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+        .eyebrow { display: inline-flex; align-items: center; gap: 10px; color: #cdd2df;
+                   font-size: .76rem; font-weight: 700; letter-spacing: .16em;
+                   text-transform: uppercase; text-decoration: none; }
+        .eyebrow::before { content: ""; width: 7px; height: 7px; border-radius: 50%;
+                           background: #64e6a5; box-shadow: 0 0 16px #64e6a5; }
+        .eyebrow:hover { color: #fff; }
+        .hero-mark { flex: none; width: clamp(1.6rem, 4vw, 2.6rem);
+                     height: clamp(1.6rem, 4vw, 2.6rem);
+                     filter: drop-shadow(0 0 14px rgba(45, 226, 255, .35)); }
+
+        /* Строка пути и кнопок. Текста тут по минимуму: где я нахожусь и что
+           могу сделать — остальное показывают сами значки. */
+        .mbar { display: flex; align-items: center; justify-content: space-between;
+                gap: 12px; flex-wrap: wrap; margin: clamp(18px, 3vw, 30px) 0 16px; }
+        .crumbs { display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+                  min-width: 0; font-size: .92rem; }
+        .crumb { padding: 4px 2px; color: var(--muted); background: none; border: 0;
+                 font: inherit; cursor: pointer; }
+        .crumb:hover { color: var(--pc); }
+        .crumb.last { color: var(--text); font-weight: 700; cursor: default; }
+        .crumb-sep { color: #4a5568; }
+
+        .mtools { display: flex; align-items: center; gap: 8px; }
+        .tbtn { display: inline-flex; align-items: center; gap: 7px; height: 38px;
+                padding: 0 14px; color: #cdd6e6; font: 600 .84rem inherit;
+                white-space: nowrap; cursor: pointer;
+                background: rgba(255,255,255,.05); border: 1px solid var(--line);
+                border-radius: 10px; transition: .18s; }
+        .tbtn:hover { color: #fff; border-color: var(--pc); background: rgba(45,226,255,.1); }
+        .tbtn svg { width: 16px; height: 16px; flex: none; }
+        .tbtn--key { color: #8ee9ff; }
+        .tbtn--on { color: #04121a; background: var(--pc); border-color: var(--pc); }
+
+        /* Папки — плитки. Крупная цель для пальца, подпись одна. */
+        .mgrid { display: grid; gap: 10px; margin-bottom: 18px;
+                 grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
+        .folder { position: relative; display: flex; align-items: center; gap: 10px;
+                  padding: 14px; text-align: left; color: var(--text); cursor: pointer;
+                  background: var(--surface); border: 1px solid var(--line);
+                  border-radius: 14px; font: 600 .92rem inherit; transition: .18s; }
+        .folder:hover { border-color: var(--pc); transform: translateY(-2px); }
+        .folder svg { width: 22px; height: 22px; color: var(--pc); flex: none; }
+        .folder-name { min-width: 0; overflow: hidden; text-overflow: ellipsis;
+                       white-space: nowrap; }
+        .folder-num { margin-left: auto; color: var(--muted); font-weight: 500;
+                      font-size: .8rem; }
+        .folder.picked { border-color: var(--pc); background: rgba(45,226,255,.12); }
+
+        .mlist { display: flex; flex-direction: column;
+                 border: 1px solid var(--line); border-radius: 14px; overflow: hidden;
+                 background: rgba(15, 20, 32, .6); }
+        .row { display: grid; grid-template-columns: 34px 1fr auto;
+               align-items: center; gap: 12px; padding: 11px 14px; cursor: pointer;
+               border-bottom: 1px solid rgba(255,255,255,.05); transition: background .15s; }
+        .row:last-child { border-bottom: 0; }
+        .row:hover { background: rgba(255,255,255,.04); }
+        .row.picked { background: rgba(45,226,255,.13); }
+        .row.playing .row-title { color: var(--pc); }
+        .row-num { color: #55607a; font-size: .78rem; text-align: right;
+                   font-variant-numeric: tabular-nums; }
+        .row.playing .row-num { color: var(--pc); }
+        .row-main { min-width: 0; }
+        .row-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+                     font-weight: 600; font-size: .95rem; }
+        .row-artist { overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+                      color: var(--muted); font-size: .78rem; }
+        .row-size { color: #55607a; font-size: .76rem; font-variant-numeric: tabular-nums; }
+
+        .empty { padding: 42px 16px; color: var(--muted); text-align: center; font-size: .92rem; }
+
+        /* Низ страницы — стопка: заливка, полоса выделения, плеер. Стоят друг
+           над другом, а не перекрывают: музыка играет и во время разбора
+           треков, и прятать у неё кнопки незачем. Высоту стопки страница
+           меряет сама и отводит под неё отступ снизу. */
+        .stack { position: fixed; z-index: 40; inset: auto 0 0 0; }
+
+        .dock { padding: 12px max(20px, calc((100vw - 1380px) / 2)) 14px;
+                background: rgba(10, 14, 24, .92); backdrop-filter: blur(14px);
+                border-top: 1px solid var(--line); }
+        .dock-grid { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+                     align-items: center; gap: 14px; }
+        .now { min-width: 0; }
+        .now-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+                     font-weight: 700; font-size: .95rem; }
+        .now-artist { overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+                      color: var(--muted); font-size: .78rem; }
+        .keys { display: flex; align-items: center; gap: 10px; }
+        .kbtn { display: grid; place-items: center; width: 40px; height: 40px;
+                color: #cdd6e6; background: rgba(255,255,255,.05);
+                border: 1px solid var(--line); border-radius: 50%; cursor: pointer;
+                transition: .18s; }
+        .kbtn:hover { color: #fff; border-color: var(--pc); }
+        .kbtn svg { width: 17px; height: 17px; }
+        .kbtn--play { width: 52px; height: 52px; color: #04121a;
+                      background: var(--pc); border-color: var(--pc); }
+        .kbtn--play svg { width: 21px; height: 21px; }
+        .kbtn--play:hover { color: #04121a; filter: brightness(1.12); }
+        .kbtn.on { color: var(--pc); border-color: var(--pc); }
+        .side { display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
+
+        .seek { display: flex; align-items: center; gap: 10px; margin-top: 10px;
+                color: #6f7a92; font-size: .74rem; font-variant-numeric: tabular-nums; }
+        .bar { position: relative; flex: 1; height: 16px; cursor: pointer; }
+        .bar::before { content: ""; position: absolute; inset: 7px 0 auto;
+                       height: 4px; border-radius: 2px; background: rgba(255,255,255,.12); }
+        .bar i { position: absolute; top: 7px; left: 0; height: 4px; width: 0;
+                 border-radius: 2px; background: var(--pc); }
+        .bar b { position: absolute; top: 3px; left: 0; width: 12px; height: 12px;
+                 margin-left: -6px; border-radius: 50%; background: #fff; opacity: 0;
+                 transition: opacity .15s; }
+        .bar:hover b, .bar.grab b { opacity: 1; }
+        .vol { width: 96px; }
+
+        /* Полоса выделения — как в личном дропе, чтобы рука помнила одно. */
+        .selbar { display: flex; align-items: center; gap: 10px;
+                  padding: 12px max(20px, calc((100vw - 1380px) / 2));
+                  background: rgba(12, 18, 30, .96); border-top: 1px solid var(--pc); }
+        .selbar .count { margin-right: auto; color: #8ee9ff; font-weight: 700;
+                         font-size: .88rem; white-space: nowrap; }
+        .selbar .tbtn { flex: 0 1 auto; min-width: 0; overflow: hidden; }
+        .selbar .tbtn span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .shut { display: grid; place-items: center; width: 38px; height: 38px; flex: none;
+                color: #cdd6e6; background: rgba(255,255,255,.05);
+                border: 1px solid var(--line); border-radius: 10px; cursor: pointer;
+                font-size: 1.1rem; line-height: 1; }
+        .shut:hover { color: #fff; border-color: #ff5a6e; background: rgba(255,90,110,.14); }
+
+        /* Полоса заливки: показываем только когда есть что показывать. */
+        .queue { padding: 12px max(20px, calc((100vw - 1380px) / 2)) 14px;
+                 background: rgba(12, 18, 30, .96); border-top: 1px solid var(--pc); }
+        .queue-line { display: flex; align-items: center; gap: 12px;
+                      font-size: .84rem; color: #cdd6e6; }
+        .queue-name { min-width: 0; overflow: hidden; text-overflow: ellipsis;
+                      white-space: nowrap; color: var(--muted); }
+        .queue-num { margin-left: auto; color: #8ee9ff; font-weight: 700;
+                     font-variant-numeric: tabular-nums; white-space: nowrap; }
+        .queue-bar { height: 4px; margin-top: 9px; border-radius: 2px;
+                     background: rgba(255,255,255,.12); overflow: hidden; }
+        .queue-bar i { display: block; height: 100%; width: 0; background: var(--pc);
+                       transition: width .15s; }
+
+        .modal { position: fixed; z-index: 60; inset: 0; display: grid; place-items: center;
+                 padding: 20px; background: rgba(6, 9, 16, .74); }
+        .sheet { width: min(420px, 100%); padding: 24px;
+                 background: linear-gradient(160deg, rgba(24,32,48,.98), rgba(12,16,26,.98));
+                 border: 1px solid var(--line); border-radius: 16px; }
+        .sheet h2 { margin: 0 0 6px; font-size: 1.2rem; }
+        .sheet p { margin: 0 0 16px; color: var(--muted); font-size: .86rem; }
+        .sheet input { width: 100%; height: 42px; padding: 0 12px; color: var(--text);
+                       background: rgba(0,0,0,.35); border: 1px solid var(--line);
+                       border-radius: 10px; font: inherit; }
+        .sheet input:focus { outline: none; border-color: var(--pc); }
+        .sheet-keys { display: flex; gap: 10px; margin-top: 16px; }
+        .sheet-keys .tbtn { flex: 1; justify-content: center; }
+        .sheet .err { margin: 10px 0 0; color: #ff7b8c; font-size: .82rem; min-height: 1em; }
+
+        [hidden] { display: none !important; }
+
+        @media (max-width: 760px) {
+          .dock-grid { grid-template-columns: 1fr; gap: 10px; }
+          .keys { justify-content: center; }
+          .side { justify-content: center; }
+          .vol { width: 130px; }
+          .mgrid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+          .selbar { flex-wrap: wrap; }
+          .selbar .count { flex: 1 0 100%; margin: 0 0 4px; }
+          .selbar .tbtn { flex: 1; justify-content: center; padding: 0 8px; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          * { transition: none !important; animation: none !important; }
+        }
+      </style>
+    </head>
+    <body>
+      <main class="mpage">
+        <header class="mtop">
+          <a class="eyebrow" href="/">vitazgio.ru · музыка</a>
+          <img class="hero-mark" src="/static/icons/vg-plain.svg" alt="Vitaz Gio"
+               width="512" height="512">
+        </header>
+
+        <div class="mbar">
+          <nav class="crumbs" id="crumbs" aria-label="Где я"></nav>
+          <div class="mtools" id="tools"></div>
+        </div>
+
+        <section class="mgrid" id="folders"></section>
+        <section class="mlist" id="tracks"></section>
+      </main>
+
+      <div class="stack" id="stack">
+      <div class="queue" id="queue" hidden>
+        <div class="queue-line">
+          <span id="queue-name" class="queue-name">…</span>
+          <span id="queue-num" class="queue-num"></span>
+        </div>
+        <div class="queue-bar"><i id="queue-fill"></i></div>
+      </div>
+      <div class="selbar" id="selbar" hidden></div>
+      <div class="dock" id="dock">
+        <div class="dock-grid">
+          <div class="now">
+            <div class="now-title" id="now-title">тишина</div>
+            <div class="now-artist" id="now-artist">выберите трек</div>
+          </div>
+          <div class="keys">
+            <button class="kbtn" id="k-prev" type="button" aria-label="Предыдущий"></button>
+            <button class="kbtn kbtn--play" id="k-play" type="button" aria-label="Слушать"></button>
+            <button class="kbtn" id="k-next" type="button" aria-label="Следующий"></button>
+          </div>
+          <div class="side">
+            <button class="kbtn" id="k-shuffle" type="button" aria-label="Вперемешку"></button>
+            <button class="kbtn" id="k-repeat" type="button" aria-label="Повтор"></button>
+            <button class="kbtn" id="k-mute" type="button" aria-label="Звук"></button>
+            <div class="bar vol" id="vol"><i></i><b></b></div>
+          </div>
+        </div>
+        <div class="seek">
+          <span id="t-at">0:00</span>
+          <div class="bar" id="seek"><i></i><b></b></div>
+          <span id="t-all">0:00</span>
+        </div>
+      </div>
+      </div>
+
+      <div class="modal" id="modal" hidden>
+        <section class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+          <h2 id="sheet-title">Расширенный режим</h2>
+          <p id="sheet-note">Пароль от личного кабинета.</p>
+          <input id="sheet-input" type="password" autocomplete="current-password">
+          <p class="err" id="sheet-err" role="alert"></p>
+          <div class="sheet-keys">
+            <button class="tbtn" id="sheet-no" type="button"><span>Отмена</span></button>
+            <button class="tbtn tbtn--on" id="sheet-ok" type="button"><span>Готово</span></button>
+          </div>
+        </section>
+      </div>
+
+      <audio id="audio" preload="metadata"></audio>
+      <input type="file" id="pick-files" accept="audio/*,.mp3,.m4a,.flac,.ogg,.opus,.wav,.aac" multiple hidden>
+      <input type="file" id="pick-dir" webkitdirectory directory multiple hidden>
+
+      <script>
+      (() => {
+        "use strict";
+
+        const SVG = {
+          play: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>',
+          pause: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>',
+          prev: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 5h2v14H7zm11 0v14l-9-7z"/></svg>',
+          next: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M15 5h2v14h-2zM6 5l9 7-9 7z"/></svg>',
+          shuffle: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h4v4M20 4l-6 6M4 20l16-16M16 20h4v-4M4 4l5 5"/></svg>',
+          repeat: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11V9a4 4 0 0 1 4-4h9M17 2l3 3-3 3M20 13v2a4 4 0 0 1-4 4H7M7 22l-3-3 3-3"/></svg>',
+          loud: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 9h4l5-4v14l-5-4H4z"/><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M17 8a5 5 0 0 1 0 8"/></svg>',
+          mute: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 9h4l5-4v14l-5-4H4z"/><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="m17 9 5 6m0-6-5 6"/></svg>',
+          folder: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>',
+          plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
+          up: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>',
+          key: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="12" r="4"/><path d="M12 12h9m-3 0v4m-3-4v3"/></svg>',
+          copy: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h8"/></svg>',
+          cut: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="6" cy="18" r="2.4"/><circle cx="18" cy="18" r="2.4"/><path d="M8 16 18 4M16 16 6 4"/></svg>',
+          paste: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><path d="M9 4h6v3H9z"/><path d="M15 5h3v15H6V5h3"/></svg>',
+          del: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V5h6v2m-8 0 1 13h8l1-13"/></svg>',
+          pen: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="m4 20 4-1 11-11-3-3L5 16z"/></svg>',
+        };
+
+        const $ = (id) => document.getElementById(id);
+        const audio = $("audio");
+
+        let tracks = [];
+        let folders = [];
+        let canEdit = false;
+        let here = "";            // в какой папке смотрим
+        let quota = { used: 0, all: 0 };
+
+        // ── что сейчас играет ───────────────────────────────────────────
+        let queueIds = [];        // порядок воспроизведения
+        let atIndex = -1;
+        let shuffle = false;
+        let repeat = false;
+
+        // ── выделение и буфер ───────────────────────────────────────────
+        let picking = false;
+        const picked = new Set();
+        let clip = null;          // { op: "copy" | "cut", ids: [...] }
+
+        const byId = (id) => tracks.find((t) => t.id === id);
+        const kids = (folder) => folders.filter((f) => f.parent === folder);
+        const inside = (folder) => tracks.filter((t) => t.folder === folder);
+
+        /* Сколько треков в папке вместе со вложенными: на плитке нужен
+           общий счёт, иначе папка с одними подпапками выглядит пустой. */
+        const deepCount = (folder) => {
+          let sum = inside(folder).length;
+          kids(folder).forEach((f) => { sum += deepCount(f.id); });
+          return sum;
+        };
+
+        const clock = (sec) => {
+          if (!isFinite(sec) || sec < 0) sec = 0;
+          const m = Math.floor(sec / 60), s = Math.floor(sec % 60);
+          return m + ":" + String(s).padStart(2, "0");
+        };
+        const weight = (bytes) => {
+          if (bytes >= 1048576) return (bytes / 1048576).toFixed(1) + " МБ";
+          return Math.max(1, Math.round(bytes / 1024)) + " КБ";
+        };
+
+        // ── чтение с сервера ────────────────────────────────────────────
+        const load = async () => {
+          const res = await fetch("/api/music", { headers: { "Accept": "application/json" } });
+          const data = await res.json();
+          tracks = data.tracks || [];
+          folders = data.folders || [];
+          canEdit = !!data.can_edit;
+          quota = { used: data.used || 0, all: data.quota || 0 };
+          if (here && !folders.some((f) => f.id === here)) here = "";
+          draw();
+        };
+
+        // ── отрисовка ───────────────────────────────────────────────────
+        const drawCrumbs = () => {
+          const chain = [];
+          let cur = here;
+          const guard = new Set();
+          while (cur && !guard.has(cur)) {
+            guard.add(cur);
+            const f = folders.find((x) => x.id === cur);
+            if (!f) break;
+            chain.unshift(f);
+            cur = f.parent;
+          }
+          const parts = ['<button class="crumb' + (chain.length ? '' : ' last') +
+                         '" data-go="">Вся музыка</button>'];
+          chain.forEach((f, i) => {
+            parts.push('<span class="crumb-sep">/</span>');
+            const last = i === chain.length - 1;
+            parts.push('<button class="crumb' + (last ? ' last' : '') + '" data-go="' +
+                       f.id + '">' + esc(f.name) + '</button>');
+          });
+          $("crumbs").innerHTML = parts.join("");
+        };
+
+        const esc = (s) => String(s).replace(/[&<>"]/g, (c) =>
+          ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+        const tool = (id, icon, text, extra) =>
+          '<button class="tbtn' + (extra || "") + '" data-act="' + id + '">' +
+          icon + '<span>' + text + '</span></button>';
+
+        const drawTools = () => {
+          const parts = [];
+          if (here) parts.push(tool("up", SVG.up, "Назад"));
+          if (canEdit) {
+            // «Папка» создаёт пустую, «Альбом» заливает готовую с диска —
+            // одинаковые слова тут путали бы больше, чем помогали.
+            parts.push(tool("newdir", SVG.plus, "Папка"));
+            parts.push(tool("upload", SVG.up, "Треки"));
+            parts.push(tool("uploaddir", SVG.folder, "Альбом"));
+            if (here) parts.push(tool("rename", SVG.pen, "Имя"));
+          } else {
+            parts.push(tool("unlock", SVG.key, "Расширенный режим", " tbtn--key"));
+          }
+          $("tools").innerHTML = parts.join("");
+        };
+
+        const drawFolders = () => {
+          const list = kids(here);
+          $("folders").innerHTML = list.map((f) =>
+            '<button class="folder" data-dir="' + f.id + '">' + SVG.folder +
+            '<span class="folder-name">' + esc(f.name) + '</span>' +
+            '<span class="folder-num">' + deepCount(f.id) + '</span></button>').join("");
+        };
+
+        const drawTracks = () => {
+          const list = inside(here);
+          if (!list.length) {
+            $("tracks").innerHTML = '<div class="empty">' +
+              (kids(here).length ? "здесь только папки" : "пусто") + '</div>';
+            return;
+          }
+          $("tracks").innerHTML = list.map((t, i) =>
+            '<div class="row" data-id="' + t.id + '">' +
+            '<div class="row-num">' + (i + 1) + '</div>' +
+            '<div class="row-main"><div class="row-title">' + esc(t.title) + '</div>' +
+            '<div class="row-artist">' + esc(t.artist || "неизвестен") + '</div></div>' +
+            '<div class="row-size">' + weight(t.size) + '</div></div>').join("");
+          paint();
+        };
+
+        const paint = () => {
+          const nowId = queueIds[atIndex];
+          document.querySelectorAll(".row").forEach((row) => {
+            const id = row.dataset.id;
+            row.classList.toggle("picked", picked.has(id));
+            row.classList.toggle("playing", id === nowId);
+          });
+          drawSelbar();
+        };
+
+        const draw = () => {
+          drawCrumbs();
+          drawTools();
+          drawFolders();
+          drawTracks();
+        };
+
+        /* Полоса внизу живёт в двух видах. Пока треки выбраны — что с ними
+           сделать. Как только сложили в буфер, выбор снимается и остаётся
+           одна кнопка: вставить сюда. Так буфер переживает переход по папкам
+           и видно, что он не пуст. */
+        const drawSelbar = () => {
+          const bar = $("selbar");
+          const marked = picking && picked.size;
+          if (!marked && !clip) { bar.hidden = true; measure(); return; }
+          bar.hidden = false;
+          if (marked) {
+            bar.innerHTML = '<span class="count">' + picked.size + '</span>' +
+              tool("copy", SVG.copy, "Копия") +
+              tool("cut", SVG.cut, "Вырезать") +
+              tool("kill", SVG.del, "Удалить") +
+              '<button class="shut" data-act="off" aria-label="Снять выбор">&times;</button>';
+          } else {
+            bar.innerHTML = '<span class="count">в буфере ' + clip.ids.length + '</span>' +
+              tool("paste", SVG.paste, "Вставить сюда", " tbtn--on") +
+              '<button class="shut" data-act="off" aria-label="Очистить буфер">&times;</button>';
+          }
+          measure();
+        };
+
+        const stopPicking = () => {
+          if (picking && picked.size) { picking = false; picked.clear(); }
+          else { clip = null; }
+          paint();
+        };
+
+        /* Стопка внизу растёт и сжимается, поэтому отступ под неё считаем
+           по факту, а не подбираем на глаз в стилях. */
+        const measure = () => {
+          document.body.style.paddingBottom = ($("stack").offsetHeight + 18) + "px";
+        };
+        addEventListener("resize", measure);
+
+        // ── плеер ───────────────────────────────────────────────────────
+        const buildQueue = (startId) => {
+          const list = inside(here).map((t) => t.id);
+          if (!list.length) return;
+          if (shuffle) {
+            for (let i = list.length - 1; i > 0; i--) {
+              const j = Math.floor(Math.random() * (i + 1));
+              [list[i], list[j]] = [list[j], list[i]];
+            }
+            const at = list.indexOf(startId);
+            if (at > 0) { list.splice(at, 1); list.unshift(startId); }
+          }
+          queueIds = list;
+          atIndex = Math.max(0, list.indexOf(startId));
+        };
+
+        const play = (id) => {
+          if (!queueIds.includes(id)) buildQueue(id);
+          else atIndex = queueIds.indexOf(id);
+          const t = byId(id);
+          if (!t) return;
+          audio.src = "/api/music/file/" + id;
+          audio.play().catch(() => {});
+          $("now-title").textContent = t.title;
+          $("now-artist").textContent = t.artist || "неизвестен";
+          document.title = t.title + " — vitazgio.ru";
+          paint();
+        };
+
+        const step = (dir) => {
+          if (!queueIds.length) return;
+          let next = atIndex + dir;
+          if (next < 0) next = queueIds.length - 1;
+          if (next >= queueIds.length) {
+            if (!repeat && dir > 0) { audio.pause(); return; }
+            next = 0;
+          }
+          play(queueIds[next]);
+        };
+
+        const setPlayIcon = () => {
+          $("k-play").innerHTML = audio.paused ? SVG.play : SVG.pause;
+          $("k-play").setAttribute("aria-label", audio.paused ? "Слушать" : "Пауза");
+        };
+
+        // ── ползунки: одна механика на перемотку и громкость ────────────
+        const slider = (el, read, write) => {
+          const at = (e) => {
+            const box = el.getBoundingClientRect();
+            const k = Math.min(1, Math.max(0, (e.clientX - box.left) / box.width));
+            write(k);
+          };
+          el.addEventListener("pointerdown", (e) => {
+            el.classList.add("grab");
+            try { el.setPointerCapture(e.pointerId); } catch (err) { /* обойдёмся */ }
+            at(e);
+          });
+          el.addEventListener("pointermove", (e) => { if (el.classList.contains("grab")) at(e); });
+          const stop = (e) => {
+            if (!el.classList.contains("grab")) return;
+            el.classList.remove("grab");
+            try { el.releasePointerCapture(e.pointerId); } catch (err) { /* уже */ }
+          };
+          el.addEventListener("pointerup", stop);
+          el.addEventListener("pointercancel", stop);
+          el.show = (k) => {
+            k = Math.min(1, Math.max(0, k || 0));
+            el.querySelector("i").style.width = (k * 100) + "%";
+            el.querySelector("b").style.left = (k * 100) + "%";
+          };
+          return el;
+        };
+
+        const seek = slider($("seek"), null, (k) => {
+          if (isFinite(audio.duration)) audio.currentTime = k * audio.duration;
+        });
+        const vol = slider($("vol"), null, (k) => {
+          audio.volume = k; audio.muted = false;
+          try { localStorage.setItem("vgVolume", String(k)); } catch (e) { /* и ладно */ }
+          vol.show(k); setMuteIcon();
+        });
+
+        const setMuteIcon = () => {
+          const off = audio.muted || audio.volume === 0;
+          $("k-mute").innerHTML = off ? SVG.mute : SVG.loud;
+          $("k-mute").classList.toggle("on", off);
+        };
+
+        audio.addEventListener("timeupdate", () => {
+          $("t-at").textContent = clock(audio.currentTime);
+          if (isFinite(audio.duration)) seek.show(audio.currentTime / audio.duration);
+        });
+        audio.addEventListener("loadedmetadata", () => {
+          $("t-all").textContent = clock(audio.duration);
+        });
+        audio.addEventListener("ended", () => {
+          if (repeat && queueIds.length === 1) { audio.currentTime = 0; audio.play(); return; }
+          step(1);
+        });
+        audio.addEventListener("play", setPlayIcon);
+        audio.addEventListener("pause", setPlayIcon);
+
+        $("k-play").addEventListener("click", () => {
+          if (!queueIds.length) {
+            const first = inside(here)[0];
+            if (first) play(first.id);
+            return;
+          }
+          if (audio.paused) audio.play().catch(() => {}); else audio.pause();
+        });
+        $("k-prev").addEventListener("click", () => {
+          // Привычка из плееров: первые секунды «назад» — это к началу трека.
+          if (audio.currentTime > 3) { audio.currentTime = 0; return; }
+          step(-1);
+        });
+        $("k-next").addEventListener("click", () => step(1));
+        $("k-shuffle").addEventListener("click", () => {
+          shuffle = !shuffle;
+          $("k-shuffle").classList.toggle("on", shuffle);
+          const nowId = queueIds[atIndex];
+          if (nowId) buildQueue(nowId);
+        });
+        $("k-repeat").addEventListener("click", () => {
+          repeat = !repeat;
+          $("k-repeat").classList.toggle("on", repeat);
+        });
+        $("k-mute").addEventListener("click", () => {
+          audio.muted = !audio.muted;
+          setMuteIcon();
+          vol.show(audio.muted ? 0 : audio.volume);
+        });
+
+        $("k-prev").innerHTML = SVG.prev;
+        $("k-next").innerHTML = SVG.next;
+        $("k-shuffle").innerHTML = SVG.shuffle;
+        $("k-repeat").innerHTML = SVG.repeat;
+        setPlayIcon();
+        let startVol = 0.8;
+        try {
+          const saved = parseFloat(localStorage.getItem("vgVolume"));
+          if (isFinite(saved)) startVol = saved;
+        } catch (e) { /* хранилище может быть закрыто */ }
+        audio.volume = startVol;
+        vol.show(startVol);
+        setMuteIcon();
+
+        // ── клики по списку ─────────────────────────────────────────────
+        let holdTimer = 0;
+        let holdFrom = null;
+
+        const rowId = (e) => {
+          const row = e.target.closest(".row");
+          return row ? row.dataset.id : null;
+        };
+
+        $("tracks").addEventListener("click", (e) => {
+          const id = rowId(e);
+          if (!id) return;
+          if (picking) {
+            if (picked.has(id)) picked.delete(id); else picked.add(id);
+            if (!picked.size) picking = false;
+            paint();
+            return;
+          }
+          play(id);
+        });
+
+        // Долгое нажатие — вход в выделение. То же, что в личном дропе.
+        $("tracks").addEventListener("pointerdown", (e) => {
+          if (!canEdit || picking) return;
+          const id = rowId(e);
+          if (!id) return;
+          holdFrom = { x: e.clientX, y: e.clientY };
+          holdTimer = setTimeout(() => {
+            picking = true;
+            picked.add(id);
+            paint();
+            if (navigator.vibrate) navigator.vibrate(15);
+          }, 420);
+        });
+        const holdOff = () => { clearTimeout(holdTimer); holdTimer = 0; holdFrom = null; };
+        $("tracks").addEventListener("pointermove", (e) => {
+          if (!holdFrom) return;
+          if (Math.abs(e.clientX - holdFrom.x) > 12 || Math.abs(e.clientY - holdFrom.y) > 12) holdOff();
+        });
+        $("tracks").addEventListener("pointerup", holdOff);
+        $("tracks").addEventListener("pointercancel", holdOff);
+        $("tracks").addEventListener("contextmenu", (e) => {
+          if (!canEdit) return;
+          const id = rowId(e);
+          if (!id) return;
+          e.preventDefault();
+          picking = true;
+          picked.add(id);
+          paint();
+        });
+
+        $("folders").addEventListener("click", (e) => {
+          const key = e.target.closest("[data-dir]");
+          if (!key) return;
+          here = key.dataset.dir;
+          queueIds = [];
+          atIndex = -1;
+          draw();
+        });
+
+        $("crumbs").addEventListener("click", (e) => {
+          const key = e.target.closest("[data-go]");
+          if (!key) return;
+          here = key.dataset.go;
+          queueIds = [];
+          atIndex = -1;
+          draw();
+        });
+
+        // ── окошко с вопросом ───────────────────────────────────────────
+        let sheetDone = null;
+        const ask = (title, note, value, secret) => new Promise((done) => {
+          sheetDone = done;
+          $("sheet-title").textContent = title;
+          $("sheet-note").textContent = note;
+          $("sheet-err").textContent = "";
+          const box = $("sheet-input");
+          box.type = secret ? "password" : "text";
+          box.value = value || "";
+          $("modal").hidden = false;
+          box.focus();
+          box.select();
+        });
+        const shut = (answer) => {
+          $("modal").hidden = true;
+          const done = sheetDone;
+          sheetDone = null;
+          if (done) done(answer);
+        };
+        $("sheet-ok").addEventListener("click", () => shut($("sheet-input").value));
+        $("sheet-no").addEventListener("click", () => shut(null));
+        $("sheet-input").addEventListener("keydown", (e) => {
+          if (e.key === "Enter") shut($("sheet-input").value);
+          if (e.key === "Escape") shut(null);
+        });
+
+        const send = async (url, how, body) => {
+          const res = await fetch(url, {
+            method: how,
+            headers: body ? { "Content-Type": "application/json" } : undefined,
+            body: body ? JSON.stringify(body) : undefined,
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data.error || "Не вышло.");
+          return data;
+        };
+
+        // ── очередь заливки: строго по одному файлу ─────────────────────
+        // Разом браузер не вытягивает: десяток параллельных отправок съедали
+        // память и вкладка падала. Здесь всегда одна отправка, файл уходит
+        // потоком — в память страницы он не читается вовсе.
+        const uploads = [];
+        let uploading = false;
+        let sent = 0;
+        let planned = 0;
+
+        const drawQueue = (name, part) => {
+          const box = $("queue");
+          if (!uploading) { box.hidden = true; return; }
+          box.hidden = false;
+          $("queue-name").textContent = name;
+          $("queue-num").textContent = sent + " / " + planned;
+          $("queue-fill").style.width = Math.round(part * 100) + "%";
+          measure();
+        };
+
+        const putOne = (file, folder) => new Promise((done, fail) => {
+          const form = new FormData();
+          form.append("file", file);
+          form.append("folder", folder);
+          const req = new XMLHttpRequest();
+          req.open("POST", "/api/music");
+          req.upload.addEventListener("progress", (e) => {
+            if (e.lengthComputable) drawQueue(file.name, e.loaded / e.total);
+          });
+          req.addEventListener("load", () => {
+            let data = {};
+            try { data = JSON.parse(req.responseText); } catch (e) { /* пустой ответ */ }
+            if (req.status >= 200 && req.status < 300) done(data);
+            else fail(new Error(data.error || ("Сервер ответил " + req.status)));
+          });
+          req.addEventListener("error", () => fail(new Error("Связь оборвалась.")));
+          req.addEventListener("abort", () => fail(new Error("Отменено.")));
+          req.send(form);
+        });
+
+        const runQueue = async () => {
+          if (uploading) return;
+          uploading = true;
+          const failed = [];
+          while (uploads.length) {
+            const job = uploads.shift();
+            drawQueue(job.file.name, 0);
+            let ok = false;
+            // Оборвалось — не бросаем всю пачку: три попытки с паузой, и дальше.
+            for (let tryNo = 1; tryNo <= 3 && !ok; tryNo++) {
+              try {
+                await putOne(job.file, job.folder);
+                ok = true;
+              } catch (err) {
+                if (tryNo === 3) failed.push(job.file.name);
+                else await new Promise((r) => setTimeout(r, tryNo * 1200));
+              }
+            }
+            sent++;
+            drawQueue(job.file.name, 1);
+          }
+          uploading = false;
+          drawQueue("", 0);
+          sent = 0;
+          planned = 0;
+          await load();
+          if (failed.length) {
+            alert("Не залилось: " + failed.slice(0, 6).join(", ") +
+                  (failed.length > 6 ? " и ещё " + (failed.length - 6) : ""));
+          }
+        };
+
+        const enqueue = (files, folder) => {
+          // Уже лежащее не перезаливаем: сверяем имя и размер.
+          const known = new Set(tracks.map((t) => t.title.toLowerCase()));
+          const fresh = Array.prototype.filter.call(files, (f) => {
+            const ext = f.name.lastIndexOf(".");
+            const stem = (ext > 0 ? f.name.slice(0, ext) : f.name).toLowerCase();
+            return f.size > 0 && !known.has(stem);
+          });
+          if (!fresh.length) return;
+          fresh.forEach((f) => uploads.push({ file: f, folder }));
+          planned += fresh.length;
+          runQueue();
+        };
+
+        $("pick-files").addEventListener("change", (e) => {
+          enqueue(e.target.files, here);
+          e.target.value = "";
+        });
+
+        // Папку с музыкой раскладываем как есть: подпапки станут подпапками.
+        $("pick-dir").addEventListener("change", async (e) => {
+          const files = Array.prototype.slice.call(e.target.files);
+          e.target.value = "";
+          if (!files.length) return;
+          const made = new Map();
+          made.set("", here);
+          const dirFor = async (path) => {
+            if (made.has(path)) return made.get(path);
+            const cut = path.lastIndexOf("/");
+            const up = cut < 0 ? "" : path.slice(0, cut);
+            const name = cut < 0 ? path : path.slice(cut + 1);
+            const parent = await dirFor(up);
+            const made2 = await send("/api/music/folder", "POST", { name, parent });
+            made.set(path, made2.id);
+            return made2.id;
+          };
+          for (const f of files) {
+            const rel = f.webkitRelativePath || f.name;
+            const parts = rel.split("/");
+            parts.pop();
+            // Верхнюю папку выбора не дублируем — кладём её содержимое сюда.
+            if (parts.length) parts.shift();
+            let dir = here;
+            try { dir = await dirFor(parts.join("/")); } catch (err) { dir = here; }
+            uploads.push({ file: f, folder: dir });
+            planned++;
+          }
+          await load();
+          runQueue();
+        });
+
+        // ── кнопки ──────────────────────────────────────────────────────
+        const parentOf = (id) => {
+          const f = folders.find((x) => x.id === id);
+          return f ? f.parent : "";
+        };
+
+        const acts = {
+          up: () => { here = parentOf(here); queueIds = []; atIndex = -1; draw(); },
+          unlock: async () => {
+            const pass = await ask("Расширенный режим",
+              "Пароль от личного кабинета — и можно менять музыку.", "", true);
+            if (pass === null) return;
+            const res = await fetch("/api/login", {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ password: pass }),
+            });
+            if (!res.ok) {
+              const data = await res.json().catch(() => ({}));
+              alert(data.error || "Неверный пароль.");
+              return;
+            }
+            await load();
+          },
+          newdir: async () => {
+            const name = await ask("Новая папка", "Как назвать?", "", false);
+            if (!name) return;
+            await send("/api/music/folder", "POST", { name, parent: here });
+            await load();
+          },
+          rename: async () => {
+            const f = folders.find((x) => x.id === here);
+            if (!f) return;
+            const name = await ask("Имя папки", "Как назвать?", f.name, false);
+            if (!name) return;
+            await send("/api/music/folder/" + here, "PATCH", { name });
+            await load();
+          },
+          upload: () => $("pick-files").click(),
+          uploaddir: () => $("pick-dir").click(),
+          copy: () => { clip = { op: "copy", ids: [...picked] }; picked.clear(); picking = false; paint(); },
+          cut: () => { clip = { op: "cut", ids: [...picked] }; picked.clear(); picking = false; paint(); },
+          paste: async () => {
+            if (!clip) return;
+            await send("/api/music/op", "POST",
+              { op: clip.op === "cut" ? "move" : "copy", ids: clip.ids, target: here });
+            clip = null;
+            await load();
+          },
+          kill: async () => {
+            if (!picked.size) return;
+            if (!confirm("Удалить " + picked.size + "?")) return;
+            await send("/api/music/op", "POST", { op: "delete", ids: [...picked] });
+            picked.clear();
+            picking = false;
+            await load();
+          },
+          off: () => stopPicking(),
+        };
+
+        document.addEventListener("click", (e) => {
+          const key = e.target.closest("[data-act]");
+          if (!key) return;
+          const run = acts[key.dataset.act];
+          if (run) Promise.resolve(run()).catch((err) => alert(err.message));
+        });
+
+        document.addEventListener("keydown", (e) => {
+          if (e.target.matches("input")) return;
+          if (e.code === "Space") { e.preventDefault(); $("k-play").click(); }
+          if (e.key === "Escape" && picking) stopPicking();
+          if (e.key === "ArrowRight" && e.altKey) step(1);
+          if (e.key === "ArrowLeft" && e.altKey) step(-1);
+        });
+
+        measure();
+        load().catch(() => {
+          $("tracks").innerHTML = '<div class="empty">фонотека не отвечает</div>';
+        });
+      })();
+      </script>
+    </body>
+    </html>
+    """
+    return html.replace("__ICONLINKS__", ICON_LINKS)
+
+
 @app.route("/")
 def home():
     html = """
@@ -7098,6 +8314,7 @@ def home():
 
         .pick--cabinet { --pc: #2de2ff; }
         .pick--rack    { --pc: #2de2ff; }
+        .pick--music   { --pc: #2de2ff; }
         .pick--hero    { --pc: #5f9bff; }
         .pick--pad     { --pc: #63f5ad; }
         .pick--invader { --pc: #63f5ad; }
@@ -7121,6 +8338,9 @@ def home():
         .pick--cart .pick-art svg { animation: pxSlot 3.2s ease-in-out infinite; }
         @keyframes pxSlot { 0%, 62%, 100% { transform: translateY(0); } 74% { transform: translateY(10%); } }
         .pick--pad .pick-art svg { animation: pxTilt 3s ease-in-out infinite; }
+        /* Динамик покачивается вместе с геймпадом, но чуть медленнее — в такт
+           они выглядели бы как один механизм, а это две разные кнопки. */
+        .pick--music .pick-art svg { animation: pxTilt 3.6s ease-in-out infinite; }
         @keyframes pxTilt { 0%, 100% { transform: rotate(-4deg); } 50% { transform: rotate(4deg); } }
         /* У стойки лампы моргают вразнобой: одинаковый такт выглядит мёртво. */
         .pick-art .px-blink2 { animation: pxBlink2 2.9s steps(1) infinite; }
@@ -7308,6 +8528,11 @@ def home():
               <span class="pick-art">__ICON_PAD__</span>
               <span class="pick-glow"></span>
             </button>
+            <a class="pick pick--music" href="/music"
+               title="Музыка" aria-label="Открыть музыку">
+              <span class="pick-art">__ICON_SPEAKER__</span>
+              <span class="pick-glow"></span>
+            </a>
             <button class="pick pick--rack" type="button" id="cabinet-pick"
                     title="Личный кабинет" aria-label="Открыть личный кабинет">
               <span class="pick-art">__ICON_RACK__</span>
