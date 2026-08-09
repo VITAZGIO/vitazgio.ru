@@ -1689,7 +1689,12 @@ def arcade_score_delete():
 
 
 def music_editor_required(view):
-    """Слушать может каждый, менять — только из-под пароля кабинета.
+    """Фонотека целиком под паролем кабинета — и слушать, и менять.
+
+    Изначально слушать мог кто угодно, но выкладывать в открытый доступ
+    скачанную музыку — это раздача чужого, и претензии тут прилетают
+    именно за раздачу, а не за личную копию. Поэтому закрыто всё.
+
     Отвечаем кодом, а не переадресацией: это разбирает скрипт страницы."""
     @wraps(view)
     def wrapped(*args, **kwargs):
@@ -1706,6 +1711,7 @@ def music_editor_required(view):
 
 
 @app.get("/api/music")
+@music_editor_required
 def music_list_api():
     with music_lock:
         _music_scan()
@@ -1936,6 +1942,7 @@ def music_op_api():
 
 
 @app.get("/api/music/file/<track_id>")
+@music_editor_required
 def music_file_api(track_id):
     with music_lock:
         track = music_items.get(track_id)
@@ -6919,11 +6926,15 @@ def drop_page():
 
 @app.get("/music")
 def music_page():
-    """Фонотека. Слушать может кто угодно, менять — из-под пароля кабинета.
+    """Фонотека. Вся под паролем кабинета — и слушать, и менять.
 
-    Разделение простое: страница всегда рисует одно и то же, а кнопки правки
-    появляются, только когда сервер в ответе на список сказал can_edit. Сам
-    запрет живёт на сервере, здесь лишь чтобы не мозолить глаза."""
+    Открытой её делать не стали: выкладывать в общий доступ скачанную музыку
+    — это раздача чужого, и претензии прилетают именно за раздачу.
+
+    Сама страница отдаётся кому угодно, но без пароля она пуста: список и
+    файлы сервер не выдаёт. Кнопки правки появляются, только когда сервер в
+    ответе на список сказал can_edit — запрет живёт на сервере, здесь лишь
+    чтобы не мозолить глаза."""
     html = """<!doctype html>
     <html lang="ru">
     <head>
@@ -6967,9 +6978,9 @@ def music_page():
         .eyebrow::before { content: ""; width: 7px; height: 7px; border-radius: 50%;
                            background: #64e6a5; box-shadow: 0 0 16px #64e6a5; }
         .eyebrow:hover { color: #fff; }
+        /* Только буквы, без свечения и подложки. */
         .hero-mark { flex: none; width: clamp(1.6rem, 4vw, 2.6rem);
-                     height: clamp(1.6rem, 4vw, 2.6rem);
-                     filter: drop-shadow(0 0 14px rgba(45, 226, 255, .35)); }
+                     height: clamp(1.6rem, 4vw, 2.6rem); }
 
         /* Строка пути и кнопок. Текста тут по минимуму: где я нахожусь и что
            могу сделать — остальное показывают сами значки. */
@@ -7188,7 +7199,7 @@ def music_page():
 
       <div class="modal" id="modal" hidden>
         <section class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
-          <h2 id="sheet-title">Расширенный режим</h2>
+          <h2 id="sheet-title">Вход в фонотеку</h2>
           <p id="sheet-note">Пароль от личного кабинета.</p>
           <input id="sheet-input" type="password" autocomplete="current-password">
           <p class="err" id="sheet-err" role="alert"></p>
@@ -7233,6 +7244,7 @@ def music_page():
         let tracks = [];
         let folders = [];
         let canEdit = false;
+        let locked = true;        // фонотека вся под паролем, и слушать тоже
         let here = "";            // в какой папке смотрим
         let quota = { used: 0, all: 0 };
 
@@ -7272,7 +7284,16 @@ def music_page():
         // ── чтение с сервера ────────────────────────────────────────────
         const load = async () => {
           const res = await fetch("/api/music", { headers: { "Accept": "application/json" } });
+          if (res.status === 403) {
+            locked = true;
+            tracks = [];
+            folders = [];
+            canEdit = false;
+            draw();
+            return;
+          }
           const data = await res.json();
+          locked = false;
           tracks = data.tracks || [];
           folders = data.folders || [];
           canEdit = !!data.can_edit;
@@ -7313,6 +7334,10 @@ def music_page():
 
         const drawTools = () => {
           const parts = [];
+          if (locked) {
+            $("tools").innerHTML = tool("unlock", SVG.key, "Войти", " tbtn--key");
+            return;
+          }
           if (here) parts.push(tool("up", SVG.up, "Назад"));
           if (canEdit) {
             // «Папка» создаёт пустую, «Альбом» заливает готовую с диска —
@@ -7321,8 +7346,6 @@ def music_page():
             parts.push(tool("upload", SVG.up, "Треки"));
             parts.push(tool("uploaddir", SVG.folder, "Альбом"));
             if (here) parts.push(tool("rename", SVG.pen, "Имя"));
-          } else {
-            parts.push(tool("unlock", SVG.key, "Расширенный режим", " tbtn--key"));
           }
           $("tools").innerHTML = parts.join("");
         };
@@ -7336,6 +7359,13 @@ def music_page():
         };
 
         const drawTracks = () => {
+          if (locked) {
+            $("tracks").innerHTML =
+              '<div class="empty">фонотека под паролем' +
+              '<br><br><button class="tbtn tbtn--key" data-act="unlock" ' +
+              'style="margin:0 auto">' + SVG.key + '<span>Войти</span></button></div>';
+            return;
+          }
           const list = inside(here);
           if (!list.length) {
             $("tracks").innerHTML = '<div class="empty">' +
@@ -7788,8 +7818,8 @@ def music_page():
         const acts = {
           up: () => { here = parentOf(here); queueIds = []; atIndex = -1; draw(); },
           unlock: async () => {
-            const pass = await ask("Расширенный режим",
-              "Пароль от личного кабинета — и можно менять музыку.", "", true);
+            const pass = await ask("Вход в фонотеку",
+              "Пароль от личного кабинета.", "", true);
             if (pass === null) return;
             const res = await fetch("/api/login", {
               method: "POST", headers: { "Content-Type": "application/json" },
@@ -7930,24 +7960,29 @@ def home():
         }
 
         /* Верхняя строка героя: слева подпись с доменом, справа знак сайта.
-           Знак ростом со шрифт вывески под ним, поэтому строка не занимает
-           лишней высоты — подпись просто едет по центру рядом со знаком. */
+           Знак вынут из потока: он ростом со шрифт вывески, и в общей строке
+           растягивал её с восемнадцати пикселей до семидесяти — от этого
+           страница уезжала вниз, а подпись отрывалась от заголовка. Теперь
+           строка снова по высоте подписи, а знак висит поверх и заходит
+           вверх в поле страницы, которое там и так пустовало. */
         .hero-top {
+          position: relative;
           display: flex;
           align-items: center;
-          justify-content: space-between;
-          gap: 16px;
           margin-bottom: 22px;
         }
 
         .hero-mark {
-          flex: none;
+          position: absolute;
+          right: 0;
+          top: 50%;
+          /* Чуть выше середины строки: ровно по центру нижний край буквы G
+             ложился на верхнюю линию панели. Смещение в долях от роста, а не
+             в пикселях, — знак масштабируется вместе с вывеской. */
+          transform: translateY(-62%);
           width: clamp(1.15rem, 4.7vw, 4.4rem);
           height: clamp(1.15rem, 4.7vw, 4.4rem);
-          /* Знак идёт без подложки: тёмный квадрат иконки на фоновом
-             свечении читался как лишняя плашка. Свечение вешаем на сами
-             буквы — по прозрачности оно ложится по их контуру. */
-          filter: drop-shadow(0 0 14px rgba(45, 226, 255, .35));
+          /* Никакого свечения и подложки — только сами буквы. */
         }
 
         .eyebrow {
@@ -8408,7 +8443,10 @@ def home():
           .cyber-text { letter-spacing: -.08em; font-size: clamp(1.6rem, 8.8vw, 2.9rem); }
           /* Знак ростом со шрифт вывески, а он здесь свой — повторяем размер. */
           .hero-mark { width: clamp(1.6rem, 8.8vw, 2.9rem); height: clamp(1.6rem, 8.8vw, 2.9rem); }
-          .eyebrow { margin-bottom: 18px; font-size: .95rem; letter-spacing: .12em; }
+          /* Отступ до панели держит строка целиком, а не подпись внутри неё —
+             иначе к нему прибавлялся отступ строки и выходило вдвое больше. */
+          .hero-top { margin-bottom: 18px; }
+          .eyebrow { font-size: .95rem; letter-spacing: .12em; }
           .eyebrow::before { width: 9px; height: 9px; }
           .arcade-bar-line { font-size: .86rem; letter-spacing: .26em; }
           footer { font-size: .95rem; }
