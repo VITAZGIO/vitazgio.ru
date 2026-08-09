@@ -6713,11 +6713,31 @@ def home():
           margin: 0 auto clamp(34px, 5vw, 58px);
         }
 
+        /* Верхняя строка героя: слева подпись с доменом, справа знак сайта.
+           Знак ростом со шрифт вывески под ним, поэтому строка не занимает
+           лишней высоты — подпись просто едет по центру рядом со знаком. */
+        .hero-top {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 16px;
+          margin-bottom: 22px;
+        }
+
+        .hero-mark {
+          flex: none;
+          width: clamp(1.15rem, 4.7vw, 4.4rem);
+          height: clamp(1.15rem, 4.7vw, 4.4rem);
+          /* Знак идёт без подложки: тёмный квадрат иконки на фоновом
+             свечении читался как лишняя плашка. Свечение вешаем на сами
+             буквы — по прозрачности оно ложится по их контуру. */
+          filter: drop-shadow(0 0 14px rgba(45, 226, 255, .35));
+        }
+
         .eyebrow {
           display: inline-flex;
           align-items: center;
           gap: 10px;
-          margin-bottom: 22px;
           color: #cdd2df;
           font-size: 0.76rem;
           font-weight: 700;
@@ -6834,16 +6854,71 @@ def home():
            С нативной не выходило гладко — она доводит ленту до карточки после
            каждого маха, а поверх этого шла подмена копий, и вместе получалось
            дёрганье. pan-y оставляет браузеру вертикаль: страница листается
-           пальцем как обычно, вбок распоряжаемся мы. */
+           пальцем как обычно, вбок распоряжаемся мы.
+
+           Стойка задаёт колонку — ту же, что у панели заголовка, — и служит
+           точкой отсчёта для стрелок. Раньше окно барабана было во всю
+           ширину окна с широкими полями: слева лента вставала вровень с
+           панелью, а справа уезжала за край экрана. Теперь обрезаем ровно
+           по колонке, и обе стороны совпадают с панелью. */
+        .services-deck {
+          position: relative;
+          width: min(1380px, calc(100% - 40px));
+          margin: 0 auto;
+        }
+
         .services-wrap {
-          width: 100%;
           overflow: hidden;
-          padding: 14px max(20px, calc((100vw - 1380px) / 2)) 36px;
+          padding: 14px 0 36px;
           touch-action: pan-y;
           cursor: grab;
+          /* Без этого зажатая мышь выделяла текст карточки вместо прокрутки. */
+          user-select: none;
+          -webkit-user-select: none;
         }
         .services-wrap.dragging { cursor: grabbing; }
         .services { will-change: transform; }
+
+        /* Стрелки живут в полях по бокам колонки, за уровнем панели.
+           Треугольник приплюснутый: основание жирное, высота маленькая.
+           Отступ наружу появляется только когда экран шире колонки —
+           на узком поля всего по 20 пикселей, и клин садится в них впритык. */
+        .drum-arrow {
+          position: absolute;
+          top: 50%;
+          /* Минус 11 — половина разницы верхнего и нижнего полей окна:
+             так стрелка встаёт по центру карточек, а не по центру стойки. */
+          transform: translateY(calc(-50% - 11px));
+          width: 24px;
+          height: 58px;
+          display: grid;
+          place-items: center;
+          padding: 0;
+          border: 0;
+          background: none;
+          color: rgba(120, 208, 255, .62);
+          cursor: pointer;
+          transition: color .2s ease;
+        }
+
+        .drum-arrow:hover, .drum-arrow:focus-visible { color: #2de2ff; outline: none; }
+        .drum-arrow:active { color: #fff; }
+        .drum-arrow--prev { right: 100%; margin-right: clamp(0px, (100vw - 1420px) / 2, 26px); }
+        .drum-arrow--next { left: 100%; margin-left: clamp(0px, (100vw - 1420px) / 2, 26px); }
+
+        .drum-arrow b {
+          display: block;
+          width: 14px;
+          height: 40px;
+          background: currentColor;
+          filter: drop-shadow(0 0 7px currentColor);
+          transition: transform .2s ease;
+        }
+
+        .drum-arrow--prev b { clip-path: polygon(100% 0, 100% 100%, 0 50%); }
+        .drum-arrow--next b { clip-path: polygon(0 0, 0 100%, 100% 50%); }
+        .drum-arrow--prev:hover b { transform: translateX(-2px); }
+        .drum-arrow--next:hover b { transform: translateX(2px); }
 
         /* Не сетка, а лента: карточки одной ширины идут в строку и
            прокручиваются по кругу, как барабан. Ужимать их под число
@@ -6853,9 +6928,14 @@ def home():
           display: flex;
           gap: 14px;
           width: max-content;
-          margin: 0 auto;
+          margin: 0;
         }
         .service { flex: none; width: 264px; }
+
+        /* Картинки внутри карточки браузер норовит утащить как файл, а сама
+           карточка — ссылка, её он тащит как адрес. И то и другое обрывало
+           поток событий указателя, из-за чего лента переставала крутиться. */
+        .service img, .service svg { -webkit-user-drag: none; pointer-events: none; }
 
         .service {
           --accent: #6c8cff;
@@ -7106,11 +7186,16 @@ def home():
           .cyber-terminal { min-height: 112px; padding-inline: 12px; }
           .terminal-prompt { margin-right: .18em; font-size: clamp(1.6rem, 7.9vw, 2.7rem); }
           .cyber-text { letter-spacing: -.08em; font-size: clamp(1.6rem, 8.8vw, 2.9rem); }
+          /* Знак ростом со шрифт вывески, а он здесь свой — повторяем размер. */
+          .hero-mark { width: clamp(1.6rem, 8.8vw, 2.9rem); height: clamp(1.6rem, 8.8vw, 2.9rem); }
           .eyebrow { margin-bottom: 18px; font-size: .95rem; letter-spacing: .12em; }
           .eyebrow::before { width: 9px; height: 9px; }
           .arcade-bar-line { font-size: .86rem; letter-spacing: .26em; }
           footer { font-size: .95rem; }
           .service { width: 78vw; min-height: 280px; }
+          /* На телефоне листают пальцем, а поля по бокам всего 20 пикселей —
+             стрелкам там не встать, да и незачем. */
+          .drum-arrow { display: none; }
           footer { flex-direction: column; }
           .auth-panel { padding: 34px 25px 28px; }
         }
@@ -7123,7 +7208,11 @@ def home():
     <body>
       <main class="page">
         <section class="hero" aria-labelledby="page-title">
-          <div class="eyebrow">vitazgio.ru · мои домены</div>
+          <div class="hero-top">
+            <div class="eyebrow">vitazgio.ru · мои домены</div>
+            <img class="hero-mark" src="/static/icons/vg-plain.svg" alt="Vitaz Gio"
+                 width="512" height="512">
+          </div>
           <h1 id="page-title" class="cyber-terminal" aria-label="Мои веб-сервисы, Vitazgio Network, Domain Control">
             <span class="terminal-prompt" aria-hidden="true">&gt;</span>
             <span id="cyber-text" class="cyber-text" data-text="МОИ ВЕБ-СЕРВИСЫ" aria-hidden="true">МОИ ВЕБ-СЕРВИСЫ</span>
@@ -7131,6 +7220,11 @@ def home():
           </h1>
         </section>
 
+        <div class="services-deck">
+          <button class="drum-arrow drum-arrow--prev" type="button" hidden
+                  data-drum="-1" aria-label="Предыдущий сервис"><b></b></button>
+          <button class="drum-arrow drum-arrow--next" type="button" hidden
+                  data-drum="1" aria-label="Следующий сервис"><b></b></button>
         <nav class="services-wrap" aria-label="Сервисы vitazgio.ru">
           <div class="services">
             <a class="service service--ha" href="https://ha.vitazgio.ru" aria-label="Открыть Home Assistant">
@@ -7201,6 +7295,7 @@ def home():
             </a>
           </div>
         </nav>
+        </div>
 
         <!-- Полка с двумя кнопками: стойка ведёт в кабинет, геймпад — в игры.
              Обе без единой буквы: подпись даёт aria-label и всплывающая
@@ -7253,27 +7348,34 @@ def home():
            закрыто карточками при любом сдвиге. Двигаем через transform: он
            не заставляет браузер пересчитывать раскладку.
 
-           Отпустил палец — лента не просто гаснет, а доезжает до карточки и
-           встаёт так, чтобы та стояла у левого края, ровно как при загрузке.
-           Куда именно доехать, считаем заранее: прикидываем, куда унесло бы
-           по инерции, и округляем до ближайшей карточки. Поэтому мах всегда
-           заканчивается ровной раскладкой, а не половинкой карточки в углу.
-
-           Скорость ограничена: за один мах лента проезжает не больше
-           MAX_CARDS карточек, иначе за ними не уследить глазом. */
+           Отпустил палец — лента идёт свободным выбегом с трением. Как
+           только скорость падает до GRAB, её подхватывает магнит: считает,
+           где лента встала бы сама, округляет до ближайшей карточки и
+           доводит туда. Подхват происходит на ходу, задолго до остановки,
+           поэтому щелчка в конце не видно — лента просто плавно причаливает
+           карточкой к левому краю, ровно как при загрузке страницы. */
         (() => {
           const wrap = document.querySelector(".services-wrap");
           const row = document.querySelector(".services");
           if (!wrap || !row) return;
 
           const GAP = 14;
-          const MAX_SPEED = 2.4;      // пикселей на миллисекунду, потолок разгона
-          const THROW = 170;          // на сколько миллисекунд «продлеваем» мах
-          const MAX_CARDS = 3;        // больше этого за один мах не проедем
-          const MAX_GLIDE = 3.4;      // потолок скорости доводки, px за мс
+          const MAX_SPEED = 4.8;      // пикселей на миллисекунду, потолок разгона
+          const FRICTION = 0.955;     // сколько скорости остаётся за кадр в 16 мс
+          const GRAB = 1.35;          // на этой скорости магнит подхватывает ленту
           const DRAG_SLOP = 8;        // сдвиг, после которого это уже не тык
+          const NUDGE = 1.6;          // скорость доводки по стрелке, px за мс
+          // Скорость тает по одному закону, значит весь остаток пути — это
+          // текущая скорость, помноженная на постоянную времени.
+          const TAU = 16 / Math.log(1 / FRICTION);
 
           const originals = Array.prototype.slice.call(row.children);
+          const arrows = Array.prototype.slice.call(
+            document.querySelectorAll(".drum-arrow"));
+          // Карточка — ссылка, и браузер тащит её как адрес. Перетаскивание
+          // обрывало поток событий указателя: на компьютере зажатая мышь
+          // подсвечивала карточку, а лента при этом стояла.
+          originals.forEach((card) => { card.draggable = false; });
           let clones = [];
           let setWidth = 0;
           let pitch = 0;              // шаг: карточка вместе с зазором
@@ -7310,38 +7412,65 @@ def home():
             speed = 0;
           };
 
-          /* Доводка: едем к цели с замедлением к концу. Время подбираем по
-             расстоянию, но в разумных пределах — на длинном махе иначе
-             получалась бы неспешная поездка. */
-          const easeTo = (target) => {
+          /* Доводка: едем к цели с замедлением к концу. Время подбираем под
+             ту скорость, с какой лента подошла, — тогда стыка со свободным
+             выбегом не видно. У этого замедления скорость наибольшая в самом
+             начале и вдвое выше средней, отсюда двойка в формуле.
+
+             Замедление именно квадратичное, а не более крутое: у крутого
+             длинный хвост — на последние двадцать пикселей уходило почти
+             полсекунды, и это читалось как «встало и потом дощёлкнуло». */
+          const easeTo = (target, entry) => {
             const from = offset;
             const dist = target - from;
-            if (Math.abs(dist) < 0.5) { offset = target; place(); return; }
-            // Время подбираем так, чтобы доводка не разгонялась выше потолка.
-            // У плавного замедления скорость наибольшая в самом начале и
-            // втрое выше средней — отсюда тройка в формуле.
             const way = Math.abs(dist);
-            const time = Math.min(900, Math.max(240 + way * 0.45, 3 * way / MAX_GLIDE));
+            if (way < 0.5) { stopMotion(); offset = target; place(); return; }
+            const time = Math.max(140, Math.min(800, 2 * way / Math.max(entry, 0.2)));
             const t0 = performance.now();
+            stopMotion();
             const step = (now) => {
               const k = Math.min(1, (now - t0) / time);
-              const ease = 1 - Math.pow(1 - k, 3);
+              const ease = 1 - (1 - k) * (1 - k);
               offset = from + dist * ease;
               place();
               raf = k < 1 ? requestAnimationFrame(step) : 0;
             };
-            stopMotion();
             raf = requestAnimationFrame(step);
           };
 
-          /* Куда встать после маха: прикидываем, куда унесло бы по инерции,
-             округляем до карточки и не даём улететь дальше MAX_CARDS. */
-          const settle = () => {
+          /* Магнит: прикидываем, где лента остановилась бы сама, округляем
+             до ближайшей карточки и причаливаем туда с той же скоростью. */
+          const magnet = () => {
             if (!alive || !pitch) return;
-            const guess = offset + speed * THROW;
-            const limit = pitch * MAX_CARDS;
-            const capped = Math.max(offset - limit, Math.min(offset + limit, guess));
-            easeTo(Math.round(capped / pitch) * pitch);
+            const stopAt = offset + speed * TAU;
+            easeTo(Math.round(stopAt / pitch) * pitch, Math.abs(speed));
+          };
+
+          /* Свободный выбег. Пока лента идёт быстрее GRAB, ей никто не
+             мешает — крутится сколько накрутили. Замедлилась — передаём
+             магниту, и он доводит её до карточки уже на ходу. */
+          const coast = () => {
+            if (!alive) return;
+            if (Math.abs(speed) <= GRAB) { magnet(); return; }
+            let last = performance.now();
+            const step = (now) => {
+              const dt = Math.min(48, now - last);
+              last = now;
+              offset += speed * dt;
+              speed *= Math.pow(FRICTION, dt / 16);
+              place();
+              if (Math.abs(speed) <= GRAB) { raf = 0; magnet(); return; }
+              raf = requestAnimationFrame(step);
+            };
+            if (raf) cancelAnimationFrame(raf);
+            raf = requestAnimationFrame(step);
+          };
+
+          /* Шаг по стрелке: ровно одна карточка от текущего положения. */
+          const nudge = (dir) => {
+            if (!alive || !pitch) return;
+            speed = 0;
+            easeTo((Math.round(offset / pitch) + dir) * pitch, NUDGE);
           };
 
           const build = () => {
@@ -7351,6 +7480,7 @@ def home():
             alive = false;
             offset = 0;
             row.style.transform = "";
+            arrows.forEach((key) => { key.hidden = true; });
             setWidth = measure();
             pitch = originals[0].getBoundingClientRect().width + GAP;
             // Видимая ширина — без боковых полей. По полной ширине блока
@@ -7367,6 +7497,7 @@ def home():
             const need = Math.ceil((setWidth + room) / setWidth) + 1;
             for (let i = 1; i < need; i++) addCopy();
             alive = true;
+            arrows.forEach((key) => { key.hidden = false; });
             place();
           };
 
@@ -7376,6 +7507,7 @@ def home():
           let lastT = 0;
           let travelled = 0;
           let pointer = 0;
+          let held = false;           // взят ли захват указателя
 
           const onDown = (e) => {
             if (!alive || e.button > 0) return;
@@ -7384,12 +7516,9 @@ def home():
             lastX = e.clientX;
             lastT = e.timeStamp;
             travelled = 0;
+            held = false;
             stopMotion();
             wrap.classList.add("dragging");
-            // Захват нужен, чтобы палец, уехавший за пределы полосы, всё
-            // равно продолжал крутить ленту. Иногда браузер отказывает —
-            // например, когда событие пришло не от живого указателя.
-            try { wrap.setPointerCapture(pointer); } catch (err) { /* обойдёмся */ }
           };
 
           const onMove = (e) => {
@@ -7398,6 +7527,16 @@ def home():
             const dt = Math.max(1, e.timeStamp - lastT);
             offset -= dx;
             travelled += Math.abs(dx);
+            /* Захват нужен, чтобы палец, уехавший за пределы полосы, всё
+               равно продолжал крутить ленту. Но берём его только когда
+               протяжка уже началась: пока указатель захвачен, браузер
+               адресует щелчок самой полосе, и тык по карточке не открывал
+               сервис. Иногда захват не даётся — например, если событие
+               пришло не от живого указателя; тогда обойдёмся без него. */
+            if (!held && travelled > DRAG_SLOP) {
+              held = true;
+              try { wrap.setPointerCapture(pointer); } catch (err) { /* обойдёмся */ }
+            }
             // Скорость считаем по последнему отрезку, но с оглядкой на
             // прежнюю: от одного дёрганого кадра лента не должна улетать.
             const raw = -dx / dt;
@@ -7411,19 +7550,35 @@ def home():
             if (!dragging) return;
             dragging = false;
             wrap.classList.remove("dragging");
-            try { wrap.releasePointerCapture(pointer); } catch (err) { /* уже отпущен */ }
-            settle();
+            if (held) {
+              held = false;
+              try { wrap.releasePointerCapture(pointer); } catch (err) { /* уже отпущен */ }
+            }
+            coast();
           };
 
           wrap.addEventListener("pointerdown", onDown);
           wrap.addEventListener("pointermove", onMove);
           wrap.addEventListener("pointerup", onUp);
           wrap.addEventListener("pointercancel", onUp);
+          // Последний рубеж против нативного переноса: у картинок его гасит
+          // стиль, у ссылки — свойство, но с выделенного текста он всё равно
+          // может начаться, и тогда лента замирает на полпути.
+          wrap.addEventListener("dragstart", (e) => e.preventDefault());
+
+          arrows.forEach((key) => {
+            key.addEventListener("click", () => nudge(Number(key.dataset.drum)));
+          });
 
           // Протащил ленту — значит не по карточке жал, переход отменяем.
           wrap.addEventListener("click", (e) => {
             if (travelled > DRAG_SLOP) { e.preventDefault(); e.stopPropagation(); }
           }, true);
+
+          // Окно обрезает ленту, но остаётся прокручиваемым: браузер может
+          // сам увести его вбок, подтягивая карточку под фокус. Держим на нуле,
+          // иначе его сдвиг сложится с нашим и раскладка поедет.
+          wrap.addEventListener("scroll", () => { if (wrap.scrollLeft) wrap.scrollLeft = 0; });
 
           // Колесо: вбок крутим ленту, вниз оставляем странице. Доводку
           // запускаем, когда колесо замерло, — иначе она мешала бы крутить.
@@ -7438,7 +7593,7 @@ def home():
             offset += dx;
             place();
             clearTimeout(wheelIdle);
-            wheelIdle = setTimeout(() => { speed = 0; settle(); }, 140);
+            wheelIdle = setTimeout(() => { speed = 0; magnet(); }, 140);
           }, { passive: false });
 
           /* Переход табом по ссылкам: своей прокрутки у полосы нет, поэтому
@@ -7452,7 +7607,7 @@ def home():
             const pad = parseFloat(getComputedStyle(wrap).paddingLeft);
             if (box.left >= view.left + pad - 1 && box.right <= view.right) return;
             speed = 0;
-            easeTo(Math.round((offset + box.left - view.left - pad) / pitch) * pitch);
+            easeTo(Math.round((offset + box.left - view.left - pad) / pitch) * pitch, NUDGE);
           });
 
           build();
