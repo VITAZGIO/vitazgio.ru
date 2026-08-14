@@ -24,6 +24,7 @@ from zoneinfo import ZoneInfo
 
 import paramiko
 from flask import Flask, Response, g, jsonify, redirect, request, send_file, session, url_for
+from markupsafe import escape
 from flask_sock import Sock
 from werkzeug.middleware.proxy_fix import ProxyFix
 
@@ -2089,9 +2090,53 @@ DROP_INLINE_TYPES = {
     ".pdf": "application/pdf",
     ".txt": "text/plain; charset=utf-8", ".log": "text/plain; charset=utf-8",
     ".md": "text/plain; charset=utf-8", ".csv": "text/plain; charset=utf-8",
-    ".mp4": "video/mp4", ".webm": "video/webm",
+    ".mp4": "video/mp4", ".webm": "video/webm", ".m4v": "video/mp4",
+    ".mov": "video/quicktime", ".ogv": "video/ogg",
     ".mp3": "audio/mpeg", ".ogg": "audio/ogg", ".wav": "audio/wav",
+    ".m4a": "audio/mp4", ".opus": "audio/ogg", ".flac": "audio/flac",
+    ".aac": "audio/aac",
 }
+
+# Чем показывать файл на странице ссылки. Всё, чего тут нет, ссылка просто
+# отдаёт файлом — выдумывать просмотр для архива или экзешника незачем.
+DROP_VIEW_KINDS = (
+    ("image", {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".avif", ".ico"}),
+    ("video", {".mp4", ".webm", ".m4v", ".mov", ".ogv"}),
+    ("audio", {".mp3", ".ogg", ".wav", ".m4a", ".opus", ".flac", ".aac"}),
+    ("page", {".pdf", ".txt", ".log", ".md", ".csv"}),
+)
+
+
+def _drop_human_size(bytes_count):
+    """Вес файла по-человечески — для шапки страницы просмотра."""
+    if bytes_count >= 1073741824:
+        return f"{bytes_count / 1073741824:.2f} ГБ"
+    if bytes_count >= 1048576:
+        return f"{bytes_count / 1048576:.1f} МБ"
+    if bytes_count >= 1024:
+        return f"{round(bytes_count / 1024)} КБ"
+    return f"{bytes_count} Б"
+
+
+def _drop_view_kind(name):
+    """Каким тегом показывать файл, либо пусто — если показывать нечем."""
+    ext = os.path.splitext(name or "")[1].lower()
+    for kind, exts in DROP_VIEW_KINDS:
+        if ext in exts:
+            return kind
+    return ""
+
+
+def _drop_share_mode(share):
+    """Что делает ссылка: «view» — открывает страницу, «dl» — отдаёт файл.
+
+    У ссылок, выданных до появления тумблера, поля нет. Раньше правило было
+    негласным: бессрочная открывалась в браузере, а срочная скачивалась —
+    его и повторяем, чтобы старые ссылки вели себя как вели."""
+    mode = (share or {}).get("mode")
+    if mode in ("view", "dl"):
+        return mode
+    return "dl" if (share or {}).get("expires") else "view"
 
 
 def _drop_send(item_id, item, inline=False):
@@ -2353,6 +2398,7 @@ def drop_list_api():
                 "thumb": _drop_can_thumb(v),
                 "share": bool(v.get("share")),
                 "share_expires": (v.get("share") or {}).get("expires"),
+                "share_mode": _drop_share_mode(v["share"]) if v.get("share") else None,
                 # Ссылку отдаём готовой: страница должна уметь показать её
                 # ещё раз, а не только выдать один раз при создании.
                 "share_url": (url_for("drop_public", token=v["share"]["token"], _external=True)
@@ -2385,6 +2431,22 @@ def drop_download(item_id):
     if not item or item["kind"] == "folder":
         return "Не найдено", 404
     return _drop_send(item_id, item)
+
+
+@app.get("/api/drop/view/<item_id>")
+@login_required
+def drop_view(item_id):
+    """То же содержимое, но с настоящим типом — для просмотра внутри дропа.
+
+    Скачивание отдаёт всё как поток байтов, и видео от такого не играет:
+    тегу нужен разобранный тип, а угадывать его браузеру мы запретили
+    заголовком nosniff. Здесь тип берётся из того же белого списка, что и у
+    публичной ссылки, так что ничего исполняемого сюда не попадёт."""
+    with drop_lock:
+        item = drop_items.get(item_id)
+    if not item or item["kind"] == "folder":
+        return "Не найдено", 404
+    return _drop_send(item_id, item, inline=True)
 
 
 @app.patch("/api/drop/<item_id>")
@@ -2626,6 +2688,9 @@ def drop_op_status(job_id):
 def drop_share_create(item_id):
     payload = request.get_json(silent=True) or {}
     forever = bool(payload.get("forever"))
+    # Срок и режим независимы: бывает нужна и вечная ссылка на скачивание,
+    # и суточная на просмотр.
+    mode = "view" if payload.get("mode") == "view" else "dl"
     try:
         hours = int(payload.get("hours", 24))
     except (TypeError, ValueError):
@@ -2640,11 +2705,12 @@ def drop_share_create(item_id):
         item["share"] = {
             "token": secrets.token_urlsafe(24),
             "expires": None if forever else time.time() + hours * 3600,
+            "mode": mode,
         }
         token = item["share"]["token"]
         _drop_write_index()
     return jsonify(url=url_for("drop_public", token=token, _external=True),
-                   hours=0 if forever else hours, forever=forever)
+                   hours=0 if forever else hours, forever=forever, mode=mode)
 
 
 @app.delete("/api/drop/share/<item_id>")
@@ -2658,20 +2724,137 @@ def drop_share_revoke(item_id):
     return jsonify(ok=True)
 
 
-@app.get("/d/<token>")
-def drop_public(token):
-    """Публичная ссылка. Единственный эндпоинт дропа без авторизации —
-    поэтому отдаёт строго один файл по неугадываемому токену и только вложением."""
+def _drop_public_item(token):
+    """Файл по токену ссылки, либо пусто. Из-под замка выходим сразу:
+    держать его на время отдачи файла незачем."""
     with drop_lock:
         item_id = _drop_share_lookup(token)
         item = drop_items.get(item_id) if item_id else None
+    return (item_id, item) if item else (None, None)
+
+
+@app.get("/d/<token>")
+def drop_public(token):
+    """Публичная ссылка — единственный вход в дроп без авторизации.
+
+    Ссылка бывает двух видов, и вид выбирается отдельно от срока. «Скачать»
+    отдаёт файл вложением, как и раньше. «Просмотр» открывает страницу с
+    картинкой, видео или проигрывателем — и кнопкой скачивания рядом, чтобы
+    просмотровая ссылка не была урезанной.
+
+    Если показывать нечем — архив, установщик, что угодно ещё, — просмотр
+    вырождается в обычную отдачу файла."""
+    item_id, item = _drop_public_item(token)
     if not item:
         return "Ссылка недействительна или истекла", 404
-    # Ссылка со сроком ведёт себя как раньше — файл скачивается. Бессрочная
-    # открывается прямо в браузере: её и делают, чтобы вставить адресом
-    # картинки в настройки другого сайта, а не чтобы качать по одному файлу.
-    forever = not (item.get("share") or {}).get("expires")
-    return _drop_send(item_id, item, inline=forever)
+    if _drop_share_mode(item.get("share")) != "view":
+        return _drop_send(item_id, item)
+    kind = _drop_view_kind(item["name"])
+    if not kind:
+        return _drop_send(item_id, item)
+    return _drop_view_page(token, item, kind)
+
+
+@app.get("/d/<token>/raw")
+def drop_public_raw(token):
+    """Байты для тега на странице просмотра.
+
+    Отдаём потоком с поддержкой запросов по кускам: без неё браузер тянул бы
+    весь фильм целиком, прежде чем показать первый кадр, и перемотка не
+    работала бы вовсе. Памяти это не стоит ничего — файл читается с диска
+    порциями, а не загружается в неё."""
+    item_id, item = _drop_public_item(token)
+    if not item or _drop_share_mode(item.get("share")) != "view":
+        return "", 404
+    return _drop_send(item_id, item, inline=True)
+
+
+@app.get("/d/<token>/save")
+def drop_public_save(token):
+    """Кнопка «скачать» со страницы просмотра."""
+    item_id, item = _drop_public_item(token)
+    if not item:
+        return "", 404
+    return _drop_send(item_id, item)
+
+
+def _drop_view_page(token, item, kind):
+    """Страница просмотра: сам файл, его имя, вес и кнопка скачивания.
+
+    Ничего не читаем в память — теги ссылаются на /raw, а его отдаёт
+    send_file прямо с диска."""
+    raw = url_for("drop_public_raw", token=token)
+    save = url_for("drop_public_save", token=token)
+    name = escape(item["name"])
+    size = _drop_human_size(item.get("size") or 0)
+    if kind == "image":
+        body = f'<img src="{raw}" alt="{name}">'
+    elif kind == "video":
+        body = f'<video src="{raw}" controls playsinline preload="metadata"></video>'
+    elif kind == "audio":
+        body = f'<audio src="{raw}" controls preload="metadata"></audio>'
+    else:
+        body = f'<iframe src="{raw}" title="{name}"></iframe>'
+    html = """<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#080b12">
+__ICONLINKS__
+<title>__NAME__ · vitazgio.ru</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100svh; display: flex; flex-direction: column;
+         font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+         background:
+           radial-gradient(circle at 12% 8%, rgba(57,126,255,.2), transparent 32rem),
+           radial-gradient(circle at 88% 82%, rgba(149,65,255,.16), transparent 34rem),
+           #0d1321;
+         color: #f7f8fc; }
+  header { display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+           padding: 16px max(16px, 4vw); border-bottom: 1px solid rgba(255,255,255,.1); }
+  .who { display: inline-flex; align-items: center; gap: 9px; color: #cdd2df;
+         font-size: .72rem; font-weight: 700; letter-spacing: .16em;
+         text-transform: uppercase; text-decoration: none; }
+  .who::before { content: ""; width: 7px; height: 7px; border-radius: 50%;
+                 background: #64e6a5; box-shadow: 0 0 16px #64e6a5; }
+  .name { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis;
+          white-space: nowrap; font-weight: 700; }
+  .size { color: #6f7a92; font-size: .8rem; white-space: nowrap; }
+  .get { display: inline-flex; align-items: center; gap: 8px; height: 38px;
+         padding: 0 16px; color: #04121a; font: 700 .8rem inherit; text-decoration: none;
+         background: #2de2ff; border-radius: 10px; white-space: nowrap; }
+  .get:hover { filter: brightness(1.12); }
+  main { flex: 1; display: grid; place-items: center; padding: max(16px, 3vw);
+         min-height: 0; }
+  img, video { max-width: 100%; max-height: calc(100svh - 140px);
+               border-radius: 12px; background: #05080f; }
+  audio { width: min(560px, 100%); }
+  iframe { width: min(1000px, 100%); height: calc(100svh - 140px);
+           border: 1px solid rgba(255,255,255,.1); border-radius: 12px;
+           background: #05080f; }
+  @media (max-width: 560px) { .size { display: none; } }
+</style>
+</head>
+<body>
+  <header>
+    <a class="who" href="/">vitazgio.ru</a>
+    <span class="name">__NAME__</span>
+    <span class="size">__SIZE__</span>
+    <a class="get" href="__SAVE__" download>Скачать</a>
+  </header>
+  <main>__BODY__</main>
+</body>
+</html>
+"""
+    return (html.replace("__ICONLINKS__", ICON_LINKS)
+                .replace("__NAME__", name)
+                .replace("__SIZE__", size)
+                .replace("__SAVE__", save)
+                .replace("__BODY__", body))
 
 
 @app.delete("/api/drop/<item_id>")
@@ -5560,6 +5743,10 @@ def drop_page():
         .composer { margin-top: 16px; }
         .composer textarea { width: 100%; min-height: 76px; padding: 11px 13px; color: #e9fbff; font: 400 .8rem "Cascadia Code", Consolas, monospace; border: 1px solid rgba(255,255,255,.12); outline: none; background: rgba(4,10,20,.6); resize: vertical; }
         .composer textarea:focus { border-color: #ff782f; }
+        /* Отправка слева, возврат из папки — прижат к правому краю. */
+        .composer-bar { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+        .composer-bar .up { margin-left: auto; color: #8ee9ff; border-color: rgba(45,226,255,.35); }
+        .composer-bar .up:hover { color: #04121c; background: #2de2ff; border-color: #2de2ff; }
 
         .uploads { margin-top: 14px; }
         .up { padding: 9px 12px; margin-bottom: 6px; border: 1px solid rgba(45,226,255,.16); background: rgba(10,17,30,.8); }
@@ -5683,6 +5870,14 @@ def drop_page():
                border: 2px solid var(--tint, #7d8798); border-radius: 5px;
                background: color-mix(in srgb, var(--tint, #7d8798) 12%, transparent); }
         .ico.img { border-style: solid; background-size: cover; background-position: center; font-size: 0; }
+        /* Значок видео и звука кликабелен — метим треугольником в углу,
+           иначе не понять, что по нему можно ткнуть. */
+        .ico.play { position: relative; cursor: pointer; }
+        .ico.play::after { content: ""; position: absolute; right: 2px; bottom: 2px;
+               width: 0; height: 0; border-left: 8px solid currentColor;
+               border-top: 5px solid transparent; border-bottom: 5px solid transparent; }
+        .ico.img, .ico.play { cursor: pointer; }
+        .ico.play:hover { background: color-mix(in srgb, var(--tint, #7d8798) 26%, transparent); }
         /* Та же ширина, что у бейджей, иначе значок папки съезжает на пару пикселей. */
         .ico.dir { width: 34px; height: 34px; border: 0; border-radius: 0; background: none;
                    cursor: pointer; transition: transform .16s; }
@@ -5728,6 +5923,15 @@ def drop_page():
         .share-row.check { cursor: pointer; }
         .share-row input[type=checkbox] { width: 17px; height: 17px; margin: 0; accent-color: #2de2ff; }
         .share-note { margin: 0 0 16px; color: #5d6d80; font-size: .72rem; line-height: 1.5; }
+        /* Режим ссылки: две кнопки-переключателя, выбранная залита. Срок и
+           режим независимы, поэтому и стоят отдельными блоками. */
+        .sh-modes { display: flex; gap: 8px; margin-bottom: 10px; }
+        .sh-mode { flex: 1; height: 38px; color: #cfe2ee; cursor: pointer;
+                   font: 700 .72rem "Cascadia Code", Consolas, monospace;
+                   border: 1px solid rgba(255,255,255,.16); border-radius: 9px;
+                   background: rgba(255,255,255,.05); transition: .16s; }
+        .sh-mode:hover { border-color: rgba(45,226,255,.5); }
+        .sh-mode.on { color: #04121c; border-color: #2de2ff; background: #2de2ff; }
         .share-btns { display: flex; gap: 10px; }
         .share-btns button { flex: 1; height: 36px; font: 700 .74rem "Cascadia Code", Consolas, monospace;
                      letter-spacing: .06em; cursor: pointer; color: #cfe2ee;
@@ -5764,8 +5968,9 @@ def drop_page():
         /* Просмотр картинки во весь экран */
         .lightbox { position: fixed; inset: 0; z-index: 300; display: grid; place-items: center; padding: 24px;
                     background: rgba(2,5,10,.94); backdrop-filter: blur(4px); }
-        .lightbox img { max-width: 100%; max-height: 100%; object-fit: contain; border: 1px solid rgba(45,226,255,.25);
-                        box-shadow: 0 24px 70px rgba(0,0,0,.7); }
+        .lightbox img, .lightbox video { max-width: 100%; max-height: 100%; object-fit: contain;
+                        border: 1px solid rgba(45,226,255,.25); box-shadow: 0 24px 70px rgba(0,0,0,.7); }
+        .lightbox audio { width: min(560px, calc(100% - 40px)); }
         .lightbox .lb-close { position: absolute; top: 16px; right: 16px; width: 44px; height: 44px; display: grid; place-items: center;
                               color: #eaf6ff; font-size: 1.5rem; line-height: 1; cursor: pointer; border: 1px solid rgba(255,255,255,.22);
                               border-radius: 6px; background: rgba(10,16,26,.85); }
@@ -5817,7 +6022,12 @@ def drop_page():
 
         <div class="composer">
           <textarea id="text-area" placeholder="Текст — отправится отдельной панелью. Ctrl+Enter"></textarea>
-          <button class="btn" id="send-text" type="button" style="margin-top:8px">Отправить текст</button>
+          <div class="composer-bar">
+            <button class="btn" id="send-text" type="button">Отправить текст</button>
+            <!-- Возврат из папки. В цепочку сверху попадать неудобно: она
+                 мелкая и уезжает наверх, а эта кнопка всегда под рукой. -->
+            <button class="btn up" id="go-up" type="button" hidden>← Назад</button>
+          </div>
         </div>
 
         <div class="uploads" id="uploads"></div>
@@ -5833,6 +6043,7 @@ def drop_page():
         const $ = id => document.getElementById(id);
 
         let parent = null;
+        let upTo = null;            // куда уводит кнопка «назад»
         let items = [];
         const expanded = new Set();
 
@@ -5881,6 +6092,19 @@ def drop_page():
           [["txt","md","log","json","xml","yml","yaml","ini","conf"], "#9aa6b8"],
         ];
         const extOf = name => (name.includes(".") ? name.split(".").pop() : "").toLowerCase();
+
+        /* Что можно открыть прямо на странице. Список повторяет серверный:
+           там он решает, чем показывать файл по публичной ссылке. */
+        const VIEW_KINDS = {
+          image: ["png", "jpg", "jpeg", "gif", "webp", "bmp", "avif", "ico"],
+          video: ["mp4", "webm", "m4v", "mov", "ogv"],
+          audio: ["mp3", "ogg", "wav", "m4a", "opus", "flac", "aac"],
+        };
+        const viewKind = name => {
+          const ext = extOf(name);
+          for (const kind in VIEW_KINDS) if (VIEW_KINDS[kind].includes(ext)) return kind;
+          return "";
+        };
         const tintOf = ext => (TINTS.find(([list]) => list.includes(ext)) || [null, "#7d8798"])[1];
 
         /* Значки папок. Рисуем сами, а не эмодзи: те на каждой системе
@@ -5961,25 +6185,46 @@ def drop_page():
               style="--tint:${tintOf(ext)};background-image:url(/api/drop/thumb/${encodeURIComponent(it.id)})"></span>`;
           }
           const label = ext ? ext.slice(0, 4).toUpperCase() : "ФАЙЛ";
+          const kind = viewKind(it.name);
+          if (kind) {
+            // У видео и звука миниатюры нет, но открывать их тоже надо —
+            // значок становится кнопкой и получает треугольник в углу.
+            return `<span class="ico play" data-act="view"
+              title="${kind === "video" ? "Смотреть" : "Слушать"}"
+              style="--tint:${tintOf(ext)}">${esc(label)}</span>`;
+          }
           return `<span class="ico" style="--tint:${tintOf(ext)}">${esc(label)}</span>`;
         };
 
         /* Окно выдачи ссылки: часы и галка «без срока». Бессрочная нужна,
            чтобы картинку можно было вставить адресом в настройки другого
            сайта — там ссылка с истечением через сутки бесполезна. */
+        /* Что выбрали в прошлый раз — просмотр или скачивание. Первый раз
+           ставим скачивание: это то, зачем ссылку делают чаще всего. */
+        const lastMode = () => {
+          try { return localStorage.getItem("vgShareMode") === "view" ? "view" : "dl"; }
+          catch (e) { return "dl"; }
+        };
+        const rememberMode = mode => {
+          try { localStorage.setItem("vgShareMode", mode); } catch (e) { /* и ладно */ }
+        };
+
         const askShare = () => new Promise(resolve => {
           const box = document.createElement("div");
           box.className = "lightbox share-ask";
+          let mode = lastMode();
           box.innerHTML =
             '<div class="share-panel">' +
               '<h3>Ссылка на файл</h3>' +
+              '<div class="sh-modes">' +
+                '<button type="button" class="sh-mode" data-mode="dl">Скачивание</button>' +
+                '<button type="button" class="sh-mode" data-mode="view">Просмотр</button>' +
+              '</div>' +
+              '<p class="share-note" id="sh-hint"></p>' +
               '<label class="share-row"><span>Часов</span>' +
                 '<input type="number" min="1" max="720" value="24" id="sh-h"></label>' +
               '<label class="share-row check"><input type="checkbox" id="sh-f">' +
                 '<span>Без срока — не истекает никогда</span></label>' +
-              '<p class="share-note">Ссылка со сроком скачивает файл. ' +
-                'Бессрочная открывает его прямо в браузере — такой адрес ' +
-                'можно вставить как картинку в настройки другого сайта.</p>' +
               '<div class="share-btns">' +
                 '<button type="button" class="go" id="sh-ok">СОЗДАТЬ</button>' +
                 '<button type="button" id="sh-no">ОТМЕНА</button>' +
@@ -5989,6 +6234,17 @@ def drop_page():
           document.body.classList.add("modal-open");
           const hours = box.querySelector("#sh-h");
           const forever = box.querySelector("#sh-f");
+          const hint = box.querySelector("#sh-hint");
+          const paintMode = () => {
+            box.querySelectorAll(".sh-mode").forEach(b =>
+              b.classList.toggle("on", b.dataset.mode === mode));
+            hint.textContent = mode === "view"
+              ? "Открывает страницу с картинкой или видео. Кнопка «скачать» там тоже есть."
+              : "Сразу скачивает файл, без промежуточных страниц.";
+          };
+          paintMode();
+          box.querySelectorAll(".sh-mode").forEach(b =>
+            b.addEventListener("click", () => { mode = b.dataset.mode; paintMode(); }));
           hours.focus();
           const shut = value => {
             box.remove();
@@ -6004,9 +6260,10 @@ def drop_page():
           // чем оставлять серое неактивное число рядом с «без срока».
           forever.addEventListener("change", () => { hours.disabled = forever.checked; });
           box.querySelector("#sh-ok").addEventListener("click", () => {
-            shut(forever.checked
+            rememberMode(mode);
+            shut(Object.assign({ mode: mode }, forever.checked
               ? { forever: true }
-              : { hours: parseInt(hours.value, 10) || 24 });
+              : { hours: parseInt(hours.value, 10) || 24 }));
           });
           box.querySelector("#sh-no").addEventListener("click", () => shut(null));
           box.addEventListener("click", ev => { if (ev.target === box) shut(null); });
@@ -6079,9 +6336,8 @@ def drop_page():
            узнать адрес заново было неоткуда. */
         const linkMenu = item => {
           const url = item.share_url || "";
-          const life = item.share_expires
-            ? "истекает " + fmtDate(item.share_expires)
-            : "без срока — открывается прямо в браузере";
+          const life = (item.share_mode === "view" ? "просмотр · " : "скачивание · ") +
+            (item.share_expires ? "истекает " + fmtDate(item.share_expires) : "без срока");
           const m = modal(
             "<h3>Ссылка активна</h3>" +
             '<div class="lk-url">' + esc(url) + "</div>" +
@@ -6103,15 +6359,32 @@ def drop_page():
           });
         };
 
-        /* Картинка во весь экран. Закрыть можно крестиком, щелчком по фону,
-           Escape или кнопкой «назад» — последнее важно на телефоне, где
-           крестик легко не заметить и по привычке смахнуть назад. */
+        /* Файл во весь экран: картинка, видео или звук. Закрыть можно
+           крестиком, щелчком по фону, Escape или кнопкой «назад» — последнее
+           важно на телефоне, где крестик легко не заметить и по привычке
+           смахнуть назад.
+
+           Берём файл из /api/drop/view, а не из скачивания: там он отдаётся
+           потоком байтов без типа, и видео от такого не играет. */
         const openImage = item => {
+          const kind = item.thumb ? "image" : (viewKind(item.name) || "image");
           const box = document.createElement("div");
           box.className = "lightbox";
-          const img = document.createElement("img");
-          img.src = "/api/drop/download/" + encodeURIComponent(item.id);
-          img.alt = item.name;
+          let img;
+          if (kind === "video") {
+            img = document.createElement("video");
+            img.controls = true;
+            img.autoplay = true;
+            img.playsInline = true;
+          } else if (kind === "audio") {
+            img = document.createElement("audio");
+            img.controls = true;
+            img.autoplay = true;
+          } else {
+            img = document.createElement("img");
+            img.alt = item.name;
+          }
+          img.src = "/api/drop/view/" + encodeURIComponent(item.id);
           const name = document.createElement("div");
           name.className = "lb-name";
           name.textContent = item.name;
@@ -6171,6 +6444,10 @@ def drop_page():
             parts.push(`<button class="crumb${last ? " here" : ""}" data-go="${esc(c.id)}">${esc(c.name)}</button>`);
           });
           $("crumbs").innerHTML = parts.join("");
+          // Куда ведёт «назад»: предпоследняя папка цепочки, а из папки
+          // первого уровня — в корень. В корне кнопку прячем: оттуда некуда.
+          upTo = crumbs.length > 1 ? crumbs[crumbs.length - 2].id : null;
+          $("go-up").hidden = crumbs.length === 0;
         };
 
         const render = () => {
@@ -6421,11 +6698,17 @@ def drop_page():
             .forEach(r => r.classList.remove("dragging", "drag-over"));
         };
 
+        // Поле ввода внутри строки живёт по своим правилам: и долгий тык, и
+        // правая кнопка на нём должны работать как в обычном поле, иначе не
+        // вставить имя из буфера.
+        const inField = el => !!(el && el.closest && el.closest("input, textarea"));
+
         $("items").addEventListener("touchstart", e => {
           touching = true;
           const row = e.target.closest(".item");
           if (!row || picking) return;
           if (e.target.closest("[data-act]")) return;     // кнопки строки не трогаем
+          if (inField(e.target)) return;
           holdStart(row.dataset.id, e.touches[0].clientX, e.touches[0].clientY);
         }, { passive: true });
         $("items").addEventListener("touchmove", e => {
@@ -6440,6 +6723,9 @@ def drop_page():
         $("items").addEventListener("contextmenu", e => {
           const row = e.target.closest(".item");
           if (!row) return;
+          // На поле имени правая кнопка должна открыть меню браузера с
+          // «вставить», а не начать выделение строк.
+          if (inField(e.target)) return;
           e.preventDefault();
           if (picking) togglePick(row.dataset.id); else startPicking(row.dataset.id);
         });
@@ -6565,6 +6851,11 @@ def drop_page():
         };
 
         document.addEventListener("paste", e => {
+          /* Курсор стоит в поле ввода — не вмешиваемся вовсе. Раньше проверка
+             была только на поле заметки, и вставка имени файла при
+             переименовании улетала в новое сообщение вместо самого поля. */
+          const field = e.target.closest && e.target.closest("input, textarea, [contenteditable]");
+          if (field && field !== $("text-area")) return;
           const files = clipFiles(e.clipboardData);
           if (files.length) {
             // Картинка идёт файлом всегда, даже если курсор стоит в поле
@@ -6699,6 +6990,12 @@ def drop_page():
           const btn = e.target.closest(".crumb");
           if (!btn || btn.classList.contains("here")) return;
           parent = btn.dataset.go || null;
+          expanded.clear();
+          load();
+        });
+
+        $("go-up").addEventListener("click", () => {
+          parent = upTo;
           expanded.clear();
           load();
         });
@@ -6857,8 +7154,9 @@ def drop_page():
               const data = await api("/api/drop/share/" + id, {
                 method: "POST", headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(choice) });
-              const life = data.forever ? "без срока" : "живёт " + data.hours + " ч";
-              try { await navigator.clipboard.writeText(data.url); toast("Ссылка скопирована, " + life); }
+              const life = (data.mode === "view" ? "просмотр, " : "скачивание, ") +
+                           (data.forever ? "без срока" : "живёт " + data.hours + " ч");
+              try { await navigator.clipboard.writeText(data.url); toast("Ссылка скопирована — " + life); }
               catch { prompt("Ссылка (" + life + "):", data.url); }
               load();
             } catch (err) { toast(err.message, true); }
@@ -6891,6 +7189,10 @@ def drop_page():
             input.maxLength = 120;
             if (ext) input.title = "Расширение " + ext + " останется прежним";
             nameEl.replaceWith(input);
+            // Пока правим имя, строку нельзя таскать: нажатие мышью в поле
+            // запускало перенос файла вместо установки курсора, и вставить
+            // из буфера было нечем. Разметку потом перерисует load().
+            row.draggable = false;
             input.focus();
             input.select();
             let saving = false;
