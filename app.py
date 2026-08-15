@@ -5043,6 +5043,66 @@ _GAME_ICONS = {
         "B": ("#3d4757", None), "w": ("#cdd8e6", None), "r": ("#ff5a6e", None),
         "L": ("#63f5ad", "px-blink"),
     }),
+    # Окно с кодом — значок «страны DIY». Строки подсвечиваются сверху вниз,
+    # внизу мигает курсор: программа не картинка, она живёт.
+    "code": _pixel_svg([
+        "....................",
+        "....................",
+        "..KKKKKKKKKKKKKKKK..",
+        "..KTTTTTTTTTTTTTTK..",
+        "..KTrrTggTyyTTTTTK..",
+        "..KTTTTTTTTTTTTTTK..",
+        "..KSSSSSSSSSSSSSSK..",
+        "..KS111111111SSSSK..",
+        "..KSSSSSSSSSSSSSSK..",
+        "..KSSS22222222SSSK..",
+        "..KSSSSSSSSSSSSSSK..",
+        "..KSSS33333SSSSSSK..",
+        "..KSSSSSSSSSSSSSSK..",
+        "..KS4444444SSSSSSK..",
+        "..KSSSSSSSSSSSSSSK..",
+        "..KSccSSSSSSSSSSSK..",
+        "..KSSSSSSSSSSSSSSK..",
+        "..KKKKKKKKKKKKKKKK..",
+        "....................",
+        "....................",
+    ], {
+        "K": ("#48566b", None), "S": ("#151a22", None), "T": ("#2f3846", None),
+        "r": ("#ff3b53", None), "g": ("#ffd84a", None), "y": ("#63f5ad", None),
+        "1": ("#2de2ff", "px-f1"), "2": ("#63f5ad", "px-f2"),
+        "3": ("#ffd84a", "px-f3"), "4": ("#2de2ff", "px-f4"),
+        "c": ("#cdd8e6", "px-blink"),
+    }),
+    # Человек за компом — значок личного кабинета. Очки светятся тем же
+    # классом, что и синяя строка на экране: это её отражение, и разойтись
+    # по фазе они не могут в принципе.
+    "me": _pixel_svg([
+        "....................",
+        "....................",
+        ".MMMMMMMMM..........",
+        ".MSSSSSSSM..HHHH....",
+        ".MSSSSSSSM.HHHHHH...",
+        ".MS22222SM.FFFFFFF..",
+        ".MSSSSSSSM.FFFFFFF..",
+        ".MS1111SSM.11FFFFF..",
+        ".MSSSSSSSM.FFFFFFF..",
+        ".MS33333SM..FFFFF...",
+        ".MSSSSSSSM...fff....",
+        ".MMMMMMMMM...fff....",
+        "....MMM....CCCCCC...",
+        "....MMM...CCCCCCCC..",
+        "..........CCCCCCCCC.",
+        "TTTTTTTTTTTTTTTTTTTT",
+        "TTTTTTTTTTTTTTTTTTTT",
+        "....................",
+        "....................",
+        "....................",
+    ], {
+        "M": ("#48566b", None), "S": ("#151a22", None), "T": ("#232a35", None),
+        "F": ("#d2a07d", None), "f": ("#a97a58", None),
+        "H": ("#3a2a22", None), "C": ("#2f3846", None),
+        "1": ("#2de2ff", "px-f1"), "2": ("#63f5ad", "px-f2"), "3": ("#ffd84a", "px-f3"),
+    }),
     # Динамик — значок музыкальной вкладки. Волн две: ближняя горит всегда,
     # дальняя мигает, поэтому значок дышит «одна волна — две» и без наведения.
     "speaker": _pixel_svg([
@@ -7226,6 +7286,118 @@ def drop_page():
     return html.replace("__ICONLINKS__", ICON_LINKS)
 
 
+def _soon_page(name, kicker, headline, lead, points):
+    """Заготовка под раздел: страница уже есть и открывается с полки, а
+    содержимое появится позже. Пустая страница выглядела бы поломкой,
+    поэтому честно пишем, что здесь будет."""
+    items = "".join(f"<li>{escape(p)}</li>" for p in points)
+    html = """<!doctype html>
+    <html lang="ru">
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <meta name="theme-color" content="#080b12">
+      <meta name="description" content="__LEAD__">
+      __ICONLINKS__
+      <link rel="manifest" href="/manifest.webmanifest">
+      <title>__NAME__ · vitazgio.ru</title>
+      <style>
+        :root { color-scheme: dark; --line: rgba(255,255,255,.1); --muted: #989fb2; }
+        * { box-sizing: border-box; }
+        body {
+          margin: 0; min-height: 100svh; display: flex; flex-direction: column;
+          font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+          background:
+            radial-gradient(circle at 12% 8%, rgba(57,126,255,.22), transparent 32rem),
+            radial-gradient(circle at 88% 78%, rgba(149,65,255,.18), transparent 34rem),
+            #0d1321;
+          color: #f7f8fc;
+        }
+        .page { width: min(1380px, calc(100% - 40px)); margin: 0 auto;
+                padding: clamp(24px, 5vw, 56px) 0 40px; }
+        .top { position: relative; display: flex; align-items: center; margin-bottom: 22px; }
+        .eyebrow { display: inline-flex; align-items: center; gap: 10px; color: #cdd2df;
+                   font-size: .76rem; font-weight: 700; letter-spacing: .16em;
+                   text-transform: uppercase; text-decoration: none; }
+        .eyebrow::before { content: ""; width: 7px; height: 7px; border-radius: 50%;
+                           background: #64e6a5; box-shadow: 0 0 16px #64e6a5; }
+        .eyebrow:hover { color: #fff; }
+        .mark { position: absolute; right: 0; top: 50%; transform: translateY(-62%);
+                width: clamp(1.15rem, 4.7vw, 4.4rem); height: clamp(1.15rem, 4.7vw, 4.4rem); }
+        h1 { position: relative; min-height: 132px; display: flex; align-items: center;
+             margin: 0; padding: 28px clamp(22px, 4vw, 54px);
+             font-family: "Cascadia Code", Consolas, "Courier New", monospace;
+             font-size: clamp(1.15rem, 4.7vw, 4rem); font-weight: 800;
+             letter-spacing: -.05em; color: #dffaff;
+             border: 1px solid rgba(54,228,255,.24);
+             background: linear-gradient(110deg, rgba(12,28,43,.92), rgba(20,17,38,.82));
+             clip-path: polygon(0 0, calc(100% - 25px) 0, 100% 25px, 100% 100%, 25px 100%, 0 calc(100% - 25px));
+             text-shadow: 2px 0 #ff3fa4, -2px 0 #21dcff; }
+        .lead { max-width: 62ch; margin: 26px 0 0; color: var(--muted); font-size: 1.05rem; line-height: 1.6; }
+        .soon { display: inline-block; margin-top: 26px; padding: 6px 14px;
+                color: #04121a; background: #2de2ff; border-radius: 999px;
+                font: 700 .7rem "Cascadia Code", Consolas, monospace;
+                letter-spacing: .16em; text-transform: uppercase; }
+        ul { max-width: 62ch; margin: 20px 0 0; padding-left: 20px;
+             color: var(--muted); line-height: 1.75; }
+        li::marker { color: #2de2ff; }
+        footer { margin-top: auto; padding: 28px 0 0; color: #686f80; font-size: .82rem; }
+      </style>
+    </head>
+    <body>
+      <main class="page">
+        <div class="top">
+          <a class="eyebrow" href="/">__KICKER__</a>
+          <img class="mark" src="/static/icons/vg-plain.svg" alt="Vitaz Gio"
+               width="512" height="512">
+        </div>
+        <h1>__HEADLINE__</h1>
+        <div class="soon">в работе</div>
+        <p class="lead">__LEAD__</p>
+        <ul>__ITEMS__</ul>
+        <footer>@Vitaz Gio · раздел готовится</footer>
+      </main>
+    </body>
+    </html>
+    """
+    return (html.replace("__ICONLINKS__", ICON_LINKS)
+                .replace("__NAME__", escape(name))
+                .replace("__KICKER__", escape(kicker))
+                .replace("__HEADLINE__", escape(headline))
+                .replace("__LEAD__", escape(lead))
+                .replace("__ITEMS__", items))
+
+
+@app.get("/diy")
+def diy_page():
+    return _soon_page(
+        "Страна DIY", "vitazgio.ru · страна diy", "СТРАНА DIY",
+        "Здесь будет всё, что сделано руками и головой: программы, поделки, "
+        "чертежи. Сам сайт пойдёт первым экспонатом.",
+        [
+            "Программы и скрипты — что делает, зачем писалось, ссылка на исходники",
+            "Поделки и пайка — фотографии с подписями",
+            "Чертежи и модели из КОМПАСа",
+            "Разборы: что сломалось, как чинилось",
+        ])
+
+
+@app.get("/servers")
+def servers_page():
+    return _soon_page(
+        "Хозяйство", "vitazgio.ru · хозяйство", "ХОЗЯЙСТВО",
+        "Рассказ про сервера: какие машины, что на них крутится и как это "
+        "связано в одну систему. Без адресов и версий — их знать посторонним "
+        "незачем.",
+        [
+            "Машины: имя, роль, процессор, память, диски",
+            "Схема связи: от заграничного сервера до домашней сети",
+            "Что где живёт — по названиям сервисов",
+            "Сколько всего ядер, памяти и терабайт",
+            "История: что было год назад и что стало",
+        ])
+
+
 @app.get("/music")
 def music_page():
     """Фонотека. Вся под паролем кабинета — и слушать, и менять.
@@ -8614,7 +8786,8 @@ def home():
           background: linear-gradient(90deg, transparent, rgba(255,255,255,.14), transparent);
         }
         .arcade-picks {
-          display: flex; justify-content: center; gap: 14px; margin-top: 16px;
+          display: flex; flex-wrap: wrap; justify-content: center;
+          gap: 14px; margin-top: 16px;
         }
         .arcade-picks .pick { width: clamp(104px, 16vw, 132px); }
         .pick {
@@ -8674,10 +8847,22 @@ def home():
         @keyframes pxSpin { 0%, 100% { transform: scaleX(1); } 50% { transform: scaleX(.18); } }
         .pick--cart .pick-art svg { animation: pxSlot 3.2s ease-in-out infinite; }
         @keyframes pxSlot { 0%, 62%, 100% { transform: translateY(0); } 74% { transform: translateY(10%); } }
-        .pick--pad .pick-art svg { animation: pxTilt 3s ease-in-out infinite; }
-        /* Динамик покачивается вместе с геймпадом, но чуть медленнее — в такт
-           они выглядели бы как один механизм, а это две разные кнопки. */
+        /* Покачиваются все пять, на один и тот же угол, но с разной скоростью.
+           Разница нарочно мелкая: в такт полка выглядела бы одним механизмом,
+           а так каждая кнопка живёт сама по себе, и глаз это ловит, даже если
+           не может объяснить. */
+        .pick--pad .pick-art svg   { animation: pxTilt 3s ease-in-out infinite; }
+        .pick--diy .pick-art svg   { animation: pxTilt 3.2s ease-in-out infinite; }
+        .pick--rack .pick-art svg  { animation: pxTilt 3.45s ease-in-out infinite; }
         .pick--music .pick-art svg { animation: pxTilt 3.6s ease-in-out infinite; }
+        .pick--me .pick-art svg    { animation: pxTilt 3.85s ease-in-out infinite; }
+
+        /* Бегущая подсветка: строки кода на экране и отблеск в очках. */
+        @keyframes pxFlow { 0%, 100% { opacity: .2; } 18% { opacity: 1; } }
+        .pick-art .px-f1 { animation: pxFlow 1.6s linear infinite; }
+        .pick-art .px-f2 { animation: pxFlow 1.6s linear infinite .4s; }
+        .pick-art .px-f3 { animation: pxFlow 1.6s linear infinite .8s; }
+        .pick-art .px-f4 { animation: pxFlow 1.6s linear infinite 1.2s; }
         @keyframes pxTilt { 0%, 100% { transform: rotate(-4deg); } 50% { transform: rotate(4deg); } }
         /* У стойки лампы моргают вразнобой: одинаковый такт выглядит мёртво. */
         .pick-art .px-blink2 { animation: pxBlink2 2.9s steps(1) infinite; }
@@ -8751,6 +8936,10 @@ def home():
           .eyebrow { font-size: .95rem; letter-spacing: .12em; }
           .eyebrow::before { width: 9px; height: 9px; }
           .arcade-bar-line { font-size: .86rem; letter-spacing: .26em; }
+          /* Пять кнопок в строку на телефоне не влезают — раскладываем
+             тремя и двумя, ширину считаем от полосы, а не подбираем. */
+          .arcade-picks { gap: 10px; }
+          .arcade-picks .pick { width: calc((100% - 20px) / 3); max-width: 132px; }
           footer { font-size: .95rem; }
           .service { width: 78vw; min-height: 280px; }
           /* На телефоне листают пальцем, а поля по бокам всего 20 пикселей —
@@ -8862,20 +9051,33 @@ def home():
              подсказка, а глазу хватает пиксельного значка. -->
         <section class="arcade-bar" aria-label="Рубка">
           <div class="arcade-bar-line"><span>РУБКА</span></div>
+          <!-- Порядок задан: игры, страна DIY, хозяйство, музыка, кабинет.
+               Стойка переехала сюда из кабинета — теперь она про сервера,
+               а у кабинета свой значок: человек за компом. -->
           <div class="arcade-picks">
             <button class="pick pick--pad" type="button" data-games
                     title="Игры" aria-label="Открыть игры">
               <span class="pick-art">__ICON_PAD__</span>
               <span class="pick-glow"></span>
             </button>
+            <a class="pick pick--diy" href="/diy"
+               title="Страна DIY" aria-label="Открыть страну DIY">
+              <span class="pick-art">__ICON_CODE__</span>
+              <span class="pick-glow"></span>
+            </a>
+            <a class="pick pick--rack" href="/servers"
+               title="Хозяйство" aria-label="Открыть рассказ о серверах">
+              <span class="pick-art">__ICON_RACK__</span>
+              <span class="pick-glow"></span>
+            </a>
             <a class="pick pick--music" href="/music"
                title="Музыка" aria-label="Открыть музыку">
               <span class="pick-art">__ICON_SPEAKER__</span>
               <span class="pick-glow"></span>
             </a>
-            <button class="pick pick--rack" type="button" id="cabinet-pick"
+            <button class="pick pick--me" type="button" id="cabinet-pick"
                     title="Личный кабинет" aria-label="Открыть личный кабинет">
-              <span class="pick-art">__ICON_RACK__</span>
+              <span class="pick-art">__ICON_ME__</span>
               <span class="pick-glow"></span>
             </button>
           </div>
