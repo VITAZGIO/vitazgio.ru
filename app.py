@@ -16,7 +16,9 @@ import threading
 import time
 import uuid
 import urllib.error
+import urllib.parse
 import urllib.request
+import zipfile
 from collections import defaultdict, deque
 from datetime import datetime
 from functools import wraps
@@ -2431,6 +2433,183 @@ def drop_download(item_id):
     if not item or item["kind"] == "folder":
         return "Не найдено", 404
     return _drop_send(item_id, item)
+
+
+# Архив папки собираем на лету и сразу отдаём: складывать его в памяти
+# нельзя — папка с фотографиями легко весит больше, чем есть оперативки.
+DROP_ZIP_CHUNK = 1024 * 1024
+
+
+class _ZipSink:
+    """Приёмник для zipfile: копит записанное и отдаёт порциями наружу.
+
+    zipfile умеет писать в непрокручиваемый поток — тогда размеры файлов он
+    дописывает после данных отдельной меткой. Нам это и нужно: считать файл
+    заранее, только чтобы узнать его длину, значит прочитать всю папку дважды."""
+
+    def __init__(self):
+        self._parts = []
+        self._pos = 0
+        self._held = 0
+
+    def write(self, data):
+        data = bytes(data)
+        self._parts.append(data)
+        self._pos += len(data)
+        self._held += len(data)
+        return len(data)
+
+    def tell(self):
+        return self._pos
+
+    def flush(self):
+        pass
+
+    @property
+    def held(self):
+        return self._held
+
+    def drain(self):
+        out = b"".join(self._parts)
+        self._parts.clear()
+        self._held = 0
+        return out
+
+
+def _drop_zip_name(name, taken):
+    """Имя внутри архива: без разделителей пути и без повторов в одной папке.
+
+    Разделители убираем не для красоты — имя вида «../ключи» распаковалось бы
+    мимо выбранной папки."""
+    clean = re.sub(r'[\x00-\x1f<>:"/\\|?*]', "", name or "").strip(" .") or "файл"
+    stem, dot, ext = clean.rpartition(".")
+    if not dot:
+        stem, ext = clean, ""
+    candidate, counter = clean, 2
+    while candidate.lower() in taken:
+        candidate = f"{stem} ({counter})" + (f".{ext}" if dot else "")
+        counter += 1
+    taken.add(candidate.lower())
+    return candidate
+
+
+def _drop_zip_plan(folder_id):
+    """Что кладём в архив: путь внутри архива, файл на диске, размер, время.
+    Пустые папки тоже попадают — иначе они пропадут при распаковке.
+    Вызывать под drop_lock."""
+    plan = []
+
+    def walk(node_id, prefix, seen):
+        if node_id in seen:
+            return
+        seen = seen | {node_id}
+        taken = set()
+        for child in sorted(_drop_children(node_id),
+                            key=lambda k: drop_items[k]["name"].lower()):
+            item = drop_items[child]
+            name = _drop_zip_name(item["name"], taken)
+            if item["kind"] == "folder":
+                plan.append((prefix + name + "/", None, 0, item.get("created", 0)))
+                walk(child, prefix + name + "/", seen)
+            else:
+                plan.append((prefix + name, child, item.get("size", 0),
+                             item.get("created", 0)))
+
+    walk(folder_id, "", set())
+    return plan
+
+
+def _drop_zip_length(plan):
+    """Точный размер будущего архива, чтобы браузер показал полосу загрузки.
+
+    Считается только для несжатого архива без ZIP64: заголовок файла 30 байт
+    плюс имя, затем данные, затем метка на 16 байт; в конце по 46 байт плюс
+    имя на каждую запись и 22 байта хвоста. Если выходит за четыре гигабайта,
+    формат переключится на ZIP64 и эта арифметика перестанет быть верной —
+    тогда длину не обещаем вовсе."""
+    total = 22
+    for arcname, file_id, size, _ in plan:
+        name_len = len(arcname.encode("utf-8"))
+        # 30 — заголовок файла, 16 — метка с размерами после данных,
+        # 46 — запись в оглавлении. Метка пишется и для папок: zipfile
+        # ставит её всем записям, раз поток непрокручиваемый.
+        total += 30 + name_len + 16 + 46 + name_len
+        if file_id:
+            total += size
+    limit = 0xFFFFFFFF
+    if total > limit or any(size > limit for _, _, size, _ in plan):
+        return None
+    return total
+
+
+def _drop_zip_time(stamp):
+    """Время файла для архива. До 1980 года формат не умеет, ниже не опускаем."""
+    try:
+        # Время в архиве пишется без пояса — берём местное, как и делают
+        # все архиваторы.
+        moment = datetime.fromtimestamp(stamp or 0)
+    except (OSError, OverflowError, ValueError):
+        moment = datetime.now()
+    if moment.year < 1980:
+        return (1980, 1, 1, 0, 0, 0)
+    return (moment.year, moment.month, moment.day,
+            moment.hour, moment.minute, moment.second - moment.second % 2)
+
+
+@app.get("/api/drop/zip/<item_id>")
+@login_required
+def drop_zip(item_id):
+    """Папка целиком одним архивом.
+
+    Ничего не сжимаем: фотографии, видео и музыка уже сжаты, и второй проход
+    только сожрал бы процессор ради процента-двух. Зато без сжатия архив
+    собирается ровно со скоростью диска."""
+    with drop_lock:
+        item = drop_items.get(item_id)
+        if not item or item["kind"] != "folder":
+            return "Не найдено", 404
+        plan = _drop_zip_plan(item_id)
+        folder = item["name"]
+
+    def pour():
+        sink = _ZipSink()
+        with zipfile.ZipFile(sink, "w", zipfile.ZIP_STORED, allowZip64=True) as zf:
+            for arcname, file_id, _, made in plan:
+                info = zipfile.ZipInfo(arcname, _drop_zip_time(made))
+                info.compress_type = zipfile.ZIP_STORED
+                if file_id is None:
+                    zf.writestr(info, b"")          # пустая папка
+                    yield sink.drain()
+                    continue
+                path = _drop_path(file_id)
+                if not os.path.exists(path):
+                    continue
+                with zf.open(info, "w") as dst, open(path, "rb") as src:
+                    while True:
+                        chunk = src.read(DROP_ZIP_CHUNK)
+                        if not chunk:
+                            break
+                        dst.write(chunk)
+                        if sink.held >= DROP_ZIP_CHUNK:
+                            yield sink.drain()
+                if sink.held:
+                    yield sink.drain()
+        yield sink.drain()
+
+    safe = (_drop_zip_name(folder, set()) or "папка") + ".zip"
+    quoted = urllib.parse.quote(safe)
+    response = Response(pour(), mimetype="application/zip")
+    # Имя даём дважды. Русское — только в filename* и только процентами:
+    # заголовки уходят в latin-1, и сырая кириллица роняет отдачу на месте.
+    # Простое filename оставляем латинским, для совсем старых клиентов.
+    response.headers["Content-Disposition"] = (
+        "attachment; filename=\"archive.zip\"; filename*=UTF-8''" + quoted)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Cache-Control"] = "no-store"
+    length = _drop_zip_length(plan)
+    if length is not None:
+        response.headers["Content-Length"] = str(length)
+    return response
 
 
 @app.get("/api/drop/view/<item_id>")
@@ -6538,7 +6717,9 @@ def drop_page():
               ${iconHtml(it)}
               <span class="nm">${esc(it.name)}</span>
               <span class="acts">
-                ${isFolder ? "" : `<button class="act" data-act="dl" title="Скачать">⤓</button>`}
+                ${isFolder
+                  ? `<button class="act" data-act="zip" title="Скачать папку архивом">⤓</button>`
+                  : `<button class="act" data-act="dl" title="Скачать">⤓</button>`}
                 ${isText ? `<button class="act" data-act="copy" title="Копировать">⧉</button>` : ""}
                 ${isFolder ? "" : `<button class="act${it.share ? " on" : ""}" data-act="share" title="Ссылка для скачивания">🔗</button>`}
                 <button class="act" data-act="ren" title="Переименовать">✎</button>
@@ -7126,6 +7307,17 @@ def drop_page():
           }
 
           if (act === "dl") { window.location.assign("/api/drop/download/" + id); return; }
+
+          if (act === "zip") {
+            // Пустую папку архивировать нечего — сразу говорим, а не отдаём
+            // пользователю архив на двадцать два байта.
+            if (!item.count) { toast("Папка пуста", true); return; }
+            toast("Собираю архив: " + item.count + " " +
+                  plural(item.count, ["объект", "объекта", "объектов"]) +
+                  ", " + fmtSize(item.size || 0));
+            window.location.assign("/api/drop/zip/" + id);
+            return;
+          }
 
           if (act === "icon") { folderCard(item); return; }
 
