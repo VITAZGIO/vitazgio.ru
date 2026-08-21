@@ -9707,23 +9707,6 @@ def home():
           gap: 14px; margin-top: 16px;
         }
         .arcade-picks .pick { width: clamp(104px, 16vw, 132px); }
-        .host-strip {
-          display: flex; flex-wrap: wrap; align-items: center; justify-content: center;
-          gap: 10px; margin-top: 16px;
-        }
-        .host-badge {
-          padding: 5px 12px; border-radius: 999px;
-          background: rgba(45,226,255,.14); border: 1px solid rgba(45,226,255,.45);
-          color: #2de2ff; font: 700 .64rem "Cascadia Code", Consolas, monospace;
-          letter-spacing: .18em; text-transform: uppercase;
-        }
-        .host-go {
-          padding: 5px 12px; border-radius: 999px; text-decoration: none;
-          border: 1px solid rgba(255,255,255,.14); color: #c8cfe2;
-          background: rgba(255,255,255,.03); font-size: .82rem;
-          transition: border-color .18s ease, color .18s ease;
-        }
-        .host-go:hover { border-color: rgba(45,226,255,.5); color: #f7f8fc; }
         .pick {
           --pc: #2de2ff;
           position: relative; display: grid; place-items: center;
@@ -10014,13 +9997,6 @@ def home():
               <span class="pick-art">__ICON_ME__</span>
               <span class="pick-glow"></span>
             </button>
-          </div>
-          <!-- Полоса хозяина: показывается сама, если сайт помнит устройство
-               по кабинету. Гостю её не видно — она скрыта до ответа сервера. -->
-          <div class="host-strip" id="host-strip" hidden>
-            <span class="host-badge">режим хозяина</span>
-            <a class="host-go" href="/diy">Добавить творение</a>
-            <a class="host-go" href="/cabinet">Кабинет</a>
           </div>
         </section>
 
@@ -10387,23 +10363,8 @@ def home():
             trigger.focus();
           };
 
-          // Спрашиваем один раз при заходе: если сайт помнит это устройство,
-          // хозяин видит свою полосу прямо на главной и не жмёт пароль.
-          let remembered = false;
-          const remember = (yes) => {
-            remembered = yes;
-            const strip = document.getElementById("host-strip");
-            if (strip) strip.hidden = !yes;
-            trigger.title = yes ? "Личный кабинет — вход открыт" : "Личный кабинет";
-          };
-          fetch("/api/session/probe", { credentials: "same-origin" })
-            .then((r) => r.json())
-            .then((d) => remember(!!d.trusted))
-            .catch(() => {});
-
           // Помнит — сразу в кабинет, не помнит — просим пароль.
           trigger.addEventListener("click", async () => {
-            if (remembered) { window.location.assign("/cabinet"); return; }
             try {
               const response = await fetch("/api/session/probe", { credentials: "same-origin" });
               const result = await response.json();
