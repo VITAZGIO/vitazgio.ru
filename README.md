@@ -190,6 +190,34 @@ service worker (`/sw.js`), складывает файлы в Cache Storage и �
 дома, поэтому пакет отправляет постоянно включённая машина в домашней сети
 (`_wol_relay` заходит на неё по SSH и шлёт пакет оттуда).
 
+### Пароль кабинета
+
+Соль и хэш лежат **только** в `.env`, запасных значений в коде нет — раньше
+они там были, и их можно было скачать вместе с исходниками и подбирать пароль
+офлайн, минуя лимит попыток. Без переменных приложение не стартует.
+
+Новая пара для нового пароля:
+
+```bash
+python3 - <<'EOF'
+import base64, hashlib, os, getpass
+salt = os.urandom(16)
+pwd = getpass.getpass("Новый пароль: ")
+h = hashlib.pbkdf2_hmac("sha256", pwd.encode(), salt, 600_000)
+print("CABINET_PASSWORD_SALT=" + base64.b64encode(salt).decode())
+print("CABINET_PASSWORD_HASH=" + base64.b64encode(h).decode())
+EOF
+```
+
+Две получившиеся строки положить в `.env` на сервере и перезапустить
+контейнер. Проверить, что переменные вообще есть:
+
+```bash
+grep -c CABINET_PASSWORD /opt/sites/vitazgio.ru/.env
+```
+
+Должно ответить `2`.
+
 ## Развёртывание
 
 [Dockerfile](Dockerfile) + [docker-compose.yml](docker-compose.yml): `python:3.11-slim`,

@@ -53,15 +53,27 @@ app.wsgi_app = ProxyFix(
 
 sock = Sock(app)
 
-# Репозиторий публичный, поэтому соль и хэш берём из .env: иначе их можно
-# просто скачать и подбирать пароль офлайн. Значения ниже — запасные, на случай
-# если переменные не заданы.
-PASSWORD_SALT = base64.b64decode(
-    os.environ.get("CABINET_PASSWORD_SALT") or "vLsGUQ/owFhcITf4A6CVjw=="
-)
-PASSWORD_HASH = base64.b64decode(
-    os.environ.get("CABINET_PASSWORD_HASH") or "T+E27QxamfCbhsdxJ1JlEXo4yuBwfwQFtw9ODFkA+kg="
-)
+# Репозиторий публичный, поэтому соль и хэш живут только в .env. Запасных
+# значений в коде нет намеренно: раньше они тут лежали, и любой желающий мог
+# скачать их вместе с исходниками и спокойно подбирать пароль у себя дома,
+# без всяких ограничений на число попыток. Нет переменных — приложение не
+# поднимается вовсе; это лучше, чем молча работать с всем известным паролем.
+def _password_secret(name):
+    raw = os.environ.get(name)
+    if not raw:
+        raise SystemExit(
+            f"Не задана переменная {name}. Соль и хэш пароля кабинета хранятся "
+            "только в .env — в публичный репозиторий им нельзя. Как получить "
+            "новую пару, написано в README, раздел «Пароль кабинета»."
+        )
+    try:
+        return base64.b64decode(raw)
+    except (ValueError, TypeError) as e:
+        raise SystemExit(f"Переменная {name} не читается как base64: {e}")
+
+
+PASSWORD_SALT = _password_secret("CABINET_PASSWORD_SALT")
+PASSWORD_HASH = _password_secret("CABINET_PASSWORD_HASH")
 PASSWORD_ITERATIONS = 600_000
 LOGIN_WINDOW_SECONDS = 300
 LOGIN_MAX_ATTEMPTS = 5
@@ -7478,6 +7490,269 @@ def drop_page():
     return html.replace("__ICONLINKS__", ICON_LINKS)
 
 
+# ---- Страна DIY: свои творения --------------------------------------------
+# Записи ведёт хозяин сайта прямо со страницы, без правки кода. Обложки
+# ужимаем при загрузке: портфолио листают, и тянуть в него исходные пять
+# мегабайт с телефона незачем.
+DIY_DIR = os.path.join(DATA_DIR, "diy")
+DIY_INDEX_PATH = os.path.join(DATA_DIR, "diy.json")
+DIY_MAX_IMAGE = 12 * 1024 * 1024
+DIY_COVER_SIDE = 1280
+DIY_KINDS = ("программа", "поделка", "чертёж", "разбор", "другое")
+DIY_LINK_LIMIT = 6
+
+diy_items: dict = {}
+diy_lock = threading.Lock()
+os.makedirs(DIY_DIR, exist_ok=True)
+
+
+def _diy_cover_path(item_id):
+    return os.path.join(DIY_DIR, f"{item_id}.jpg")
+
+
+def _diy_write_index():
+    """Вызывать под diy_lock."""
+    try:
+        tmp = DIY_INDEX_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(diy_items, fh, ensure_ascii=False)
+        os.replace(tmp, DIY_INDEX_PATH)
+    except OSError:
+        pass
+
+
+def _diy_load():
+    try:
+        with open(DIY_INDEX_PATH, encoding="utf-8") as fh:
+            diy_items.update(json.load(fh) or {})
+    except (OSError, ValueError):
+        pass
+    for work in diy_items.values():
+        work.setdefault("links", [])
+        work.setdefault("hidden", False)
+        work.setdefault("pinned", False)
+        work.setdefault("kind", "другое")
+
+
+_diy_load()
+
+
+def _diy_clean_links(raw):
+    """Ссылки: подпись и адрес. Пускаем только http и https — иначе в
+    портфолио можно вписать javascript: и получить чужой скрипт на сайте."""
+    out = []
+    for entry in (raw or [])[:DIY_LINK_LIMIT]:
+        if not isinstance(entry, dict):
+            continue
+        url = (entry.get("url") or "").strip()[:400]
+        if not url:
+            continue
+        if not re.match(r"^https?://", url, re.I):
+            url = "https://" + url.lstrip("/")
+        label = (entry.get("label") or "").strip()[:40] or "ссылка"
+        out.append({"label": label, "url": url})
+    return out
+
+
+def _diy_public(item_id, work, can_edit):
+    row = {
+        "id": item_id,
+        "title": work.get("title", ""),
+        "summary": work.get("summary", ""),
+        "kind": work.get("kind", "другое"),
+        "links": work.get("links", []),
+        "cover": bool(work.get("cover")),
+        "created": work.get("created", 0),
+        "updated": work.get("updated", 0),
+        "pinned": bool(work.get("pinned")),
+    }
+    if can_edit:
+        row["hidden"] = bool(work.get("hidden"))
+    return row
+
+
+def _diy_sorted(can_edit):
+    """Закреплённые сверху, дальше по свежести. Скрытые видит только хозяин.
+    Вызывать под diy_lock."""
+    rows = [(k, v) for k, v in diy_items.items()
+            if can_edit or not v.get("hidden")]
+    rows.sort(key=lambda kv: (not kv[1].get("pinned"), -kv[1].get("created", 0)))
+    return rows
+
+
+def diy_editor_required(view):
+    """Правит только хозяин. Проверка та же, что у кабинета: живая сессия или
+    помеченное доверенным устройство — тогда режим правки включается сам,
+    без лишнего ввода пароля."""
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if not session.get("authenticated"):
+            fresh = _device_check(request.cookies.get(DEVICE_COOKIE))
+            if not fresh:
+                return jsonify(error="Нужен вход в кабинет."), 403
+            session["authenticated"] = True
+            g.new_device_cookie = fresh
+            _log_login("доверенное устройство")
+        return view(*args, **kwargs)
+
+    return wrapped
+
+
+def _diy_can_edit():
+    """Пустил бы редактор этого гостя. Отдельно от декоратора: страница
+    спрашивает об этом, ничего не меняя."""
+    if session.get("authenticated"):
+        return True
+    fresh = _device_check(request.cookies.get(DEVICE_COOKIE))
+    if fresh:
+        session["authenticated"] = True
+        g.new_device_cookie = fresh
+        _log_login("доверенное устройство")
+        return True
+    return False
+
+
+@app.get("/api/diy")
+def diy_list_api():
+    can_edit = _diy_can_edit()
+    with diy_lock:
+        works = [_diy_public(k, v, can_edit) for k, v in _diy_sorted(can_edit)]
+    return jsonify(works=works, can_edit=can_edit, kinds=list(DIY_KINDS))
+
+
+@app.post("/api/diy")
+@diy_editor_required
+def diy_create_api():
+    payload = request.get_json(silent=True) or {}
+    title = (payload.get("title") or "").strip()[:80]
+    if not title:
+        return jsonify(error="Без названия не сохранить."), 400
+    kind = payload.get("kind") if payload.get("kind") in DIY_KINDS else "другое"
+    item_id = str(uuid.uuid4())
+    now = time.time()
+    with diy_lock:
+        diy_items[item_id] = {
+            "title": title,
+            "summary": (payload.get("summary") or "").strip()[:600],
+            "kind": kind,
+            "links": _diy_clean_links(payload.get("links")),
+            "cover": False,
+            "hidden": bool(payload.get("hidden")),
+            "pinned": bool(payload.get("pinned")),
+            "created": now,
+            "updated": now,
+        }
+        _diy_write_index()
+    return jsonify(id=item_id)
+
+
+@app.patch("/api/diy/<item_id>")
+@diy_editor_required
+def diy_update_api(item_id):
+    payload = request.get_json(silent=True) or {}
+    with diy_lock:
+        work = diy_items.get(item_id)
+        if not work:
+            return jsonify(error="Запись не найдена."), 404
+        if "title" in payload:
+            title = (payload.get("title") or "").strip()[:80]
+            if not title:
+                return jsonify(error="Без названия не сохранить."), 400
+            work["title"] = title
+        if "summary" in payload:
+            work["summary"] = (payload.get("summary") or "").strip()[:600]
+        if "kind" in payload and payload["kind"] in DIY_KINDS:
+            work["kind"] = payload["kind"]
+        if "links" in payload:
+            work["links"] = _diy_clean_links(payload.get("links"))
+        for flag in ("hidden", "pinned"):
+            if flag in payload:
+                work[flag] = bool(payload[flag])
+        work["updated"] = time.time()
+        _diy_write_index()
+    return jsonify(ok=True)
+
+
+@app.delete("/api/diy/<item_id>")
+@diy_editor_required
+def diy_delete_api(item_id):
+    with diy_lock:
+        work = diy_items.pop(item_id, None)
+        if work:
+            _diy_write_index()
+    if work:
+        try:
+            os.remove(_diy_cover_path(item_id))
+        except OSError:
+            pass
+    return jsonify(ok=True)
+
+
+@app.post("/api/diy/<item_id>/cover")
+@diy_editor_required
+def diy_cover_upload_api(item_id):
+    with diy_lock:
+        if item_id not in diy_items:
+            return jsonify(error="Запись не найдена."), 404
+    picture = request.files.get("file")
+    if not picture:
+        return jsonify(error="Файл не выбран."), 400
+    if request.content_length and request.content_length > DIY_MAX_IMAGE + 8192:
+        return jsonify(error="Картинка больше 12 МБ."), 413
+    try:
+        from PIL import Image
+
+        Image.MAX_IMAGE_PIXELS = 80_000_000   # защита от «бомб» с диким разрешением
+        with Image.open(picture.stream) as image:
+            image.draft("RGB", (DIY_COVER_SIDE, DIY_COVER_SIDE))
+            image = image.convert("RGB")
+            image.thumbnail((DIY_COVER_SIDE, DIY_COVER_SIDE))
+            image.save(_diy_cover_path(item_id), "JPEG", quality=82, optimize=True)
+    except Exception:
+        return jsonify(error="Это не похоже на картинку."), 415
+    with diy_lock:
+        work = diy_items.get(item_id)
+        if work:
+            work["cover"] = True
+            work["updated"] = time.time()
+            _diy_write_index()
+    return jsonify(ok=True, size=os.path.getsize(_diy_cover_path(item_id)))
+
+
+@app.delete("/api/diy/<item_id>/cover")
+@diy_editor_required
+def diy_cover_delete_api(item_id):
+    with diy_lock:
+        work = diy_items.get(item_id)
+        if work:
+            work["cover"] = False
+            work["updated"] = time.time()
+            _diy_write_index()
+    try:
+        os.remove(_diy_cover_path(item_id))
+    except OSError:
+        pass
+    return jsonify(ok=True)
+
+
+@app.get("/diy/cover/<item_id>")
+def diy_cover_api(item_id):
+    """Обложка. Открыта всем: страница со списком тоже открыта."""
+    with diy_lock:
+        work = diy_items.get(item_id)
+        hidden = bool(work and work.get("hidden"))
+    if not work or not work.get("cover"):
+        return "", 404
+    if hidden and not _diy_can_edit():
+        return "", 404
+    path = _diy_cover_path(item_id)
+    if not os.path.exists(path):
+        return "", 404
+    response = send_file(path, mimetype="image/jpeg", conditional=True)
+    response.headers["Cache-Control"] = "public, max-age=86400"
+    return response
+
+
 def _soon_page(name, kicker, headline, lead, points):
     """Заготовка под раздел: страница уже есть и открывается с полки, а
     содержимое появится позже. Пустая страница выглядела бы поломкой,
@@ -7562,16 +7837,466 @@ def _soon_page(name, kicker, headline, lead, points):
 
 @app.get("/diy")
 def diy_page():
-    return _soon_page(
-        "Страна DIY", "vitazgio.ru · страна diy", "СТРАНА DIY",
-        "Здесь будет всё, что сделано руками и головой: программы, поделки, "
-        "чертежи. Сам сайт пойдёт первым экспонатом.",
-        [
-            "Программы и скрипты — что делает, зачем писалось, ссылка на исходники",
-            "Поделки и пайка — фотографии с подписями",
-            "Чертежи и модели из КОМПАСа",
-            "Разборы: что сломалось, как чинилось",
-        ])
+    """Страна DIY: витрина своих творений.
+
+    Смотреть может кто угодно, добавлять — хозяин. Отдельного входа не просим:
+    если сайт уже помнит устройство по кабинету, режим правки включается сам."""
+    html = """<!doctype html>
+    <html lang="ru">
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <meta name="theme-color" content="#080b12">
+      <meta name="description" content="Программы, поделки и чертежи vitazgio.ru">
+      __ICONLINKS__
+      <link rel="manifest" href="/manifest.webmanifest">
+      <title>Страна DIY · vitazgio.ru</title>
+      <style>
+        :root {
+          color-scheme: dark;
+          --bg: #0d1321; --line: rgba(255,255,255,.1); --muted: #989fb2;
+          --pc: #2de2ff; --warm: #ffd84a;
+        }
+        * { box-sizing: border-box; }
+        body { margin: 0; min-width: 320px; padding-bottom: 60px;
+               font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+               background:
+                 radial-gradient(circle at 12% 8%, rgba(57,126,255,.22), transparent 32rem),
+                 radial-gradient(circle at 88% 78%, rgba(149,65,255,.18), transparent 34rem),
+                 var(--bg);
+               color: #f7f8fc; }
+        .page { width: min(1380px, calc(100% - 40px)); margin: 0 auto;
+                padding: clamp(24px, 5vw, 52px) 0 0; }
+
+        .top { position: relative; display: flex; align-items: center; margin-bottom: 22px; }
+        .eyebrow { display: inline-flex; align-items: center; gap: 10px; color: #cdd2df;
+                   font-size: .76rem; font-weight: 700; letter-spacing: .16em;
+                   text-transform: uppercase; text-decoration: none; }
+        .eyebrow::before { content: ""; width: 7px; height: 7px; border-radius: 50%;
+                           background: #64e6a5; box-shadow: 0 0 16px #64e6a5; }
+        .eyebrow:hover { color: #fff; }
+        .mark { position: absolute; right: 0; top: 50%; transform: translateY(-62%);
+                width: clamp(1.15rem, 4.7vw, 4.4rem); height: clamp(1.15rem, 4.7vw, 4.4rem); }
+
+        h1 { position: relative; min-height: 118px; display: flex; align-items: center;
+             margin: 0; padding: 24px clamp(20px, 4vw, 48px);
+             font-family: "Cascadia Code", Consolas, monospace;
+             font-size: clamp(1.1rem, 4.2vw, 3.4rem); font-weight: 800;
+             letter-spacing: -.05em; color: #dffaff;
+             border: 1px solid rgba(54,228,255,.24);
+             background: linear-gradient(110deg, rgba(12,28,43,.92), rgba(20,17,38,.82));
+             clip-path: polygon(0 0, calc(100% - 25px) 0, 100% 25px, 100% 100%, 25px 100%, 0 calc(100% - 25px));
+             text-shadow: 2px 0 #ff3fa4, -2px 0 #21dcff; }
+
+        /* Полоса хозяина. Видна, только когда сайт узнал своего. */
+        .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+               margin: 22px 0 0; }
+        .badge { display: inline-flex; align-items: center; gap: 8px; height: 34px;
+                 padding: 0 13px; color: #04121a; background: var(--pc);
+                 border-radius: 999px;
+                 font: 700 .68rem "Cascadia Code", Consolas, monospace;
+                 letter-spacing: .14em; text-transform: uppercase; }
+        .btn { display: inline-flex; align-items: center; gap: 8px; height: 38px;
+               padding: 0 16px; color: #cdd6e6; cursor: pointer;
+               font: 600 .84rem inherit; white-space: nowrap;
+               background: rgba(255,255,255,.05); border: 1px solid var(--line);
+               border-radius: 10px; transition: .18s; }
+        .btn:hover { color: #fff; border-color: var(--pc); background: rgba(45,226,255,.1); }
+        .btn.go { color: #04121a; background: var(--pc); border-color: var(--pc); }
+        .btn.go:hover { filter: brightness(1.1); }
+        .btn.bad { color: #ff9aa6; border-color: rgba(255,90,110,.35); }
+        .btn.bad:hover { border-color: #ff5a6e; background: rgba(255,90,110,.14); }
+        .btn svg { width: 16px; height: 16px; flex: none; }
+        .bar .spacer { margin-left: auto; }
+
+        .grid { display: grid; gap: 18px; margin: 26px 0 0;
+                grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
+
+        .work { position: relative; display: flex; flex-direction: column;
+                overflow: hidden; background: rgba(25,32,48,.82);
+                border: 1px solid var(--line); border-radius: 18px;
+                transition: transform .2s, border-color .2s, box-shadow .2s; }
+        .work:hover { transform: translateY(-4px); border-color: rgba(45,226,255,.5);
+                      box-shadow: 0 20px 50px rgba(0,0,0,.4); }
+        .work.draft { border-style: dashed; opacity: .82; }
+        .shot { aspect-ratio: 16 / 9; background: #0a0f18 center/cover no-repeat;
+                border-bottom: 1px solid var(--line); }
+        .shot.none { display: grid; place-items: center; color: #3d4759;
+                     font: 700 .74rem "Cascadia Code", Consolas, monospace;
+                     letter-spacing: .2em; }
+        .body { flex: 1; display: flex; flex-direction: column; gap: 10px; padding: 16px 18px 18px; }
+        .kind { align-self: flex-start; padding: 3px 10px; color: #9fe8ff;
+                background: rgba(45,226,255,.12); border-radius: 999px;
+                font: 700 .64rem "Cascadia Code", Consolas, monospace;
+                letter-spacing: .12em; text-transform: uppercase; }
+        .work h2 { margin: 0; font-size: 1.18rem; letter-spacing: -.02em; }
+        .work p { margin: 0; color: var(--muted); font-size: .9rem; line-height: 1.5;
+                  white-space: pre-wrap; }
+        .links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 2px; }
+        .links a { display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px;
+                   color: #cfe6ff; text-decoration: none; font-size: .78rem;
+                   background: rgba(255,255,255,.06); border: 1px solid var(--line);
+                   border-radius: 8px; }
+        .links a:hover { color: #04121a; background: var(--pc); border-color: var(--pc); }
+        .flags { display: flex; gap: 6px; }
+        .flag { padding: 2px 8px; border-radius: 999px;
+                font: 700 .6rem "Cascadia Code", Consolas, monospace;
+                letter-spacing: .1em; text-transform: uppercase; }
+        .flag.hid { color: #ffd0a0; background: rgba(255,140,60,.16); }
+        .flag.pin { color: #04121a; background: var(--warm); }
+        /* Кнопки правки прижаты к низу: в ряду карточки разной высоты,
+           и без этого «Править» гуляет по вертикали. */
+        .tools { display: flex; gap: 8px; margin-top: auto; padding-top: 4px; }
+        .tools .btn { height: 32px; padding: 0 12px; font-size: .78rem; }
+
+        .empty { padding: 60px 20px; color: var(--muted); text-align: center; }
+
+        /* Окно правки */
+        .veil { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center;
+                padding: 20px; overflow: auto; background: rgba(6,9,16,.76); }
+        .sheet { width: min(560px, 100%); padding: 24px;
+                 background: linear-gradient(160deg, rgba(24,32,48,.98), rgba(12,16,26,.98));
+                 border: 1px solid var(--line); border-radius: 18px; }
+        .sheet h3 { margin: 0 0 18px; font-size: 1.15rem; }
+        .field { display: block; margin-bottom: 14px; }
+        .field span { display: block; margin-bottom: 6px; color: var(--muted);
+                      font-size: .74rem; letter-spacing: .1em; text-transform: uppercase; }
+        .field input, .field textarea, .field select {
+          width: 100%; padding: 10px 12px; color: #f7f8fc; font: inherit;
+          background: rgba(0,0,0,.35); border: 1px solid var(--line); border-radius: 10px; }
+        .field textarea { min-height: 96px; resize: vertical; }
+        .field input:focus, .field textarea:focus, .field select:focus {
+          outline: none; border-color: var(--pc); }
+        .row2 { display: flex; gap: 8px; margin-bottom: 8px; }
+        .row2 input:first-child { flex: 0 0 34%; }
+        .row2 input:nth-child(2) { flex: 1; }
+        .row2 button { flex: none; width: 38px; }
+        .checks { display: flex; flex-wrap: wrap; gap: 16px; margin: 4px 0 18px; }
+        .checks label { display: inline-flex; align-items: center; gap: 8px;
+                        color: #cdd6e6; font-size: .86rem; cursor: pointer; }
+        .checks input { width: 17px; height: 17px; accent-color: var(--pc); }
+        .cover { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
+        .cover .pic { width: 108px; aspect-ratio: 16/9; flex: none; border-radius: 8px;
+                      background: #0a0f18 center/cover no-repeat; border: 1px solid var(--line); }
+        .sheet-keys { display: flex; gap: 10px; }
+        .sheet-keys .btn { flex: 1; justify-content: center; }
+        .note { margin: 0 0 14px; color: #ff9aa6; font-size: .82rem; min-height: 1em; }
+
+        .toast { position: fixed; left: 50%; bottom: 26px; z-index: 90;
+                 transform: translateX(-50%); padding: 11px 18px;
+                 color: #04121a; background: var(--pc); border-radius: 10px;
+                 font-weight: 700; font-size: .86rem; }
+        .toast.bad { color: #fff; background: #d93a52; }
+
+        [hidden] { display: none !important; }
+        @media (max-width: 620px) {
+          .grid { grid-template-columns: 1fr; }
+          .row2 { flex-wrap: wrap; }
+          .row2 input:first-child { flex: 1 1 100%; }
+        }
+        @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+      </style>
+    </head>
+    <body>
+      <main class="page">
+        <div class="top">
+          <a class="eyebrow" href="/">vitazgio.ru · страна diy</a>
+          <img class="mark" src="/static/icons/vg-plain.svg" alt="Vitaz Gio"
+               width="512" height="512">
+        </div>
+        <h1>СТРАНА DIY</h1>
+
+        <div class="bar" id="bar"></div>
+        <section class="grid" id="grid"></section>
+        <p class="empty" id="empty" hidden>Пока пусто</p>
+      </main>
+
+      <input type="file" id="pick" accept="image/*" hidden>
+
+      <script>
+      (() => {
+        "use strict";
+        const $ = (id) => document.getElementById(id);
+        const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g,
+          (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+        const SVG = {
+          plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
+          pen: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><path d="m4 20 4-1 11-11-3-3L5 16z"/></svg>',
+          del: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M4 7h16M9 7V5h6v2m-8 0 1 13h8l1-13"/></svg>',
+          key: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><circle cx="8" cy="12" r="4"/><path d="M12 12h9m-3 0v4m-3-4v3"/></svg>',
+          eye: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M2 12s3.6-6 10-6 10 6 10 6-3.6 6-10 6-10-6-10-6z"/><circle cx="12" cy="12" r="2.6"/></svg>',
+        };
+
+        let works = [];
+        let kinds = ["другое"];
+        let canEdit = false;
+        let asGuest = false;      // хозяин смотрит витрину чужими глазами
+
+        const admin = () => canEdit && !asGuest;
+
+        const load = async () => {
+          const r = await fetch("/api/diy", { credentials: "same-origin" });
+          const d = await r.json();
+          works = d.works || [];
+          kinds = d.kinds || kinds;
+          canEdit = !!d.can_edit;
+          draw();
+        };
+
+        const send = async (url, how, body) => {
+          const r = await fetch(url, {
+            method: how, credentials: "same-origin",
+            headers: body ? { "Content-Type": "application/json" } : undefined,
+            body: body ? JSON.stringify(body) : undefined,
+          });
+          const d = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(d.error || "Не вышло.");
+          return d;
+        };
+
+        let toastTimer = 0;
+        const toast = (text, bad) => {
+          document.querySelectorAll(".toast").forEach((t) => t.remove());
+          const el = document.createElement("div");
+          el.className = "toast" + (bad ? " bad" : "");
+          el.textContent = text;
+          document.body.appendChild(el);
+          clearTimeout(toastTimer);
+          toastTimer = setTimeout(() => el.remove(), 3200);
+        };
+
+        /* ── полоса сверху ─────────────────────────────────────────── */
+        const drawBar = () => {
+          const bar = $("bar");
+          if (!canEdit) {
+            bar.innerHTML = '<button class="btn" data-act="login">' + SVG.key +
+              "<span>Я хозяин</span></button>";
+            return;
+          }
+          bar.innerHTML =
+            '<span class="badge">режим хозяина</span>' +
+            '<button class="btn go" data-act="new">' + SVG.plus + "<span>Добавить</span></button>" +
+            '<button class="btn spacer" data-act="guest">' + SVG.eye +
+            "<span>" + (asGuest ? "Вернуть правку" : "Глазами гостя") + "</span></button>";
+        };
+
+        const linkChips = (list) => (list || []).map((l) =>
+          '<a href="' + esc(l.url) + '" target="_blank" rel="noopener">' +
+          esc(l.label) + "</a>").join("");
+
+        const drawGrid = () => {
+          const grid = $("grid");
+          const list = asGuest ? works.filter((w) => !w.hidden) : works;
+          $("empty").hidden = list.length > 0;
+          $("empty").textContent = admin()
+            ? "Пока пусто. Нажми «Добавить» — и появится первая запись."
+            : "Пока пусто";
+          grid.innerHTML = list.map((w) => {
+            const shot = w.cover
+              ? '<div class="shot" style="background-image:url(/diy/cover/' + w.id + ')"></div>'
+              : '<div class="shot none">без фото</div>';
+            const flags = [];
+            if (w.hidden) flags.push('<span class="flag hid">черновик</span>');
+            if (w.pinned) flags.push('<span class="flag pin">закреплено</span>');
+            const tools = admin()
+              ? '<div class="tools">' +
+                '<button class="btn" data-edit="' + w.id + '">' + SVG.pen + "<span>Править</span></button>" +
+                '<button class="btn bad" data-kill="' + w.id + '">' + SVG.del + "<span>Удалить</span></button>" +
+                "</div>"
+              : "";
+            return '<article class="work' + (w.hidden ? " draft" : "") + '">' + shot +
+              '<div class="body">' +
+              (flags.length ? '<div class="flags">' + flags.join("") + "</div>" : "") +
+              '<span class="kind">' + esc(w.kind) + "</span>" +
+              "<h2>" + esc(w.title) + "</h2>" +
+              (w.summary ? "<p>" + esc(w.summary) + "</p>" : "") +
+              (w.links && w.links.length ? '<div class="links">' + linkChips(w.links) + "</div>" : "") +
+              tools + "</div></article>";
+          }).join("");
+        };
+
+        const draw = () => { drawBar(); drawGrid(); };
+
+        /* ── окно правки ───────────────────────────────────────────── */
+        let sheet = null;
+
+        const linkRow = (label, url) =>
+          '<div class="row2"><input placeholder="подпись" maxlength="40" value="' + esc(label) + '">' +
+          '<input placeholder="https://…" value="' + esc(url) + '">' +
+          '<button class="btn" type="button" data-drop>×</button></div>';
+
+        const openSheet = (work) => {
+          const fresh = !work;
+          work = work || { title: "", summary: "", kind: kinds[0], links: [],
+                           cover: false, hidden: false, pinned: false };
+          const veil = document.createElement("div");
+          veil.className = "veil";
+          veil.innerHTML =
+            '<section class="sheet" role="dialog" aria-modal="true">' +
+            "<h3>" + (fresh ? "Новое творение" : "Правим запись") + "</h3>" +
+            '<label class="field"><span>Название</span>' +
+            '<input id="f-title" maxlength="80" value="' + esc(work.title) + '"></label>' +
+            '<label class="field"><span>Тип</span><select id="f-kind">' +
+            kinds.map((k) => '<option' + (k === work.kind ? " selected" : "") + ">" + esc(k) + "</option>").join("") +
+            "</select></label>" +
+            '<label class="field"><span>Описание</span>' +
+            '<textarea id="f-summary" maxlength="600">' + esc(work.summary) + "</textarea></label>" +
+            '<div class="field"><span>Ссылки</span><div id="f-links">' +
+            (work.links && work.links.length
+              ? work.links.map((l) => linkRow(l.label, l.url)).join("")
+              : linkRow("", "")) +
+            '</div><button class="btn" type="button" id="f-add">' + SVG.plus +
+            "<span>Ещё ссылка</span></button></div>" +
+            '<div class="cover"><div class="pic" id="f-pic"' +
+            (work.cover ? ' style="background-image:url(/diy/cover/' + work.id + '?t=' + Date.now() + ')"' : "") +
+            '></div><button class="btn" type="button" id="f-shot">Фото</button>' +
+            '<button class="btn bad" type="button" id="f-noshot"' +
+            (work.cover ? "" : " hidden") + ">Убрать</button></div>" +
+            '<div class="checks">' +
+            '<label><input type="checkbox" id="f-hidden"' + (work.hidden ? " checked" : "") + "> Черновик</label>" +
+            '<label><input type="checkbox" id="f-pinned"' + (work.pinned ? " checked" : "") + "> Закрепить сверху</label>" +
+            "</div>" +
+            '<p class="note" id="f-note"></p>' +
+            '<div class="sheet-keys">' +
+            '<button class="btn" type="button" id="f-no">Отмена</button>' +
+            '<button class="btn go" type="button" id="f-ok">Сохранить</button>' +
+            "</div></section>";
+          document.body.appendChild(veil);
+          sheet = { veil, work, fresh, id: work.id || null };
+          veil.querySelector("#f-title").focus();
+
+          const shut = () => { veil.remove(); sheet = null; };
+          veil.addEventListener("click", (e) => { if (e.target === veil) shut(); });
+          veil.querySelector("#f-no").addEventListener("click", shut);
+          veil.querySelector("#f-add").addEventListener("click", () => {
+            veil.querySelector("#f-links").insertAdjacentHTML("beforeend", linkRow("", ""));
+          });
+          veil.querySelector("#f-links").addEventListener("click", (e) => {
+            const drop = e.target.closest("[data-drop]");
+            if (!drop) return;
+            const rows = veil.querySelectorAll("#f-links .row2");
+            if (rows.length > 1) drop.closest(".row2").remove();
+            else rows[0].querySelectorAll("input").forEach((i) => { i.value = ""; });
+          });
+          veil.querySelector("#f-shot").addEventListener("click", () => {
+            if (!sheet.id) { note("Сначала сохрани запись — фото цепляется к ней."); return; }
+            $("pick").click();
+          });
+          veil.querySelector("#f-noshot").addEventListener("click", async () => {
+            if (!sheet.id) return;
+            await send("/api/diy/" + sheet.id + "/cover", "DELETE");
+            veil.querySelector("#f-pic").style.backgroundImage = "";
+            veil.querySelector("#f-noshot").hidden = true;
+            await load();
+          });
+          veil.querySelector("#f-ok").addEventListener("click", save);
+          const note = (text) => { veil.querySelector("#f-note").textContent = text || ""; };
+          sheet.note = note;
+          sheet.shut = shut;
+        };
+
+        const readSheet = () => {
+          const veil = sheet.veil;
+          const links = [];
+          veil.querySelectorAll("#f-links .row2").forEach((row) => {
+            const [label, url] = row.querySelectorAll("input");
+            if (url.value.trim()) links.push({ label: label.value, url: url.value });
+          });
+          return {
+            title: veil.querySelector("#f-title").value,
+            kind: veil.querySelector("#f-kind").value,
+            summary: veil.querySelector("#f-summary").value,
+            links,
+            hidden: veil.querySelector("#f-hidden").checked,
+            pinned: veil.querySelector("#f-pinned").checked,
+          };
+        };
+
+        const save = async () => {
+          const data = readSheet();
+          if (!data.title.trim()) { sheet.note("Без названия не сохранить."); return; }
+          try {
+            if (sheet.id) await send("/api/diy/" + sheet.id, "PATCH", data);
+            else {
+              const made = await send("/api/diy", "POST", data);
+              sheet.id = made.id;
+            }
+          } catch (err) { sheet.note(err.message); return; }
+          const shut = sheet.shut;
+          await load();
+          shut();
+          toast("Сохранено");
+        };
+
+        // Фото цепляем к уже сохранённой записи: до этого ей некуда лечь.
+        $("pick").addEventListener("change", async (e) => {
+          const file = e.target.files[0];
+          e.target.value = "";
+          if (!file || !sheet || !sheet.id) return;
+          const form = new FormData();
+          form.append("file", file);
+          try {
+            const r = await fetch("/api/diy/" + sheet.id + "/cover",
+              { method: "POST", credentials: "same-origin", body: form });
+            const d = await r.json();
+            if (!r.ok) throw new Error(d.error || "Не вышло.");
+            const pic = sheet.veil.querySelector("#f-pic");
+            pic.style.backgroundImage = "url(/diy/cover/" + sheet.id + "?t=" + Date.now() + ")";
+            sheet.veil.querySelector("#f-noshot").hidden = false;
+            toast("Фото загружено, " + Math.round(d.size / 1024) + " КБ");
+            await load();
+          } catch (err) { sheet.note(err.message); }
+        });
+
+        /* ── общие нажатия ─────────────────────────────────────────── */
+        document.addEventListener("click", async (e) => {
+          const act = e.target.closest("[data-act]");
+          if (act) {
+            const what = act.dataset.act;
+            if (what === "new") openSheet(null);
+            if (what === "guest") { asGuest = !asGuest; draw(); }
+            if (what === "login") {
+              const pass = prompt("Пароль от личного кабинета:");
+              if (pass === null) return;
+              const r = await fetch("/api/login", {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ password: pass }) });
+              if (!r.ok) { toast("Неверный пароль", true); return; }
+              await load();
+              toast("Режим хозяина включён");
+            }
+            return;
+          }
+          const edit = e.target.closest("[data-edit]");
+          if (edit) {
+            openSheet(works.find((w) => w.id === edit.dataset.edit));
+            return;
+          }
+          const kill = e.target.closest("[data-kill]");
+          if (kill) {
+            const work = works.find((w) => w.id === kill.dataset.kill);
+            if (!confirm("Удалить «" + work.title + "»?")) return;
+            try { await send("/api/diy/" + work.id, "DELETE"); }
+            catch (err) { toast(err.message, true); return; }
+            await load();
+            toast("Удалено");
+          }
+        });
+
+        document.addEventListener("keydown", (e) => {
+          if (e.key === "Escape" && sheet) sheet.shut();
+        });
+
+        load().catch(() => {
+          $("grid").innerHTML = '<p class="empty">не отвечает</p>';
+        });
+      })();
+      </script>
+    </body>
+    </html>
+    """
+    return html.replace("__ICONLINKS__", ICON_LINKS)
 
 
 @app.get("/servers")
@@ -8982,6 +9707,23 @@ def home():
           gap: 14px; margin-top: 16px;
         }
         .arcade-picks .pick { width: clamp(104px, 16vw, 132px); }
+        .host-strip {
+          display: flex; flex-wrap: wrap; align-items: center; justify-content: center;
+          gap: 10px; margin-top: 16px;
+        }
+        .host-badge {
+          padding: 5px 12px; border-radius: 999px;
+          background: rgba(45,226,255,.14); border: 1px solid rgba(45,226,255,.45);
+          color: #2de2ff; font: 700 .64rem "Cascadia Code", Consolas, monospace;
+          letter-spacing: .18em; text-transform: uppercase;
+        }
+        .host-go {
+          padding: 5px 12px; border-radius: 999px; text-decoration: none;
+          border: 1px solid rgba(255,255,255,.14); color: #c8cfe2;
+          background: rgba(255,255,255,.03); font-size: .82rem;
+          transition: border-color .18s ease, color .18s ease;
+        }
+        .host-go:hover { border-color: rgba(45,226,255,.5); color: #f7f8fc; }
         .pick {
           --pc: #2de2ff;
           position: relative; display: grid; place-items: center;
@@ -9272,6 +10014,13 @@ def home():
               <span class="pick-art">__ICON_ME__</span>
               <span class="pick-glow"></span>
             </button>
+          </div>
+          <!-- Полоса хозяина: показывается сама, если сайт помнит устройство
+               по кабинету. Гостю её не видно — она скрыта до ответа сервера. -->
+          <div class="host-strip" id="host-strip" hidden>
+            <span class="host-badge">режим хозяина</span>
+            <a class="host-go" href="/diy">Добавить творение</a>
+            <a class="host-go" href="/cabinet">Кабинет</a>
           </div>
         </section>
 
@@ -9638,8 +10387,23 @@ def home():
             trigger.focus();
           };
 
+          // Спрашиваем один раз при заходе: если сайт помнит это устройство,
+          // хозяин видит свою полосу прямо на главной и не жмёт пароль.
+          let remembered = false;
+          const remember = (yes) => {
+            remembered = yes;
+            const strip = document.getElementById("host-strip");
+            if (strip) strip.hidden = !yes;
+            trigger.title = yes ? "Личный кабинет — вход открыт" : "Личный кабинет";
+          };
+          fetch("/api/session/probe", { credentials: "same-origin" })
+            .then((r) => r.json())
+            .then((d) => remember(!!d.trusted))
+            .catch(() => {});
+
           // Помнит — сразу в кабинет, не помнит — просим пароль.
           trigger.addEventListener("click", async () => {
+            if (remembered) { window.location.assign("/cabinet"); return; }
             try {
               const response = await fetch("/api/session/probe", { credentials: "same-origin" });
               const result = await response.json();
