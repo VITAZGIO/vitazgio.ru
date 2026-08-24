@@ -324,6 +324,7 @@ def _drop_children(parent):
 DROP_FOLDER_ICONS = (
     "folder", "warn", "clock", "tree", "monitor", "phone",
     "claude", "vitaz", "star", "lock", "music", "photo",
+    "video", "work", "box", "game",
 )
 
 
@@ -2262,6 +2263,7 @@ def drop_folder_create():
     payload = request.get_json(silent=True) or {}
     name = (payload.get("name") or "").strip()[:60]
     parent = payload.get("parent") or None
+    icon = payload.get("icon") if payload.get("icon") in DROP_FOLDER_ICONS else "folder"
     if not name:
         return jsonify(error="Имя пустое."), 400
     item_id = str(uuid.uuid4())
@@ -2269,7 +2271,7 @@ def drop_folder_create():
         if parent and drop_items.get(parent, {}).get("kind") != "folder":
             parent = None
         drop_items[item_id] = {
-            "kind": "folder", "name": name, "parent": parent,
+            "kind": "folder", "name": name, "parent": parent, "icon": icon,
             "size": 0, "created": time.time(), "share": None,
         }
         _drop_write_index()
@@ -6172,6 +6174,12 @@ def drop_page():
                      border: 1px solid rgba(255,255,255,.14); outline: none; background: rgba(4,10,20,.65); }
         .share-row input[type=number]:disabled { opacity: .4; }
         .share-row.check { cursor: pointer; }
+        /* Имя новой папки: то же поле, что и часы у ссылки, только на всю
+           ширину и без стрелочек счётчика. */
+        .share-row input[type=text] { flex: 1; height: 36px; padding: 0 12px; color: #f4fbff;
+                     font: 600 .85rem "Cascadia Code", Consolas, monospace;
+                     border: 1px solid rgba(255,255,255,.14); outline: none; background: rgba(4,10,20,.65); }
+        .share-row input:focus { border-color: rgba(45,226,255,.5); }
         .share-row input[type=checkbox] { width: 17px; height: 17px; margin: 0; accent-color: #2de2ff; }
         .share-note { margin: 0 0 16px; color: #5d6d80; font-size: .72rem; line-height: 1.5; }
         /* Режим ссылки: две кнопки-переключателя, выбранная залита. Срок и
@@ -6414,6 +6422,27 @@ def drop_page():
             '<rect x="3" y="6" width="26" height="20" rx="2" fill="currentColor" fill-opacity=".18"/>' +
             '<rect x="3" y="6" width="26" height="20" rx="2"/><circle cx="10.5" cy="13" r="2.6"/>' +
             '<path d="m4.5 23.5 7.5-7.5 5 5 4-3.2 6 6.2"/>'],
+          video:   ["Видео", "#ff3b3b",
+            '<rect x="2.5" y="7" width="27" height="18" rx="5" fill="currentColor" fill-opacity=".2"/>' +
+            '<rect x="2.5" y="7" width="27" height="18" rx="5"/>' +
+            '<path d="M13.5 12.3v7.4l6.4-3.7Z" fill="currentColor" stroke="none"/>'],
+          // Ромб со скруглёнными углами и внутри — глобус: широта, долгота и
+          // выпуклый экватор. Тот же силуэт, что на присланной картинке, но
+          // нарисован в своей манере — линией, а не заливкой.
+          work:    ["Работа", "#ff9d42",
+            '<rect x="6.6" y="6.6" width="18.8" height="18.8" rx="6.5" fill="currentColor" fill-opacity=".16" transform="rotate(45 16 16)"/>' +
+            '<rect x="6.6" y="6.6" width="18.8" height="18.8" rx="6.5" transform="rotate(45 16 16)"/>' +
+            '<circle cx="16" cy="16.6" r="7"/><ellipse cx="16" cy="16.6" rx="2.9" ry="7"/>' +
+            '<path d="M9.2 14.6h13.6M9.2 18.6h13.6"/>'],
+          box:     ["Архив", "#d9a441",
+            '<path d="M4 10.5 16 4.5l12 6v13l-12 7-12-7Z" fill="currentColor" fill-opacity=".18"/>' +
+            '<path d="M4 10.5 16 4.5l12 6v13l-12 7-12-7Z"/>' +
+            '<path d="M4 10.5 16 17l12-6.5M16 17v13"/>'],
+          game:    ["Игра", "#ff7ab8",
+            '<rect x="3" y="11" width="26" height="14" rx="7" fill="currentColor" fill-opacity=".2"/>' +
+            '<rect x="3" y="11" width="26" height="14" rx="7"/>' +
+            '<path d="M9 15v6M6 18h6"/><circle cx="21.5" cy="16.3" r="1.5" fill="currentColor" stroke="none"/>' +
+            '<circle cx="25" cy="19.5" r="1.5" fill="currentColor" stroke="none"/>'],
         };
 
         const folderSvg = name => {
@@ -6573,6 +6602,50 @@ def drop_page():
             });
           });
         };
+
+        /* Создание папки: имя и сразу выбор значка — раньше значок ставили
+           отдельным шагом уже после создания, а само имя спрашивал голый
+           системный prompt(), который выглядел чужеродно на сайте. */
+        const askFolder = () => new Promise(resolve => {
+          let icon = "folder";
+          let done = false;
+          const finish = value => { if (!done) { done = true; resolve(value); } };
+          const cells = Object.keys(FOLDER_ICONS).map(key => {
+            const [label] = FOLDER_ICONS[key];
+            return `<button type="button" class="fi-cell${key === icon ? " on" : ""}" data-icon="${key}"
+              title="${esc(label)}" aria-label="${esc(label)}">${folderSvg(key)}</button>`;
+          }).join("");
+          const m = modal(
+            "<h3>Новая папка</h3>" +
+            '<label class="share-row"><span>Имя</span><input type="text" id="nf-name" maxlength="60" placeholder="Название"></label>' +
+            '<p class="share-note">Значок папки</p>' +
+            '<div class="fi-grid">' + cells + "</div>" +
+            '<div class="share-btns">' +
+              '<button type="button" class="go" id="nf-ok">СОЗДАТЬ</button>' +
+              '<button type="button" id="nf-no">ОТМЕНА</button>' +
+            "</div>");
+          // Отмена приходит и кнопкой, и Escape, и щелчком мимо панели —
+          // все три ведут в исходный m.shut(), поэтому резолвим прямо в нём.
+          const closeBox = m.shut;
+          m.shut = () => { closeBox(); finish(null); };
+          const field = m.box.querySelector("#nf-name");
+          field.focus();
+          m.box.querySelectorAll(".fi-cell").forEach(cell => {
+            cell.addEventListener("click", () => {
+              icon = cell.dataset.icon;
+              m.box.querySelectorAll(".fi-cell").forEach(c => c.classList.toggle("on", c === cell));
+            });
+          });
+          m.box.querySelector("#nf-no").addEventListener("click", () => m.shut());
+          const submit = () => {
+            const name = field.value.trim();
+            if (!name) { field.focus(); return; }
+            finish({ name, icon });
+            closeBox();
+          };
+          m.box.querySelector("#nf-ok").addEventListener("click", submit);
+          field.addEventListener("keydown", e => { if (e.key === "Enter") submit(); });
+        });
 
         // «объект / объекта / объектов» — без этого счётчик читается коряво
         const plural = (n, forms) => {
@@ -7192,10 +7265,10 @@ def drop_page():
         }
 
         $("mkdir").addEventListener("click", async () => {
-          const name = prompt("Название папки");
-          if (!name || !name.trim()) return;
+          const made = await askFolder();
+          if (!made) return;
           try { await api("/api/drop/folder", { method: "POST", headers: { "Content-Type": "application/json" },
-                                                body: JSON.stringify({ name, parent }) }); load(); }
+                                                body: JSON.stringify({ name: made.name, icon: made.icon, parent }) }); load(); }
           catch (e) { toast(e.message, true); }
         });
 
