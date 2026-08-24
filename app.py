@@ -9298,7 +9298,7 @@ def home():
       <meta name="description" content="Витрина сервисов vitazgio.ru">
       __ICONLINKS__
       <link rel="manifest" href="/manifest.webmanifest">
-      <title>vitazgio.ru — мои сервисы</title>
+      <title>vitazgio.ru</title>
       <style>
         :root {
           color-scheme: dark;
