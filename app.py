@@ -6829,10 +6829,10 @@ def drop_page():
               ${iconHtml(it)}
               <span class="nm">${esc(it.name)}</span>
               <span class="acts">
+                ${isText ? `<button class="act" data-act="copy" title="Копировать">⧉</button>` : ""}
                 ${isFolder
                   ? `<button class="act" data-act="zip" title="Скачать папку архивом">⤓</button>`
                   : `<button class="act" data-act="dl" title="Скачать">⤓</button>`}
-                ${isText ? `<button class="act" data-act="copy" title="Копировать">⧉</button>` : ""}
                 ${isFolder ? "" : `<button class="act${it.share ? " on" : ""}" data-act="share" title="Ссылка для скачивания">🔗</button>`}
                 <button class="act" data-act="ren" title="Переименовать">✎</button>
                 <button class="act del" data-act="del" title="Удалить">🗑</button>
