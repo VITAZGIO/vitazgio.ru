@@ -6426,13 +6426,17 @@ def drop_page():
             '<rect x="2.5" y="7" width="27" height="18" rx="5" fill="currentColor" fill-opacity=".2"/>' +
             '<rect x="2.5" y="7" width="27" height="18" rx="5"/>' +
             '<path d="M13.5 12.3v7.4l6.4-3.7Z" fill="currentColor" stroke="none"/>'],
-          // Ромб со скруглёнными углами и внутри — глобус: широта, долгота и
-          // выпуклый экватор. Тот же силуэт, что на присланной картинке, но
-          // нарисован в своей манере — линией, а не заливкой.
+          // Ромб со скруглёнными углами (0.4) обрезает глобус по контуру —
+          // видна только часть сферы, что попадает внутрь. Центр глобуса ниже
+          // центра ромба, поэтому снизу пропадает нижняя широта.
           work:    ["Работа", "#ff9d42",
-            '<rect x="6.6" y="6.6" width="18.8" height="18.8" rx="0.4" fill="#ff9d42" stroke="none" transform="rotate(45 16 16)"/>' +
-            '<circle cx="16" cy="16.6" r="7" stroke="#fff"/><ellipse cx="16" cy="16.6" rx="2.9" ry="7" stroke="#fff"/>' +
-            '<path d="M9.2 14.6h13.6M9.2 18.6h13.6" stroke="#fff"/>'],
+            '<defs><clipPath id="fi-work-d"><rect x="6.4" y="6.4" width="19.2" height="19.2" rx="3.84" transform="rotate(45 16 16)"/></clipPath>' +
+            '<clipPath id="fi-work-g"><circle cx="16" cy="25.6" r="10.21"/></clipPath></defs>' +
+            '<g clip-path="url(#fi-work-d)"><g clip-path="url(#fi-work-g)">' +
+            '<path d="M16 15.39V35.81"/><ellipse cx="16" cy="25.6" rx="5.63" ry="10.21"/>' +
+            '<path d="M0 20.5h32M0 25.6h32M0 30.7h32"/></g>' +
+            '<circle cx="16" cy="25.6" r="10.21"/></g>' +
+            '<rect x="6.4" y="6.4" width="19.2" height="19.2" rx="3.84" transform="rotate(45 16 16)"/>'],
           box:     ["Архив", "#d9a441",
             '<path d="M4 10.5 16 4.5l12 6v13l-12 7-12-7Z" fill="currentColor" fill-opacity=".18"/>' +
             '<path d="M4 10.5 16 4.5l12 6v13l-12 7-12-7Z"/>' +
