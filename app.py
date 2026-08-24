@@ -6145,6 +6145,30 @@ def drop_page():
         .act.del:hover { color: #ff6b81; border-color: rgba(255,107,129,.45); background: rgba(255,107,129,.1); }
         .act.on { color: #63f5ad; border-color: rgba(99,245,173,.4); }
 
+        /* На телефоне интерфейс и так в притык к пальцу, а вот на широком
+           экране компьютера всё это выглядело мелко — увеличиваем разом
+           контейнер, шрифты, кнопки и строки списка. */
+        @media (min-width: 860px) {
+          .wrap { max-width: 1320px; padding: 44px 48px; }
+          h1 { font-size: 2.6rem; }
+          .quota { min-width: 240px; }
+          .quota-text { font-size: .78rem; }
+          .bar { gap: 12px; margin-top: 28px; }
+          .btn { padding: 12px 20px; font-size: .86rem; }
+          .search { height: 44px; padding: 0 16px; font-size: .88rem; }
+          .crumbs { gap: 8px; margin-top: 22px; font-size: .86rem; }
+          .composer { margin-top: 22px; }
+          .composer textarea { min-height: 100px; padding: 15px 17px; font-size: .9rem; }
+          .items { margin-top: 24px; gap: 11px; }
+          .item { grid-template-columns: 58px minmax(0, 1fr) auto; gap: 3px 18px; padding: 15px 18px; }
+          .ico { width: 44px; height: 54px; font-size: .58rem; }
+          .ico.dir { width: 44px; height: 44px; }
+          .ico.dir svg { width: 42px; height: 42px; }
+          .nm { font-size: .96rem; }
+          .meta { font-size: .76rem; }
+          .act { padding: 7px 10px; font-size: .92rem; }
+        }
+
         .txt { position: relative; grid-area: body; margin-top: 8px; padding: 10px 34px 10px 12px; color: #b8c2d4; font-size: .76rem; white-space: pre-wrap; overflow-wrap: anywhere; border-left: 2px solid rgba(255,120,47,.5); background: rgba(4,10,20,.5); }
         /* Карандаш висит в правом верхнем углу самого текста, а не в общем
            ряду кнопок: там уже живёт переименование, и два карандаша рядом
