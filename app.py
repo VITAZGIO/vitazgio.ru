@@ -6430,8 +6430,8 @@ def drop_page():
           // выпуклый экватор. Тот же силуэт, что на присланной картинке, но
           // нарисован в своей манере — линией, а не заливкой.
           work:    ["Работа", "#ff9d42",
-            '<rect x="6.6" y="6.6" width="18.8" height="18.8" rx="6.5" fill="currentColor" fill-opacity=".16" transform="rotate(45 16 16)"/>' +
-            '<rect x="6.6" y="6.6" width="18.8" height="18.8" rx="6.5" transform="rotate(45 16 16)"/>' +
+            '<rect x="6.6" y="6.6" width="18.8" height="18.8" rx="0.4" fill="#ff9d42" transform="rotate(45 16 16)"/>' +
+            '<rect x="6.6" y="6.6" width="18.8" height="18.8" rx="0.4" transform="rotate(45 16 16)"/>' +
             '<circle cx="16" cy="16.6" r="7"/><ellipse cx="16" cy="16.6" rx="2.9" ry="7"/>' +
             '<path d="M9.2 14.6h13.6M9.2 18.6h13.6"/>'],
           box:     ["Архив", "#d9a441",
