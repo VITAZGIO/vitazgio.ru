@@ -286,6 +286,11 @@ DROP_QUOTA = 30 * 1024 * 1024 * 1024      # 30 ГБ на весь дроп
 DROP_MAX_SIZE = 2 * 1024 * 1024 * 1024    # 2 ГБ на один файл
 DROP_CHUNK_TTL = 6 * 3600                 # брошенные недокачки убираем через 6 ч
 DROP_TEXT_PREVIEW = 400
+# Особая папка «MUSIK»: всегда внизу списка, удалить нельзя. Что кинешь в
+# неё (треки или папки с треками) — попадает в плеер. Живёт под своим
+# постоянным id, чтобы переживать перезапуски.
+DROP_MUSIK_ID = "musik"
+DROP_AUDIO_EXTS = {".mp3", ".ogg", ".wav", ".m4a", ".opus", ".flac", ".aac"}
 
 drop_items: dict = {}
 drop_uploads: dict = {}
@@ -389,8 +394,13 @@ DROP_TRASH_PASS_HASH = "0d866ba9f9fd0f2cbb2134daf52356d2021a3686352d5c19d967305b
 
 def _drop_trash(item_id, when=None):
     """Отправляет элемент в корзину. Для папки метку ставим только на неё —
-    содержимое уезжает вместе, но своих меток не получает. Под drop_lock."""
+    содержимое уезжает вместе, но своих меток не получает. Особую папку MUSIK
+    не трогаем. Под drop_lock."""
+    if item_id == DROP_MUSIK_ID:
+        return
     item = drop_items.get(item_id)
+    if item and item.get("special"):
+        return
     if item and not item.get("deleted"):
         item["deleted"] = when or time.time()
 
@@ -534,8 +544,51 @@ def _drop_load_index():
     for item in drop_items.values():
         if item["parent"] and item["parent"] not in drop_items:
             item["parent"] = None
+    _drop_ensure_musik()         # особая папка MUSIK всегда на месте
     _drop_sweep_trash()          # что пролежало в корзине дольше месяца — вон
     _drop_write_index()
+
+
+def _drop_ensure_musik():
+    """Заводит (или чинит) особую папку MUSIK в корне. Под drop_lock либо на
+    старте до потоков."""
+    m = drop_items.get(DROP_MUSIK_ID)
+    if not m or m.get("kind") != "folder":
+        drop_items[DROP_MUSIK_ID] = {
+            "kind": "folder", "name": "MUSIK", "parent": None, "share": None,
+            "size": 0, "deleted": None, "icon": "music", "special": True,
+            "created": time.time(),
+        }
+    else:
+        m["parent"] = None            # всегда в корне
+        m["deleted"] = None           # в корзину не уходит
+        m["special"] = True
+        m.setdefault("icon", "music")
+
+
+def _drop_musik_tracks():
+    """Аудиофайлы внутри папки MUSIK (вглубь по подпапкам) — для плеера.
+    Каждый со своим адресом потока. Под drop_lock."""
+    out = []
+
+    def walk(parent, label):
+        kids = [(k, v) for k, v in drop_items.items()
+                if v.get("parent") == parent and not v.get("deleted")]
+        kids.sort(key=lambda kv: kv[1]["name"].lower())
+        for k, v in kids:
+            if v["kind"] == "folder":
+                walk(k, (label + " / " if label else "") + v["name"])
+            elif v["kind"] == "file":
+                if os.path.splitext(v["name"])[1].lower() in DROP_AUDIO_EXTS:
+                    out.append({
+                        "id": "d_" + k,
+                        "title": os.path.splitext(v["name"])[0],
+                        "artist": "", "folder": label,
+                        "url": "/api/drop/view/" + k,
+                    })
+
+    walk(DROP_MUSIK_ID, "")
+    return out
 
 
 _drop_load_index()
@@ -2514,8 +2567,13 @@ def drop_list_api():
                 row["count"] = count
                 row["touched"] = touched
                 row["icon"] = v.get("icon") or "folder"
+                if v.get("special"):
+                    row["special"] = True
             items.append(row)
+        # Сначала новые, но особая папка (MUSIK) всегда падает в самый низ.
+        # Сортировка устойчивая: сперва по свежести, затем особые — вниз.
         items.sort(key=lambda x: -x["touched"])
+        items.sort(key=lambda x: bool(x.get("special")))
         return jsonify(
             items=items,
             breadcrumbs=_drop_path_to_root(parent),
@@ -6322,6 +6380,13 @@ def drop_page():
         .act { padding: 5px 7px; color: #6b7385; font-size: .82rem; line-height: 1; border: 1px solid rgba(255,255,255,.1); background: transparent; cursor: pointer; transition: all .16s; }
         .act:hover { color: #fff; border-color: rgba(45,226,255,.4); background: rgba(45,226,255,.1); }
         .act.del:hover { color: #ff6b81; border-color: rgba(255,107,129,.45); background: rgba(255,107,129,.1); }
+        /* Корзина с красным крестом у папки MUSIK: показывает, что удалить
+           нельзя. Сам значок приглушён, крест — поверх. */
+        .act.nodel { position: relative; color: #6b7385; cursor: not-allowed; }
+        .act.nodel::after { content: "✕"; position: absolute; inset: 0; display: grid;
+                            place-items: center; color: #ff4d4d; font-size: .82rem; font-weight: 800;
+                            text-shadow: 0 0 3px rgba(0,0,0,.6); }
+        .act.nodel:hover { border-color: rgba(255,90,90,.45); background: rgba(255,90,90,.08); }
         .act.on { color: #63f5ad; border-color: rgba(99,245,173,.4); }
 
         /* На телефоне интерфейс и так в притык к пальцу, а вот на широком
@@ -7203,6 +7268,8 @@ def drop_page():
           const needle = $("search").value.trim().toLowerCase();
           let list = items.filter(it => !needle || it.name.toLowerCase().includes(needle));
           list.sort(SORTS[sortKey][1]);
+          // Особая папка MUSIK всегда в самом низу, какую бы сортировку ни выбрали.
+          list.sort((a, b) => (a.special ? 1 : 0) - (b.special ? 1 : 0));
           $("sort").textContent = SORTS[sortKey][0];
 
           if (!list.length) {
@@ -7227,6 +7294,10 @@ def drop_page():
               ${iconHtml(it)}
               <span class="nm">${esc(it.name)}</span>
               <span class="acts">
+                ${it.special ? `
+                  <button class="act" data-act="zip" title="Скачать папку архивом">⤓</button>
+                  <button class="act nodel" data-act="nodel" title="Эту папку удалить нельзя">🗑</button>
+                ` : `
                 ${isText ? `<button class="act" data-act="copy" title="Копировать">⧉</button>` : ""}
                 ${isFolder ? "" : `<button class="act${it.share ? " on" : ""}" data-act="share" title="Ссылка для скачивания">🔗</button>`}
                 ${isFolder
@@ -7234,6 +7305,7 @@ def drop_page():
                   : `<button class="act" data-act="dl" title="Скачать">⤓</button>`}
                 <button class="act" data-act="ren" title="Переименовать">✎</button>
                 <button class="act del" data-act="del" title="Удалить">🗑</button>
+                `}
               </span>
               <span class="meta">${esc(meta)}${it.share ? " · ссылка активна" : ""}</span>
               ${body}
@@ -7920,6 +7992,11 @@ def drop_page():
               catch { prompt("Ссылка (" + life + "):", data.url); }
               load();
             } catch (err) { toast(err.message, true); }
+            return;
+          }
+
+          if (act === "nodel") {
+            toast("Папку MUSIK удалить нельзя — она для плеера", true);
             return;
           }
 
@@ -8661,6 +8738,27 @@ def _soon_page(name, kicker, headline, lead, points):
                 .replace("__ITEMS__", items))
 
 
+@app.get("/api/player/tracks")
+@login_required
+def player_tracks():
+    """Единый список для плеера: фонотека (/music) плюс всё аудио, что лежит
+    в папке MUSIK личного дропа. У каждого трека свой адрес потока."""
+    tracks = []
+    with music_lock:
+        _music_scan()
+        folder_name = {k: v["name"] for k, v in music_folders.items()}
+        for k, v in sorted(music_items.items(),
+                           key=lambda x: (x[1]["artist"].lower(), x[1]["title"].lower())):
+            tracks.append({
+                "id": "m_" + k, "title": v["title"], "artist": v["artist"],
+                "folder": folder_name.get(v.get("folder", ""), ""),
+                "url": "/api/music/file/" + k,
+            })
+    with drop_lock:
+        tracks.extend(_drop_musik_tracks())
+    return jsonify(tracks=tracks)
+
+
 @app.get("/player")
 @login_required
 def player_window():
@@ -8788,7 +8886,7 @@ def player_window():
         const load = (i, autoplay) => {
           if (i < 0 || i >= queue.length) return;
           idx = i;
-          au.src = "/api/music/file/" + encodeURIComponent(queue[i].id);
+          au.src = queue[i].url;
           au.load();
           if (autoplay) au.play().catch(() => {});
           paintNow();
@@ -8842,14 +8940,12 @@ def player_window():
             el.addEventListener("click", () => load(+el.dataset.i, true)));
         };
 
-        fetch("/api/music", { credentials: "same-origin" })
+        fetch("/api/player/tracks", { credentials: "same-origin" })
           .then((r) => r.json())
           .then((d) => {
-            const folderName = {};
-            (d.folders || []).forEach((f) => { folderName[f.id] = f.name; });
             queue = (d.tracks || []).map((t) => ({
               id: t.id, title: t.title, artist: t.artist,
-              folder: folderName[t.folder] || "" }));
+              folder: t.folder || "", url: t.url }));
             drawList();
             // Восстановить прошлый трек и позицию.
             let start = null;
@@ -8858,7 +8954,7 @@ def player_window():
               const at = queue.findIndex((t) => t.id === start.id);
               if (at >= 0) {
                 idx = at; paintNow();
-                au.src = "/api/music/file/" + encodeURIComponent(queue[at].id);
+                au.src = queue[at].url;
                 au.addEventListener("loadedmetadata", function once() {
                   au.removeEventListener("loadedmetadata", once);
                   if (start.time) au.currentTime = start.time;
