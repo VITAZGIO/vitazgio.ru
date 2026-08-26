@@ -8626,8 +8626,6 @@ def diy_page():
             '<label class="field"><span>Тип</span><select id="f-kind">' +
             kinds.map((k) => '<option' + (k === work.kind ? " selected" : "") + ">" + esc(k) + "</option>").join("") +
             "</select></label>" +
-            '<label class="field"><span>Описание</span>' +
-            '<textarea id="f-summary" maxlength="600">' + esc(work.summary) + "</textarea></label>" +
             '<label class="field"><span>Код статьи</span>' +
             '<textarea id="f-body" class="code" spellcheck="false" ' +
             'placeholder="HTML статьи. Вложения — по имени: {{плата.jpg}}">' +
@@ -8641,12 +8639,6 @@ def diy_page():
             '<button class="btn" type="button" id="f-add-img">Загрузить фото</button>' +
             '<button class="btn" type="button" id="f-add-file">Загрузить файл</button>' +
             "</div></div>" +
-            '<div class="field"><span>Ссылки</span><div id="f-links">' +
-            (work.links && work.links.length
-              ? work.links.map((l) => linkRow(l.label, l.url)).join("")
-              : linkRow("", "")) +
-            '</div><button class="btn" type="button" id="f-add">' + SVG.plus +
-            "<span>Ещё ссылка</span></button></div>" +
             '<div class="cover"><div class="pic" id="f-pic"' +
             (work.cover ? ' style="background-image:url(/diy/cover/' + work.id + '?t=' + Date.now() + ')"' : "") +
             '></div><button class="btn" type="button" id="f-shot">Фото</button>' +
@@ -8720,16 +8712,6 @@ def diy_page():
           const shut = () => { veil.remove(); sheet = null; };
           veil.addEventListener("click", (e) => { if (e.target === veil) shut(); });
           veil.querySelector("#f-no").addEventListener("click", shut);
-          veil.querySelector("#f-add").addEventListener("click", () => {
-            veil.querySelector("#f-links").insertAdjacentHTML("beforeend", linkRow("", ""));
-          });
-          veil.querySelector("#f-links").addEventListener("click", (e) => {
-            const drop = e.target.closest("[data-drop]");
-            if (!drop) return;
-            const rows = veil.querySelectorAll("#f-links .row2");
-            if (rows.length > 1) drop.closest(".row2").remove();
-            else rows[0].querySelectorAll("input").forEach((i) => { i.value = ""; });
-          });
           veil.querySelector("#f-shot").addEventListener("click", () => {
             if (!sheet.id) { note("Сначала сохрани запись — фото цепляется к ней."); return; }
             $("pick").click();
@@ -8749,17 +8731,10 @@ def diy_page():
 
         const readSheet = () => {
           const veil = sheet.veil;
-          const links = [];
-          veil.querySelectorAll("#f-links .row2").forEach((row) => {
-            const [label, url] = row.querySelectorAll("input");
-            if (url.value.trim()) links.push({ label: label.value, url: url.value });
-          });
           return {
             title: veil.querySelector("#f-title").value,
             kind: veil.querySelector("#f-kind").value,
-            summary: veil.querySelector("#f-summary").value,
             body: veil.querySelector("#f-body").value,
-            links,
             hidden: veil.querySelector("#f-hidden").checked,
             pinned: veil.querySelector("#f-pinned").checked,
           };
@@ -10298,8 +10273,8 @@ def home():
         /* Значки в «Рубке» вдвое крупнее и с подписью под каждым. Каждый —
            это ячейка-колонка: сверху квадратная кнопка, снизу ярлык. */
         .pick-cell {
-          display: flex; flex-direction: column; align-items: center; gap: 11px;
-          width: clamp(150px, 30vw, 232px);
+          display: flex; flex-direction: column; align-items: center; gap: 10px;
+          width: clamp(112px, 20vw, 156px);
         }
         .pick-cell .pick { width: 100%; }
         .pick-label {
@@ -10465,8 +10440,8 @@ def home():
           /* Пять кнопок в строку на телефоне не влезают — раскладываем
              тремя и двумя, ширину считаем от полосы, а не подбираем. */
           .arcade-picks { gap: 12px; }
-          .arcade-picks .pick-cell { width: calc((100% - 24px) / 3); max-width: 180px; }
-          .pick-label { font-size: .72rem; letter-spacing: .16em; }
+          .arcade-picks .pick-cell { width: calc((100% - 24px) / 3); max-width: 130px; }
+          .pick-label { font-size: .68rem; letter-spacing: .14em; }
           footer { font-size: .95rem; }
           .service { width: 78vw; min-height: 280px; }
           /* На телефоне листают пальцем, а поля по бокам всего 20 пикселей —
