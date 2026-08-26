@@ -3787,6 +3787,8 @@ def cabinet():
             <div class="pl-head">
               <span class="pl-label">Аудио</span>
               <span class="pl-actions">
+                <button class="pl-icon" id="pl-pop" type="button"
+                        title="Плеер поверх сайта — не пропадёт при переходах">⧉</button>
                 <button class="pl-icon" id="pl-add" type="button" title="Добавить треки">+</button>
                 <button class="pl-icon" id="pl-toggle-list" type="button" title="Список треков">☰</button>
               </span>
@@ -3821,6 +3823,10 @@ def cabinet():
             </div>
 
             <audio id="pl-audio" preload="none"></audio>
+            <!-- Общий движок сайта. Подключаем синхронно и до скрипта кабинета:
+                 плеер тут берёт его звук, поэтому трек не обрывается, когда
+                 уходишь в дроп или блокнот. -->
+            <script src="/vg-player.js"></script>
           </div>
 
         </aside>
@@ -4800,7 +4806,8 @@ def cabinet():
         // ── Плеер ──
         {
           const box = document.getElementById("player");
-          const audio = document.getElementById("pl-audio");
+          // Звук общий на весь сайт — берём его у движка, если тот поднялся.
+          const audio = (window.VGP && window.VGP.audio) || document.getElementById("pl-audio");
           if (box && audio) {
             const el = id => document.getElementById(id);
             const eq = el("pl-eq");
@@ -4894,7 +4901,20 @@ def cabinet():
               wireAnalyser();
               audio.play().catch(() => {});
               showNow();
+              // Отдаём очередь общему движку — тогда трек не оборвётся при
+              // уходе со страницы, а виджет поверх сайта подхватит его.
+              if (window.VGP) {
+                window.VGP.adopt(tracks.map(t => ({
+                  id: "m_" + t.id, title: t.title, artist: t.artist || "", folder: "",
+                  url: "/api/music/file/" + encodeURIComponent(t.id) })), index);
+              }
             };
+
+            // Кнопка ⧉ — развернуть плеер, который висит поверх сайта.
+            const pop = el("pl-pop");
+            if (pop) pop.addEventListener("click", () => {
+              if (window.VGP) window.VGP.open();
+            });
 
             el("pl-play").addEventListener("click", () => {
               if (!tracks.length) { el("pl-list").hidden = false; return; }
@@ -8096,6 +8116,7 @@ def drop_page():
         collectShared();
       })();
       </script>
+      <script src="/vg-player.js" defer></script>
     </body>
     </html>
     """
@@ -8673,6 +8694,7 @@ def diy_article_page(item_id):
         <hr class="sep">
         <article class="article">__BODY__</article>
       </main>
+      <script src="/vg-player.js" defer></script>
     </body>
     </html>
     """
@@ -9405,6 +9427,7 @@ def notebook_page():
         load().catch(() => { $("grid").innerHTML = '<p class="empty">Не отвечает</p>'; });
       })();
       </script>
+      <script src="/vg-player.js" defer></script>
     </body>
     </html>
     """
@@ -9489,6 +9512,7 @@ def _soon_page(name, kicker, headline, lead, points):
         <ul>__ITEMS__</ul>
         <footer>@Vitaz Gio · раздел готовится</footer>
       </main>
+      <script src="/vg-player.js" defer></script>
     </body>
     </html>
     """
@@ -9521,216 +9545,459 @@ def player_tracks():
     return jsonify(tracks=tracks)
 
 
-@app.get("/player")
-@login_required
-def player_window():
-    """Плеер в отдельном окошке. Открывается из кабинета и с музыки в
-    маленьком всплывающем окне (window.open): играет непрерывно, пока окно
-    не закроют, что бы ни делали в основных вкладках сайта. Окно можно
-    двигать средствами системы и сворачивать до одной строки."""
-    html = """<!doctype html>
-    <html lang="ru">
-    <head>
-      <meta charset="utf-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1">
-      <meta name="theme-color" content="#0d1321">
-      __ICONLINKS__
-      <title>Плеер · vitazgio.ru</title>
-      <style>
-        :root { --pc: #2de2ff; --bg: #0d1321; --line: rgba(255,255,255,.1); --muted: #8593a8; }
-        * { box-sizing: border-box; }
-        html, body { height: 100%; }
-        body { margin: 0; color: #eaf3fb; overflow: hidden;
-               font-family: "Cascadia Code", Consolas, monospace;
-               background: radial-gradient(circle at top, #182a44, #0b111d 60%);
-               display: flex; flex-direction: column; }
-        .bar { display: flex; align-items: center; gap: 10px; padding: 10px 12px;
-               border-bottom: 1px solid var(--line); }
-        .bar .tt { flex: 1; min-width: 0; }
-        .bar .tt b { display: block; font-size: .82rem; overflow: hidden;
-                     text-overflow: ellipsis; white-space: nowrap; }
-        .bar .tt span { display: block; color: var(--muted); font-size: .68rem;
-                        overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .mini { flex: none; width: 30px; height: 30px; display: grid; place-items: center;
-                cursor: pointer; color: #bcd; border: 1px solid var(--line);
-                border-radius: 8px; background: rgba(255,255,255,.05); }
-        .mini:hover { color: #fff; border-color: var(--pc); background: rgba(45,226,255,.12); }
-        .mini svg { width: 15px; height: 15px; }
+@app.get("/vg-player.js")
+def vg_player_js():
+    """Единый плеер сайта: один звук, одно состояние, красивый виджет.
 
-        .seek { display: flex; align-items: center; gap: 9px; padding: 8px 12px 4px; }
-        .seek input { flex: 1; accent-color: var(--pc); height: 4px; }
-        .seek .t { color: var(--muted); font-size: .66rem; font-variant-numeric: tabular-nums; }
-        .ctrls { display: flex; align-items: center; justify-content: center; gap: 14px;
-                 padding: 4px 12px 12px; }
-        .ctrls button { display: grid; place-items: center; cursor: pointer; color: #dbe7f3;
-                        border: 1px solid var(--line); background: rgba(255,255,255,.05);
-                        border-radius: 999px; }
-        .ctrls .side { width: 40px; height: 40px; }
-        .ctrls .play { width: 52px; height: 52px; color: #04121c;
-                       background: linear-gradient(180deg, #6df0ff, #21c8e6); border: 0; }
-        .ctrls button:hover { border-color: var(--pc); }
-        .ctrls .play:hover { filter: brightness(1.08); }
-        .ctrls svg { width: 20px; height: 20px; }
-        .ctrls .play svg { width: 24px; height: 24px; }
+    Раньше плееров было три — в кабинете, на странице музыки и во всплывающем
+    окне, — и они друг о друге не знали. Теперь звук один на весь сайт: этот
+    файл держит единственный <audio>, хранит состояние в localStorage и сам
+    подхватывает трек с той же секунды на следующей странице. Виджет висит
+    поверх всего, складывается в кружок с кольцом прогресса и таскается мышью.
 
-        .list { flex: 1; overflow-y: auto; border-top: 1px solid var(--line); }
-        .trk { display: flex; align-items: center; gap: 10px; padding: 9px 12px; cursor: pointer;
-               border-bottom: 1px solid rgba(255,255,255,.05); }
-        .trk:hover { background: rgba(45,226,255,.07); }
-        .trk.on { background: rgba(45,226,255,.13); }
-        .trk .n { flex: 1; min-width: 0; }
-        .trk .n b { display: block; font-size: .78rem; font-weight: 600; overflow: hidden;
-                    text-overflow: ellipsis; white-space: nowrap; }
-        .trk .n span { display: block; color: var(--muted); font-size: .66rem; overflow: hidden;
-                       text-overflow: ellipsis; white-space: nowrap; }
-        .trk.on .n b { color: var(--pc); }
-        .empty { padding: 30px 16px; color: var(--muted); text-align: center; font-size: .8rem; }
+    Страница музыки подключает тот же движок без своего оверлея (VGP_HEADLESS)
+    и рулит им своей большой панелью — поэтому панель и виджет всегда показывают
+    одно и то же."""
+    js = r"""
+(() => {
+  "use strict";
+  if (window.VGP) return;                       // второй раз не заводимся
 
-        /* Свёрнуто в строку: остаётся только верхняя панель с названием и
-           кнопкой разворота, всё остальное прячется. */
-        body.mini-mode .seek, body.mini-mode .ctrls, body.mini-mode .list { display: none; }
-      </style>
-    </head>
-    <body>
-      <div class="bar">
-        <button class="mini" id="foldBtn" title="Свернуть в строку" aria-label="Свернуть">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/></svg>
-        </button>
-        <div class="tt"><b id="npTitle">Ничего не играет</b><span id="npSub">фонотека</span></div>
-      </div>
-      <div class="seek">
-        <span class="t" id="cur">0:00</span>
-        <input type="range" id="seek" min="0" max="0" value="0" step="1" aria-label="Перемотка">
-        <span class="t" id="dur">0:00</span>
-      </div>
-      <div class="ctrls">
-        <button class="side" id="prev" title="Назад" aria-label="Предыдущий"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 6v12H5V6h2Zm12 0v12l-9-6 9-6Z"/></svg></button>
-        <button class="play" id="play" title="Играть" aria-label="Играть/пауза"><svg id="playIcon" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7L8 5Z"/></svg></button>
-        <button class="side" id="next" title="Вперёд" aria-label="Следующий"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M17 6v12h2V6h-2ZM5 6v12l9-6-9-6Z"/></svg></button>
-      </div>
-      <div class="list" id="list"><p class="empty">Загрузка…</p></div>
-      <audio id="au"></audio>
+  const KEY = "vgPlayerState";
+  const POS = "vgPlayerBox";
+  const headless = !!window.VGP_HEADLESS;       // движок без своего оверлея
+  const lift = +(window.VGP_OFFSET || 0);       // поднять над нижней панелью
 
-      <script>
-      (() => {
-        "use strict";
-        const $ = (id) => document.getElementById(id);
-        const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g,
-          (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-        const mmss = (s) => {
-          s = Math.max(0, Math.floor(s || 0));
-          return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
-        };
-        const au = $("au");
-        let queue = [];
-        let idx = -1;
+  /* ── состояние ─────────────────────────────────────────────────── */
+  const audio = new Audio();
+  audio.preload = "metadata";
+  let queue = [];          // [{id,title,artist,folder,url}]
+  let idx = -1;
+  let ready = false;       // список загружен
+  let shuffle = false;
+  const subs = [];
 
-        const PLAY_SVG = '<path d="M8 5v14l11-7L8 5Z"/>';
-        const PAUSE_SVG = '<path d="M7 5h4v14H7zM13 5h4v14h-4z"/>';
+  const save = () => {
+    try {
+      localStorage.setItem(KEY, JSON.stringify({
+        id: queue[idx] ? queue[idx].id : null,
+        time: audio.currentTime || 0,
+        playing: !audio.paused,
+        vol: audio.volume,
+        shuffle: shuffle,
+      }));
+    } catch (e) { /* приватное окно — переживём */ }
+  };
+  const stored = () => {
+    try { return JSON.parse(localStorage.getItem(KEY) || "null"); }
+    catch (e) { return null; }
+  };
 
-        const save = () => {
-          try {
-            const t = queue[idx];
-            localStorage.setItem("vgPlayer", JSON.stringify({
-              id: t ? t.id : null, time: au.currentTime || 0, playing: !au.paused }));
-          } catch (e) { /* приватное окно — и ладно */ }
-        };
+  /* Одна вкладка играет — остальные умолкают, как в нормальных плеерах. */
+  let bus = null;
+  try { bus = new BroadcastChannel("vgplayer"); } catch (e) { /* старый браузер */ }
+  const shout = (what) => { if (bus) try { bus.postMessage(what); } catch (e) {} };
+  if (bus) bus.onmessage = (e) => {
+    if (e.data === "play" && !audio.paused) { audio.pause(); }
+    if (e.data === "sync") fire();
+  };
 
-        const paintNow = () => {
-          const t = queue[idx];
-          $("npTitle").textContent = t ? t.title : "Ничего не играет";
-          $("npSub").textContent = t ? (t.artist || "фонотека") + (t.folder ? " · " + t.folder : "") : "фонотека";
-          document.querySelectorAll(".trk").forEach((el, i) =>
-            el.classList.toggle("on", i === idx));
-          $("playIcon").innerHTML = au.paused ? PLAY_SVG : PAUSE_SVG;
-        };
+  const fire = () => { subs.forEach((f) => { try { f(state()); } catch (e) {} }); paint(); };
+  const state = () => ({
+    track: queue[idx] || null, idx, queue, playing: !audio.paused,
+    time: audio.currentTime, duration: audio.duration, shuffle,
+  });
 
-        const load = (i, autoplay) => {
-          if (i < 0 || i >= queue.length) return;
-          idx = i;
-          au.src = queue[i].url;
-          au.load();
-          if (autoplay) au.play().catch(() => {});
-          paintNow();
-          save();
-        };
+  /* ── ядро ──────────────────────────────────────────────────────── */
+  const load = (i, autoplay) => {
+    if (i < 0 || i >= queue.length) return;
+    idx = i;
+    audio.src = queue[i].url;
+    audio.load();
+    if (autoplay) { shout("play"); audio.play().catch(() => fire()); }
+    media();
+    fire();
+    save();
+  };
 
-        $("play").addEventListener("click", () => {
-          if (idx < 0 && queue.length) { load(0, true); return; }
-          if (au.paused) au.play().catch(() => {}); else au.pause();
-        });
-        $("prev").addEventListener("click", () => {
-          if (au.currentTime > 3) { au.currentTime = 0; return; }
-          if (idx > 0) load(idx - 1, true);
-        });
-        $("next").addEventListener("click", () => {
-          if (idx < queue.length - 1) load(idx + 1, true);
-        });
-        au.addEventListener("ended", () => { if (idx < queue.length - 1) load(idx + 1, true); });
-        au.addEventListener("play", paintNow);
-        au.addEventListener("pause", () => { paintNow(); save(); });
-        au.addEventListener("loadedmetadata", () => {
-          $("seek").max = Math.floor(au.duration || 0);
-          $("dur").textContent = mmss(au.duration);
-        });
-        au.addEventListener("timeupdate", () => {
-          if (!$("seek").matches(":active")) $("seek").value = Math.floor(au.currentTime || 0);
-          $("cur").textContent = mmss(au.currentTime);
-        });
-        setInterval(save, 4000);
-        $("seek").addEventListener("input", () => { au.currentTime = +$("seek").value; });
+  const api = {
+    audio,
+    get state() { return state(); },
+    subscribe(fn) { subs.push(fn); try { fn(state()); } catch (e) {} },
+    /* Кто-то другой (страница музыки) назначил очередь — принимаем её. */
+    adopt(list, at) {
+      queue = list.slice();
+      idx = Math.max(0, at | 0);
+      ready = true;
+      media(); fire(); save();
+    },
+    playAt(i) { load(i, true); },
+    playId(id) {
+      const at = queue.findIndex((t) => t.id === id);
+      if (at >= 0) load(at, true);
+    },
+    toggle() {
+      if (idx < 0 && queue.length) { load(0, true); return; }
+      if (audio.paused) { shout("play"); audio.play().catch(() => {}); }
+      else audio.pause();
+    },
+    next() { if (queue.length) load(idx + 1 >= queue.length ? 0 : idx + 1, true); },
+    prev() {
+      if (audio.currentTime > 3) { audio.currentTime = 0; return; }
+      if (queue.length) load(idx - 1 < 0 ? queue.length - 1 : idx - 1, true);
+    },
+    seek(t) { if (isFinite(audio.duration)) audio.currentTime = t; },
+    volume(v) { audio.volume = Math.min(1, Math.max(0, v)); save(); fire(); },
+    shuffle(on) {
+      shuffle = on === undefined ? !shuffle : !!on;
+      save(); fire();
+      return shuffle;
+    },
+    open() { if (box) setFolded(false); },
+    reload: () => fetchList(true),
+  };
+  window.VGP = api;
 
-        // Свернуть окно в одну строку и обратно (окно всплывающее — размер
-        // ему можно менять). Запоминаем прежнюю высоту, чтобы вернуть.
-        let fullH = 0;
-        $("foldBtn").addEventListener("click", () => {
-          const mini = document.body.classList.toggle("mini-mode");
-          try {
-            if (mini) { fullH = window.outerHeight; window.resizeTo(window.outerWidth, 92); }
-            else { window.resizeTo(window.outerWidth, fullH || 560); }
-          } catch (e) { /* обычная вкладка — просто CSS */ }
-        });
+  /* Системные кнопки (наушники, медиаклавиши, шторка) */
+  const media = () => {
+    if (!("mediaSession" in navigator)) return;
+    const t = queue[idx];
+    if (!t) return;
+    try {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: t.title || "", artist: t.artist || "vitazgio.ru",
+        album: t.folder || "фонотека",
+      });
+      navigator.mediaSession.setActionHandler("play", () => api.toggle());
+      navigator.mediaSession.setActionHandler("pause", () => api.toggle());
+      navigator.mediaSession.setActionHandler("nexttrack", () => api.next());
+      navigator.mediaSession.setActionHandler("previoustrack", () => api.prev());
+    } catch (e) { /* не поддержали — не беда */ }
+  };
 
-        const drawList = () => {
-          $("list").innerHTML = queue.length
-            ? queue.map((t, i) =>
-                '<div class="trk" data-i="' + i + '"><div class="n"><b>' + esc(t.title) +
-                '</b><span>' + esc(t.artist || "") + (t.folder ? " · " + esc(t.folder) : "") +
-                '</span></div></div>').join("")
-            : '<p class="empty">В фонотеке пока пусто.</p>';
-          $("list").querySelectorAll(".trk").forEach((el) =>
-            el.addEventListener("click", () => load(+el.dataset.i, true)));
-        };
+  audio.addEventListener("ended", () => api.next());
+  audio.addEventListener("play", () => { shout("play"); fire(); save(); });
+  audio.addEventListener("pause", () => { fire(); save(); });
+  audio.addEventListener("timeupdate", () => { paint(); });
+  audio.addEventListener("loadedmetadata", () => fire());
+  setInterval(() => { if (!audio.paused) save(); }, 3000);
+  addEventListener("pagehide", save);
 
-        fetch("/api/player/tracks", { credentials: "same-origin" })
-          .then((r) => r.json())
-          .then((d) => {
-            queue = (d.tracks || []).map((t) => ({
-              id: t.id, title: t.title, artist: t.artist,
-              folder: t.folder || "", url: t.url }));
-            drawList();
-            // Восстановить прошлый трек и позицию.
-            let start = null;
-            try { start = JSON.parse(localStorage.getItem("vgPlayer") || "null"); } catch (e) {}
-            if (start && start.id) {
-              const at = queue.findIndex((t) => t.id === start.id);
-              if (at >= 0) {
-                idx = at; paintNow();
-                au.src = queue[at].url;
-                au.addEventListener("loadedmetadata", function once() {
-                  au.removeEventListener("loadedmetadata", once);
-                  if (start.time) au.currentTime = start.time;
-                }, { once: true });
-              }
-            }
-          })
-          .catch(() => { $("list").innerHTML = '<p class="empty">Не удалось загрузить.</p>'; });
-      })();
-      </script>
-    </body>
-    </html>
-    """
-    return html.replace("__ICONLINKS__", ICON_LINKS)
+  /* ── список треков ─────────────────────────────────────────────── */
+  const fetchList = async (force) => {
+    if (ready && !force) return queue;
+    let d;
+    try {
+      const r = await fetch("/api/player/tracks", { credentials: "same-origin" });
+      if (!r.ok) { if (box) box.remove(); box = null; return []; }
+      d = await r.json();
+    } catch (e) { return []; }
+    queue = (d.tracks || []).map((t) => ({
+      id: t.id, title: t.title, artist: t.artist, folder: t.folder || "", url: t.url }));
+    ready = true;
+    fire();
+    return queue;
+  };
+
+  /* Подхват с прошлой страницы: тот же трек, та же секунда. */
+  const resume = async () => {
+    const s = stored();
+    if (s && typeof s.vol === "number") audio.volume = s.vol;
+    if (s && s.shuffle) shuffle = true;
+    if (!s || !s.id) return;
+    await fetchList();
+    const at = queue.findIndex((t) => t.id === s.id);
+    if (at < 0) return;
+    idx = at;
+    audio.src = queue[at].url;
+    audio.addEventListener("loadedmetadata", function once() {
+      audio.removeEventListener("loadedmetadata", once);
+      if (s.time) audio.currentTime = s.time;
+      if (s.playing) audio.play().catch(() => { if (box) box.classList.add("vgp-wake"); });
+    }, { once: true });
+    media(); fire();
+  };
+
+  /* ── виджет ────────────────────────────────────────────────────── */
+  let box = null, folded = true;
+  const paintFns = [];
+  const paint = () => paintFns.forEach((f) => { try { f(); } catch (e) {} });
+  const setFolded = (v) => {
+    folded = v;
+    if (!box) return;
+    box.classList.toggle("vgp-folded", folded);
+    box.classList.remove("vgp-wake");
+    try { localStorage.setItem("vgPlayerFold", folded ? "1" : "0"); } catch (e) {}
+  };
+
+  const CSS = `
+  .vgp { position:fixed; z-index:2147483000; right:22px; bottom:22px; width:326px;
+         color:#eaf6ff; font:400 13px/1.45 "Cascadia Code",Consolas,monospace;
+         border-radius:18px; overflow:hidden; isolation:isolate;
+         background:linear-gradient(160deg, rgba(17,29,48,.93), rgba(9,14,25,.95));
+         border:1px solid rgba(45,226,255,.24);
+         box-shadow:0 24px 70px rgba(0,0,0,.55), 0 0 0 1px rgba(255,255,255,.03) inset,
+                    0 0 42px rgba(45,226,255,.09);
+         backdrop-filter:blur(16px) saturate(1.2);
+         transition:width .34s cubic-bezier(.22,1,.36,1), height .34s cubic-bezier(.22,1,.36,1),
+                    border-radius .34s, opacity .2s;
+         touch-action:none; }
+  .vgp *, .vgp *::before, .vgp *::after { box-sizing:border-box; }
+  /* мягкое бирюзовое зарево по верхнему краю — «живой» прибор */
+  .vgp::before { content:""; position:absolute; inset:-40% -20% auto -20%; height:150px; pointer-events:none;
+                 background:radial-gradient(60% 100% at 50% 0%, rgba(45,226,255,.20), transparent 70%);
+                 opacity:.9; }
+  .vgp-head { position:relative; display:flex; align-items:center; gap:11px; padding:13px 13px 9px; cursor:grab; }
+  .vgp.vgp-drag .vgp-head { cursor:grabbing; }
+  .vgp-art { position:relative; width:46px; height:46px; flex:none; border-radius:13px;
+             display:grid; place-items:center; overflow:hidden;
+             background:linear-gradient(145deg, rgba(45,226,255,.22), rgba(99,245,173,.12));
+             box-shadow:0 0 0 1px rgba(45,226,255,.28) inset; }
+  .vgp-eq { display:flex; align-items:flex-end; gap:3px; height:20px; }
+  .vgp-eq i { width:3px; height:5px; border-radius:2px; background:linear-gradient(180deg,#7df0ff,#2de2ff);
+              box-shadow:0 0 7px rgba(45,226,255,.75); }
+  .vgp.vgp-on .vgp-eq i { animation:vgpBar .9s ease-in-out infinite; }
+  .vgp.vgp-on .vgp-eq i:nth-child(2){ animation-duration:.62s }
+  .vgp.vgp-on .vgp-eq i:nth-child(3){ animation-duration:1.05s }
+  .vgp.vgp-on .vgp-eq i:nth-child(4){ animation-duration:.78s }
+  @keyframes vgpBar { 0%,100%{height:5px} 50%{height:19px} }
+  .vgp-meta { flex:1; min-width:0; }
+  .vgp-t { font-size:13.5px; font-weight:700; color:#f2fbff; white-space:nowrap;
+           overflow:hidden; text-overflow:ellipsis; }
+  .vgp-a { margin-top:2px; font-size:11px; color:#7f93a8; white-space:nowrap;
+           overflow:hidden; text-overflow:ellipsis; }
+  .vgp-x { flex:none; width:28px; height:28px; display:grid; place-items:center; cursor:pointer;
+           color:#7f93a8; border:0; background:none; border-radius:9px; transition:.16s; }
+  .vgp-x:hover { color:#eaf6ff; background:rgba(255,255,255,.07); }
+  .vgp-x svg { width:15px; height:15px; }
+
+  .vgp-body { padding:0 13px 13px; }
+  .vgp-line { display:flex; align-items:center; gap:9px; margin-bottom:11px; }
+  .vgp-time { font-size:10.5px; color:#6b7c8f; font-variant-numeric:tabular-nums; flex:none; }
+  .vgp-bar { position:relative; flex:1; height:16px; display:flex; align-items:center; cursor:pointer; }
+  .vgp-bar u { position:absolute; left:0; right:0; height:4px; border-radius:3px;
+               background:rgba(255,255,255,.11); }
+  .vgp-bar i { position:absolute; left:0; height:4px; width:0; border-radius:3px;
+               background:linear-gradient(90deg,#2de2ff,#63f5ad);
+               box-shadow:0 0 10px rgba(45,226,255,.5); }
+  .vgp-bar b { position:absolute; left:0; width:11px; height:11px; margin-left:-5px; border-radius:50%;
+               background:#eafcff; box-shadow:0 0 10px rgba(45,226,255,.9); opacity:0; transition:opacity .16s; }
+  .vgp-bar:hover b, .vgp-bar.vgp-grab b { opacity:1; }
+
+  .vgp-keys { display:flex; align-items:center; justify-content:center; gap:8px; }
+  .vgp-keys button { display:grid; place-items:center; cursor:pointer; color:#cfe2ee;
+                     border:1px solid rgba(255,255,255,.1); background:rgba(255,255,255,.04);
+                     border-radius:50%; transition:.16s; }
+  .vgp-keys button:hover { color:#fff; border-color:rgba(45,226,255,.5); background:rgba(45,226,255,.12); }
+  .vgp-keys .vgp-side { width:34px; height:34px; }
+  .vgp-keys .vgp-side svg { width:15px; height:15px; }
+  .vgp-keys .vgp-play { width:46px; height:46px; color:#04121c; border:0;
+                        background:linear-gradient(160deg,#7df0ff,#26cfe8);
+                        box-shadow:0 6px 20px rgba(45,226,255,.35); }
+  .vgp-keys .vgp-play:hover { filter:brightness(1.08); background:linear-gradient(160deg,#8ff5ff,#2de2ff); }
+  .vgp-keys .vgp-play svg { width:20px; height:20px; }
+  .vgp-keys .vgp-sm { width:30px; height:30px; }
+  .vgp-keys .vgp-sm svg { width:13px; height:13px; }
+  .vgp-keys .vgp-sm.on { color:#63f5ad; border-color:rgba(99,245,173,.45); background:rgba(99,245,173,.12); }
+
+  .vgp-list { max-height:0; overflow:hidden; transition:max-height .3s ease; }
+  .vgp-list.open { max-height:220px; overflow-y:auto; margin-top:11px;
+                   border-top:1px solid rgba(255,255,255,.08); padding-top:8px; }
+  .vgp-row { display:flex; align-items:center; gap:8px; padding:7px 8px; border-radius:8px; cursor:pointer; }
+  .vgp-row:hover { background:rgba(45,226,255,.08); }
+  .vgp-row.on { background:rgba(45,226,255,.14); }
+  .vgp-row .n { flex:1; min-width:0; }
+  .vgp-row .n b { display:block; font-size:11.5px; font-weight:600; color:#dfe7f3;
+                  white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .vgp-row .n span { display:block; font-size:10px; color:#6b7c8f;
+                     white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .vgp-row.on .n b { color:#2de2ff; }
+
+  /* ── свёрнутый вид: кружок с кольцом прогресса ── */
+  .vgp.vgp-folded { width:60px; height:60px; border-radius:50%; }
+  .vgp.vgp-folded .vgp-body, .vgp.vgp-folded .vgp-meta, .vgp.vgp-folded .vgp-x { display:none; }
+  .vgp.vgp-folded .vgp-head { padding:0; height:100%; justify-content:center; }
+  .vgp.vgp-folded .vgp-art { width:100%; height:100%; border-radius:50%; background:none; box-shadow:none; }
+  .vgp-ring { position:absolute; inset:0; display:none; }
+  .vgp.vgp-folded .vgp-ring { display:block; }
+  .vgp-ring circle { fill:none; stroke-width:3; }
+  .vgp-ring .bg { stroke:rgba(255,255,255,.12); }
+  .vgp-ring .fg { stroke:#2de2ff; stroke-linecap:round; filter:drop-shadow(0 0 5px rgba(45,226,255,.8));
+                  transition:stroke-dashoffset .25s linear; }
+  /* автоплей не пустили — зовём нажать */
+  .vgp.vgp-wake { animation:vgpWake 1.4s ease-in-out infinite; }
+  @keyframes vgpWake { 0%,100%{ box-shadow:0 24px 70px rgba(0,0,0,.55), 0 0 0 0 rgba(45,226,255,.5) }
+                        50%{ box-shadow:0 24px 70px rgba(0,0,0,.55), 0 0 0 12px rgba(45,226,255,0) } }
+  @media (max-width:560px) { .vgp { right:12px; bottom:12px; width:calc(100vw - 24px); max-width:326px; } }
+  @media (prefers-reduced-motion: reduce) { .vgp, .vgp * { animation:none !important; transition:none !important; } }
+  `;
+
+  const I = {
+    play: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7L8 5Z"/></svg>',
+    pause: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>',
+    prev: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 6v12H5V6h2Zm12 0v12l-9-6 9-6Z"/></svg>',
+    next: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M17 6v12h2V6h-2ZM5 6v12l9-6-9-6Z"/></svg>',
+    list: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg>',
+    shuf: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h4v4M20 4l-6 6M16 20h4v-4M20 20l-6-6M4 4l6 6M4 20l16-16"/></svg>',
+    fold: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/></svg>',
+  };
+  const mmss = (s) => {
+    s = Math.max(0, Math.floor(s || 0));
+    return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
+  };
+
+  const build = () => {
+    const style = document.createElement("style");
+    style.textContent = CSS;
+    document.head.appendChild(style);
+
+    box = document.createElement("div");
+    box.className = "vgp vgp-folded";
+    if (lift) box.style.bottom = (22 + lift) + "px";
+    box.innerHTML =
+      '<div class="vgp-head">' +
+        '<svg class="vgp-ring" viewBox="0 0 60 60"><circle class="bg" cx="30" cy="30" r="27"/>' +
+          '<circle class="fg" cx="30" cy="30" r="27" stroke-dasharray="169.6" stroke-dashoffset="169.6"/></svg>' +
+        '<div class="vgp-art"><div class="vgp-eq"><i></i><i></i><i></i><i></i></div></div>' +
+        '<div class="vgp-meta"><div class="vgp-t">Фонотека</div><div class="vgp-a">ничего не играет</div></div>' +
+        '<button class="vgp-x" data-fold title="Свернуть">' + I.fold + '</button>' +
+      '</div>' +
+      '<div class="vgp-body">' +
+        '<div class="vgp-line"><span class="vgp-time" data-at>0:00</span>' +
+          '<div class="vgp-bar" data-bar><u></u><i></i><b></b></div>' +
+          '<span class="vgp-time" data-all>0:00</span></div>' +
+        '<div class="vgp-keys">' +
+          '<button class="vgp-sm" data-shuf title="Вперемешку">' + I.shuf + '</button>' +
+          '<button class="vgp-side" data-prev title="Назад">' + I.prev + '</button>' +
+          '<button class="vgp-play" data-play title="Играть">' + I.play + '</button>' +
+          '<button class="vgp-side" data-next title="Вперёд">' + I.next + '</button>' +
+          '<button class="vgp-sm" data-list title="Список">' + I.list + '</button>' +
+        '</div>' +
+        '<div class="vgp-list" data-rows></div>' +
+      '</div>';
+    document.body.appendChild(box);
+
+    const q = (s) => box.querySelector(s);
+    const rows = q("[data-rows]");
+
+    /* положение помним между страницами */
+    try {
+      const p = JSON.parse(localStorage.getItem(POS) || "null");
+      if (p && typeof p.x === "number") {
+        box.style.left = p.x + "px"; box.style.top = p.y + "px";
+        box.style.right = "auto"; box.style.bottom = "auto";
+      }
+      if (localStorage.getItem("vgPlayerFold") === "0") setFolded(false);
+    } catch (e) {}
+
+    /* таскаем за шапку */
+    let drag = null;
+    q(".vgp-head").addEventListener("pointerdown", (e) => {
+      if (e.target.closest("button")) return;
+      const r = box.getBoundingClientRect();
+      drag = { dx: e.clientX - r.left, dy: e.clientY - r.top, moved: false };
+      box.classList.add("vgp-drag");
+      try { q(".vgp-head").setPointerCapture(e.pointerId); } catch (err) {}
+    });
+    q(".vgp-head").addEventListener("pointermove", (e) => {
+      if (!drag) return;
+      const x = Math.min(innerWidth - box.offsetWidth - 6, Math.max(6, e.clientX - drag.dx));
+      const y = Math.min(innerHeight - box.offsetHeight - 6, Math.max(6, e.clientY - drag.dy));
+      if (Math.abs(x - (parseFloat(box.style.left) || 0)) > 2 ||
+          Math.abs(y - (parseFloat(box.style.top) || 0)) > 2) drag.moved = true;
+      box.style.left = x + "px"; box.style.top = y + "px";
+      box.style.right = "auto"; box.style.bottom = "auto";
+    });
+    const drop = (e) => {
+      if (!drag) return;
+      box.classList.remove("vgp-drag");
+      const moved = drag.moved;
+      drag = null;
+      try { localStorage.setItem(POS, JSON.stringify({
+        x: parseFloat(box.style.left) || 0, y: parseFloat(box.style.top) || 0 })); } catch (err) {}
+      // короткий тык по свёрнутому кружку — развернуть
+      if (!moved && folded) { setFolded(false); fetchList(); }
+    };
+    q(".vgp-head").addEventListener("pointerup", drop);
+    q(".vgp-head").addEventListener("pointercancel", drop);
+
+    q("[data-fold]").addEventListener("click", () => setFolded(true));
+    q("[data-play]").addEventListener("click", async () => { await fetchList(); api.toggle(); });
+    q("[data-next]").addEventListener("click", () => api.next());
+    q("[data-prev]").addEventListener("click", () => api.prev());
+    q("[data-shuf]").addEventListener("click", () => api.shuffle());
+    q("[data-list]").addEventListener("click", async () => {
+      await fetchList();
+      rows.classList.toggle("open");
+      q("[data-list]").classList.toggle("on", rows.classList.contains("open"));
+      drawRows();
+    });
+
+    /* перемотка */
+    const bar = q("[data-bar]");
+    const seekAt = (e) => {
+      const r = bar.getBoundingClientRect();
+      const k = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+      if (isFinite(audio.duration)) audio.currentTime = k * audio.duration;
+    };
+    bar.addEventListener("pointerdown", (e) => {
+      bar.classList.add("vgp-grab");
+      try { bar.setPointerCapture(e.pointerId); } catch (err) {}
+      seekAt(e);
+    });
+    bar.addEventListener("pointermove", (e) => { if (bar.classList.contains("vgp-grab")) seekAt(e); });
+    const stopSeek = () => bar.classList.remove("vgp-grab");
+    bar.addEventListener("pointerup", stopSeek);
+    bar.addEventListener("pointercancel", stopSeek);
+
+    const drawRows = () => {
+      if (!rows.classList.contains("open")) return;
+      rows.innerHTML = queue.length
+        ? queue.map((t, i) =>
+            '<div class="vgp-row' + (i === idx ? " on" : "") + '" data-i="' + i + '">' +
+            '<div class="n"><b></b><span></span></div></div>').join("")
+        : '<div class="vgp-row"><div class="n"><b>Пусто</b><span>добавь треки в фонотеку или папку MUSIK</span></div></div>';
+      // текст ставим через textContent — имена файлов бывают какие угодно
+      rows.querySelectorAll(".vgp-row[data-i]").forEach((el) => {
+        const t = queue[+el.dataset.i];
+        el.querySelector("b").textContent = t.title;
+        el.querySelector("span").textContent = (t.artist || "") + (t.folder ? " · " + t.folder : "");
+        el.addEventListener("click", () => { api.playAt(+el.dataset.i); drawRows(); });
+      });
+    };
+
+    paintFns.push(() => {
+      const t = queue[idx];
+      q(".vgp-t").textContent = t ? t.title : "Фонотека";
+      q(".vgp-a").textContent = t ? (t.artist || "vitazgio.ru") + (t.folder ? " · " + t.folder : "")
+                                 : "ничего не играет";
+      q("[data-play]").innerHTML = audio.paused ? I.play : I.pause;
+      box.classList.toggle("vgp-on", !audio.paused);
+      q("[data-shuf]").classList.toggle("on", shuffle);
+      const k = isFinite(audio.duration) && audio.duration ? audio.currentTime / audio.duration : 0;
+      q(".vgp-bar i").style.width = (k * 100) + "%";
+      q(".vgp-bar b").style.left = (k * 100) + "%";
+      q("[data-at]").textContent = mmss(audio.currentTime);
+      q("[data-all]").textContent = mmss(audio.duration);
+      q(".vgp-ring .fg").style.strokeDashoffset = String(169.6 * (1 - k));
+      const cur = rows.querySelector(".vgp-row.on");
+      if (rows.classList.contains("open") && (!cur || +cur.dataset.i !== idx)) drawRows();
+    });
+    paint();
+  };
+
+  const start = () => {
+    if (!headless) build();
+    resume();
+  };
+  if (document.readyState === "loading")
+    document.addEventListener("DOMContentLoaded", start);
+  else start();
+})();
+"""
+    response = Response(js, mimetype="application/javascript; charset=utf-8")
+    response.headers["Cache-Control"] = "private, max-age=300"
+    return response
 
 
 @app.get("/diy")
@@ -10379,6 +10646,7 @@ def diy_page():
         });
       })();
       </script>
+      <script src="/vg-player.js" defer></script>
     </body>
     </html>
     """
@@ -10648,10 +10916,10 @@ def music_page():
             <a class="back" href="/" title="На главную" aria-label="На главную"><svg viewBox="0 0 24 24" fill="none"><path d="M19 12H5m0 0 6-6m-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
             <a class="eyebrow" href="/">vitazgio.ru · музыка</a>
             <button class="popout" type="button"
-                    onclick="window.open('/player','vgplayer','width=380,height=580')"
-                    title="Открыть плеер в отдельном окне — играет, пока окно открыто">
+                    onclick="if(window.VGP)window.VGP.open()"
+                    title="Плеер поверх сайта — не пропадёт при переходе на другую страницу">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M21 3l-9 9M10 5H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5"/></svg>
-              <span>Плеер в окне</span>
+              <span>Плеер поверх сайта</span>
             </button>
           </div>
           <img class="hero-mark" src="/static/icons/vg-plain.svg" alt="Vitaz Gio"
@@ -10719,6 +10987,12 @@ def music_page():
       <input type="file" id="pick-files" accept="audio/*,.mp3,.m4a,.flac,.ogg,.opus,.wav,.aac" multiple hidden>
       <input type="file" id="pick-dir" webkitdirectory directory multiple hidden>
 
+      <!-- Тот же движок, что и на всех страницах. Подключаем синхронно, чтобы
+           window.VGP существовал к моменту запуска скрипта страницы. Виджет
+           поднимаем над нижней панелью плеера, чтобы не налезал на неё. -->
+      <script>window.VGP_OFFSET = 168;</script>
+      <script src="/vg-player.js"></script>
+
       <script>
       (() => {
         "use strict";
@@ -10744,7 +11018,10 @@ def music_page():
         };
 
         const $ = (id) => document.getElementById(id);
-        const audio = $("audio");
+        // Звук у сайта один: берём <audio> общего движка, если он поднялся.
+        // Тогда трек, начатый здесь, продолжает играть в дропе или блокноте
+        // с той же секунды, а панель внизу показывает то же, что и виджет.
+        const audio = (window.VGP && window.VGP.audio) || $("audio");
 
         let tracks = [];
         let folders = [];
@@ -10965,6 +11242,17 @@ def music_page():
           $("now-title").textContent = t.title;
           $("now-artist").textContent = t.artist || "неизвестен";
           document.title = t.title + " — vitazgio.ru";
+          // Отдаём очередь общему движку: с ней виджет на других страницах
+          // знает, что играет, и умеет листать дальше.
+          if (window.VGP) {
+            const folderName = {};
+            folders.forEach((f) => { folderName[f.id] = f.name; });
+            window.VGP.adopt(queueIds.map((qid) => {
+              const q = byId(qid) || {};
+              return { id: "m_" + qid, title: q.title || "", artist: q.artist || "",
+                       folder: folderName[q.folder] || "", url: "/api/music/file/" + qid };
+            }), atIndex);
+          }
           paint();
         };
 
@@ -12616,6 +12904,7 @@ def home():
           });
         })();
       </script>
+      <script src="/vg-player.js" defer></script>
     </body>
     </html>
     """
