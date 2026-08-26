@@ -6126,23 +6126,23 @@ def drop_page():
         h1 { margin: 0; font-size: clamp(1.5rem, 3.5vw, 2.3rem); font-weight: 700; letter-spacing: -.02em;
              color: #eaf6ff; text-shadow: 0 0 22px rgba(45,226,255,.35); }
         h1 span { color: #2de2ff; text-shadow: 0 0 22px rgba(45,226,255,.5); }
-        .quota { margin-left: auto; min-width: 210px; }
+        .quota { margin-left: auto; min-width: 315px; }
         /* Две подписи вокруг шкалы: сверху сколько занято всего (папка),
-           снизу сколько в корзине (кликабельно). */
-        .quota-line { display: flex; align-items: center; gap: 7px; color: #8f99ab;
-                      font-size: .72rem; font-family: inherit; text-align: left;
+           снизу сколько в корзине (кликабельно). Всё крупнее в полтора раза. */
+        .quota-line { display: flex; align-items: center; gap: 10px; color: #8f99ab;
+                      font-size: 1.08rem; font-family: inherit; text-align: left;
                       background: none; border: 0; padding: 0; width: 100%; }
         .quota-line b { color: #cfe2ee; font-weight: 700; }
-        .quota-line .qi { width: 15px; height: 15px; flex: none; display: grid; place-items: center; }
-        .quota-line .qi svg { width: 15px; height: 15px; display: block; }
-        .quota-used { margin-bottom: 5px; }
+        .quota-line .qi { width: 22px; height: 22px; flex: none; display: grid; place-items: center; }
+        .quota-line .qi svg { width: 22px; height: 22px; display: block; }
+        .quota-used { margin-bottom: 8px; }
         .quota-used .qi { color: #f5c344; }
-        .quota-can { margin-top: 5px; cursor: pointer; transition: color .16s; }
-        .quota-can .qi { color: #ff6b81; }
-        .quota-can:hover { color: #dfe9f3; }
-        .quota-can:hover .qi { color: #ff8a9c; }
+        .quota-can { margin-top: 8px; cursor: pointer; transition: color .16s; }
+        .quota-can .qi { color: #e8eef6; }
+        .quota-can:hover { color: #ffffff; }
+        .quota-can:hover .qi { color: #ffffff; }
         /* Шкала: слева обычная заливка (живые файлы), дальше белым — корзина. */
-        .quota-bar { position: relative; height: 6px; background: rgba(255,255,255,.08); overflow: hidden; }
+        .quota-bar { position: relative; height: 9px; background: rgba(255,255,255,.08); overflow: hidden; }
         .quota-fill { position: absolute; left: 0; top: 0; height: 100%; width: 0;
                       background: linear-gradient(90deg, #2de2ff, #63f5ad); transition: width .4s; }
         .quota-fill.hot { background: linear-gradient(90deg, #ffb35c, #ff6b81); }
@@ -6319,9 +6319,9 @@ def drop_page():
         @media (min-width: 860px) {
           .wrap { max-width: 1320px; padding: 44px 48px; }
           h1 { font-size: 2.6rem; }
-          .quota { min-width: 240px; }
-          .quota-line { font-size: .8rem; }
-          .quota-line .qi, .quota-line .qi svg { width: 16px; height: 16px; }
+          .quota { min-width: 340px; }
+          .quota-line { font-size: 1.16rem; }
+          .quota-line .qi, .quota-line .qi svg { width: 24px; height: 24px; }
           .bar { gap: 12px; margin-top: 28px; }
           .btn { padding: 12px 20px; font-size: .86rem; }
           .search { height: 44px; padding: 0 16px; font-size: .88rem; }
@@ -6660,8 +6660,8 @@ def drop_page():
             '<path d="M0 20.5h32M0 25.6h32M0 30.7h32"/></g>' +
             '<circle cx="16" cy="25.6" r="10.21"/></g>' +
             '<rect x="6.4" y="6.4" width="19.2" height="19.2" rx="3.84" transform="rotate(45 16 16)"/>'],
-          // Корзина — тот же значок, что стоит у «Корзина:» под шкалой.
-          trash:   ["Корзина", "#ff6b81",
+          // Корзина — тот же значок, что стоит у «Корзина:» под шкалой. Белый.
+          trash:   ["Корзина", "#e8eef6",
             '<path d="M4.5 8h23"/>' +
             '<path d="M12.5 8V5.6a1.4 1.4 0 0 1 1.4-1.4h4.2a1.4 1.4 0 0 1 1.4 1.4V8"/>' +
             '<path d="M7 8h18l-1.3 18.4a2 2 0 0 1-2 1.85h-11.4a2 2 0 0 1-2-1.85Z" fill="currentColor" fill-opacity=".14"/>' +
@@ -8759,10 +8759,34 @@ def diy_page():
         .toast.bad { color: #fff; background: #d93a52; }
 
         [hidden] { display: none !important; }
+
+        /* Окно ввода пароля — один в один как на главной у кабинета. */
+        .auth-modal { position: fixed; z-index: 100; inset: 0; display: grid; place-items: center; padding: 20px; }
+        .auth-backdrop { position: absolute; inset: 0; background: rgba(3,6,13,.82); backdrop-filter: blur(12px); }
+        .auth-panel { position: relative; width: min(430px, 100%); padding: 38px; color: #e8fbff;
+                      border: 1px solid rgba(45,226,255,.3);
+                      background: linear-gradient(145deg, rgba(16,30,47,.98), rgba(20,16,37,.98));
+                      clip-path: polygon(0 0, calc(100% - 22px) 0, 100% 22px, 100% 100%, 22px 100%, 0 calc(100% - 22px));
+                      box-shadow: 0 32px 100px rgba(0,0,0,.65), inset 0 0 40px rgba(45,226,255,.05); }
+        .auth-kicker { color: #2de2ff; font: 700 .7rem/1 "Cascadia Code", Consolas, monospace; letter-spacing: .16em; text-transform: uppercase; }
+        .auth-panel h2 { margin: 16px 0 8px; font: 800 clamp(2rem,8vw,3rem)/1 "Cascadia Code", Consolas, monospace; letter-spacing: -.07em; text-shadow: 2px 0 #ff3fa4, -2px 0 #2de2ff; }
+        .auth-hint { margin: 0 0 26px; color: #8792a6; line-height: 1.55; }
+        .auth-close { position: absolute; top: 15px; right: 17px; padding: 5px; color: #7d8799; font-size: 1.35rem; border: 0; background: none; cursor: pointer; }
+        .auth-close:hover { color: #fff; }
+        .auth-form label { display: block; margin-bottom: 9px; color: #b8c1d2; font-size: .78rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+        .auth-form input { width: 100%; height: 50px; padding: 0 15px; color: #f4fbff; font: 700 1rem "Cascadia Code", Consolas, monospace; border: 1px solid rgba(255,255,255,.12); outline: none; background: rgba(4,10,20,.65); }
+        .auth-form input:focus { border-color: #2de2ff; box-shadow: 0 0 0 3px rgba(45,226,255,.09); }
+        .auth-submit { width: 100%; height: 50px; margin-top: 14px; color: #071018; font: 800 .82rem "Cascadia Code", Consolas, monospace; letter-spacing: .08em; text-transform: uppercase; border: 0; background: linear-gradient(90deg, #2de2ff, #65f2bd); cursor: pointer; }
+        .auth-submit:hover { filter: brightness(1.08); }
+        .auth-submit:disabled { opacity: .55; cursor: wait; }
+        .auth-error { min-height: 20px; margin: 12px 0 0; color: #ff6ba8; font-size: .8rem; }
+        body.modal-open { overflow: hidden; }
+
         @media (max-width: 620px) {
           .grid { grid-template-columns: 1fr; }
           .row2 { flex-wrap: wrap; }
           .row2 input:first-child { flex: 1 1 100%; }
+          .auth-panel { padding: 34px 25px 28px; }
         }
         @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
       </style>
@@ -8785,6 +8809,22 @@ def diy_page():
       <input type="file" id="pick" accept="image/*" hidden>
       <input type="file" id="pick-img" accept="image/*" hidden>
       <input type="file" id="pick-file" hidden>
+
+      <div id="auth-modal" class="auth-modal" hidden>
+        <div class="auth-backdrop" data-auth-close></div>
+        <section class="auth-panel" role="dialog" aria-modal="true" aria-labelledby="auth-title">
+          <button class="auth-close" type="button" data-auth-close aria-label="Закрыть">×</button>
+          <div class="auth-kicker">Restricted area // 01</div>
+          <h2 id="auth-title">Авторизация</h2>
+          <p class="auth-hint">Введите пароль для прав админа.</p>
+          <form id="auth-form" class="auth-form">
+            <label for="auth-password">Пароль</label>
+            <input id="auth-password" name="password" type="password" autocomplete="current-password" required>
+            <button class="auth-submit" type="submit">Получить доступ</button>
+            <p id="auth-error" class="auth-error" role="alert"></p>
+          </form>
+        </section>
+      </div>
 
       <script>
       (() => {
@@ -8844,6 +8884,47 @@ def diy_page():
           clearTimeout(toastTimer);
           toastTimer = setTimeout(() => el.remove(), 3200);
         };
+
+        /* ── окно ввода пароля (как на главной у кабинета) ──────────── */
+        const authModal = $("auth-modal");
+        const authForm = $("auth-form");
+        const authPass = $("auth-password");
+        const authErr = $("auth-error");
+        const authOkBtn = authForm.querySelector("button[type='submit']");
+        const openAuth = () => {
+          authModal.hidden = false;
+          document.body.classList.add("modal-open");
+          authErr.textContent = "";
+          requestAnimationFrame(() => authPass.focus());
+        };
+        const closeAuth = () => {
+          authModal.hidden = true;
+          document.body.classList.remove("modal-open");
+          authForm.reset();
+          authErr.textContent = "";
+        };
+        authModal.querySelectorAll("[data-auth-close]").forEach((el) =>
+          el.addEventListener("click", closeAuth));
+        document.addEventListener("keydown", (e) => {
+          if (e.key === "Escape" && !authModal.hidden) closeAuth();
+        });
+        authForm.addEventListener("submit", async (e) => {
+          e.preventDefault();
+          authErr.textContent = "";
+          authOkBtn.disabled = true;
+          try {
+            const r = await fetch("/api/login", {
+              method: "POST", credentials: "same-origin",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ password: authPass.value }) });
+            const d = await r.json().catch(() => ({}));
+            if (!r.ok) { authErr.textContent = d.error || "Не удалось войти."; authPass.select(); return; }
+            closeAuth();
+            await load();                       // режим хозяина включён — не уходим со страницы
+            toast("Режим хозяина включён");
+          } catch { authErr.textContent = "Сервер недоступен."; }
+          finally { authOkBtn.disabled = false; }
+        });
 
         /* ── полоса сверху ─────────────────────────────────────────── */
         const drawBar = () => {
@@ -9104,16 +9185,7 @@ def diy_page():
             const what = act.dataset.act;
             if (what === "new") openSheet(null);
             if (what === "guest") { asGuest = !asGuest; draw(); }
-            if (what === "login") {
-              const pass = prompt("Пароль от личного кабинета:");
-              if (pass === null) return;
-              const r = await fetch("/api/login", {
-                method: "POST", headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ password: pass }) });
-              if (!r.ok) { toast("Неверный пароль", true); return; }
-              await load();
-              toast("Режим хозяина включён");
-            }
+            if (what === "login") openAuth();
             return;
           }
           const edit = e.target.closest("[data-edit]");
@@ -9164,8 +9236,14 @@ def servers_page():
 
 
 @app.get("/music")
+@login_required
 def music_page():
     """Фонотека. Вся под паролем кабинета — и слушать, и менять.
+
+    Саму страницу теперь тоже держим под паролем (login_required): без входа
+    открыть нельзя, как кабинет. С незнакомого устройства — редирект на
+    главную, где карточка «Музыка» показывает окно авторизации.
+
 
     Открытой её делать не стали: выкладывать в общий доступ скачанную музыку
     — это раздача чужого, и претензии прилетают именно за раздачу.
@@ -9449,7 +9527,7 @@ def music_page():
       <div class="modal" id="modal" hidden>
         <section class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
           <h2 id="sheet-title">Вход в фонотеку</h2>
-          <p id="sheet-note">Пароль от личного кабинета.</p>
+          <p id="sheet-note">Введите пароль для прав админа.</p>
           <input id="sheet-input" type="password" autocomplete="current-password">
           <p class="err" id="sheet-err" role="alert"></p>
           <div class="sheet-keys">
@@ -10068,7 +10146,7 @@ def music_page():
           up: () => { here = parentOf(here); queueIds = []; atIndex = -1; draw(); },
           unlock: async () => {
             const pass = await ask("Вход в фонотеку",
-              "Пароль от личного кабинета.", "", true);
+              "Введите пароль для прав админа.", "", true);
             if (pass === null) return;
             const res = await fetch("/api/login", {
               method: "POST", headers: { "Content-Type": "application/json" },
@@ -10876,7 +10954,7 @@ def home():
               <span class="pick-label">SERVERS</span>
             </span>
             <span class="pick-cell pick--music">
-              <a class="pick pick--music" href="/music"
+              <a class="pick pick--music" href="/music" id="music-pick"
                  title="Музыка" aria-label="Открыть музыку">
                 <span class="pick-art">__ICON_SPEAKER__</span>
                 <span class="pick-glow"></span>
@@ -10904,7 +10982,7 @@ def home():
           <button class="auth-close" type="button" data-auth-close aria-label="Закрыть">×</button>
           <div class="auth-kicker">Restricted area // 01</div>
           <h2 id="auth-title">Авторизация</h2>
-          <p class="auth-hint">Введите пароль для доступа к личному кабинету.</p>
+          <p class="auth-hint">Введите пароль для прав админа.</p>
           <form id="auth-form" class="auth-form">
             <label for="auth-password">Пароль</label>
             <input id="auth-password" name="password" type="password" autocomplete="current-password" required>
@@ -11237,12 +11315,18 @@ def home():
         })();
 
         (() => {
-          const trigger = document.getElementById("cabinet-pick");
+          const cabinetPick = document.getElementById("cabinet-pick");
+          const musicPick = document.getElementById("music-pick");
           const modal = document.getElementById("auth-modal");
           const form = document.getElementById("auth-form");
           const password = document.getElementById("auth-password");
           const error = document.getElementById("auth-error");
           const submit = form.querySelector("button[type='submit']");
+
+          // Куда уйти после входа. Обе закрытые карточки — кабинет и музыка —
+          // открывают одно окно; отличается только пункт назначения.
+          let authDest = "/cabinet";
+          let lastTrigger = cabinetPick;
 
           const openModal = () => {
             modal.hidden = false;
@@ -11256,21 +11340,27 @@ def home():
             document.body.classList.remove("modal-open");
             form.reset();
             error.textContent = "";
-            trigger.focus();
+            if (lastTrigger) lastTrigger.focus();
           };
 
-          // Помнит — сразу в кабинет, не помнит — просим пароль.
-          trigger.addEventListener("click", async () => {
+          // Помнит устройство — сразу пускаем, не помнит — просим пароль.
+          const guard = (dest, el) => async (event) => {
+            if (event) event.preventDefault();
+            authDest = dest;
+            lastTrigger = el;
             try {
               const response = await fetch("/api/session/probe", { credentials: "same-origin" });
               const result = await response.json();
               if (result.trusted) {
-                window.location.assign("/cabinet");
+                window.location.assign(dest);
                 return;
               }
             } catch {}
             openModal();
-          });
+          };
+
+          cabinetPick.addEventListener("click", guard("/cabinet", cabinetPick));
+          if (musicPick) musicPick.addEventListener("click", guard("/music", musicPick));
           modal.querySelectorAll("[data-auth-close]").forEach((element) => element.addEventListener("click", closeModal));
           document.addEventListener("keydown", (event) => {
             if (event.key === "Escape" && !modal.hidden) closeModal();
@@ -11293,7 +11383,7 @@ def home():
                 password.select();
                 return;
               }
-              window.location.assign(result.redirect);
+              window.location.assign(authDest);
             } catch {
               error.textContent = "Сервер недоступен. Повторите попытку.";
             } finally {
