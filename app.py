@@ -8649,6 +8649,721 @@ def diy_article_page(item_id):
                 .replace("__BODY__", body_html))
 
 
+# ---- Блокнот: страницы-вкладки с записями ---------------------------------
+# Хозяйская записная книжка. Записи трёх видов: ссылка, текст и PDF. Всё
+# лежит данными в DATA_DIR и переживает деплой, как дроп и DIY.
+NOTEBOOK_DIR = os.path.join(DATA_DIR, "notebook")
+NOTEBOOK_PATH = os.path.join(DATA_DIR, "notebook.json")
+NOTEBOOK_TEXT_MAX = 20000
+NOTEBOOK_ENTRY_LIMIT = 1000
+NOTEBOOK_PDF_MAX = 25 * 1024 * 1024
+NOTEBOOK_TYPES = ("link", "text", "pdf")
+NOTEBOOK_BORDERS = ("solid", "dashed", "dotted", "double", "none")
+NOTEBOOK_WIDTHS = ("half", "full")
+
+notebook_data: dict = {"pages": [], "entries": {}}
+notebook_lock = threading.Lock()
+os.makedirs(NOTEBOOK_DIR, exist_ok=True)
+
+
+def _notebook_pdf_path(entry_id):
+    return os.path.join(NOTEBOOK_DIR, f"{entry_id}.pdf")
+
+
+def _notebook_write():
+    """Вызывать под notebook_lock."""
+    try:
+        tmp = NOTEBOOK_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(notebook_data, fh, ensure_ascii=False)
+        os.replace(tmp, NOTEBOOK_PATH)
+    except OSError:
+        pass
+
+
+def _notebook_load():
+    try:
+        with open(NOTEBOOK_PATH, encoding="utf-8") as fh:
+            saved = json.load(fh) or {}
+        notebook_data["pages"] = saved.get("pages", [])
+        notebook_data["entries"] = saved.get("entries", {})
+    except (OSError, ValueError):
+        pass
+    if not notebook_data["pages"]:
+        notebook_data["pages"] = [{"id": str(uuid.uuid4()), "name": "Заметки"}]
+    for e in notebook_data["entries"].values():
+        e.setdefault("note", "")
+        e.setdefault("width", "half")
+        e.setdefault("border", "solid")
+        e.setdefault("accent", "#3b6cff")
+        e.setdefault("order", 0)
+
+
+_notebook_load()
+
+
+def _notebook_clean_url(raw):
+    url = (raw or "").strip()[:600]
+    if not url:
+        return ""
+    if not re.match(r"^https?://", url, re.I):
+        url = "https://" + url.lstrip("/")
+    return url
+
+
+def _notebook_entry_public(eid, e):
+    row = {
+        "id": eid, "page": e.get("page"), "type": e.get("type"),
+        "title": e.get("title", ""), "width": e.get("width", "half"),
+        "border": e.get("border", "solid"), "accent": e.get("accent", "#3b6cff"),
+        "note": e.get("note", ""), "order": e.get("order", 0),
+    }
+    if e.get("type") == "link":
+        row["url"] = e.get("url", "")
+    elif e.get("type") == "text":
+        row["text"] = e.get("text", "")
+    elif e.get("type") == "pdf":
+        row["pdf"] = bool(e.get("pdf"))
+        row["filename"] = e.get("filename", "")
+    return row
+
+
+def _notebook_apply(e, payload):
+    """Переносит присланные поля в запись, каждое — по своим правилам."""
+    if "title" in payload:
+        e["title"] = (payload.get("title") or "").strip()[:160]
+    if "note" in payload:
+        e["note"] = (payload.get("note") or "").strip()[:4000]
+    if "url" in payload and e["type"] == "link":
+        e["url"] = _notebook_clean_url(payload.get("url"))
+    if "text" in payload and e["type"] == "text":
+        e["text"] = (payload.get("text") or "")[:NOTEBOOK_TEXT_MAX]
+    if payload.get("width") in NOTEBOOK_WIDTHS:
+        e["width"] = payload["width"]
+    if payload.get("border") in NOTEBOOK_BORDERS:
+        e["border"] = payload["border"]
+    ac = (payload.get("accent") or "").strip()
+    if re.match(r"^#[0-9a-fA-F]{6}$", ac):
+        e["accent"] = ac
+
+
+@app.get("/api/notebook")
+@login_required
+def notebook_get_api():
+    with notebook_lock:
+        pages = list(notebook_data["pages"])
+        entries = [_notebook_entry_public(k, v)
+                   for k, v in notebook_data["entries"].items()]
+    entries.sort(key=lambda x: x["order"])
+    return jsonify(pages=pages, entries=entries, borders=list(NOTEBOOK_BORDERS))
+
+
+@app.post("/api/notebook/page")
+@login_required
+def notebook_page_add():
+    payload = request.get_json(silent=True) or {}
+    name = (payload.get("name") or "").strip()[:40] or "Без имени"
+    pid = str(uuid.uuid4())
+    with notebook_lock:
+        notebook_data["pages"].append({"id": pid, "name": name})
+        _notebook_write()
+    return jsonify(id=pid, name=name)
+
+
+@app.patch("/api/notebook/page/<pid>")
+@login_required
+def notebook_page_rename(pid):
+    payload = request.get_json(silent=True) or {}
+    name = (payload.get("name") or "").strip()[:40]
+    if not name:
+        return jsonify(error="Пустое имя."), 400
+    with notebook_lock:
+        page = next((p for p in notebook_data["pages"] if p["id"] == pid), None)
+        if not page:
+            return jsonify(error="Страница не найдена."), 404
+        page["name"] = name
+        _notebook_write()
+    return jsonify(ok=True)
+
+
+@app.delete("/api/notebook/page/<pid>")
+@login_required
+def notebook_page_delete(pid):
+    with notebook_lock:
+        pages = notebook_data["pages"]
+        if len(pages) <= 1:
+            return jsonify(error="Нельзя удалить единственную страницу."), 400
+        notebook_data["pages"] = [p for p in pages if p["id"] != pid]
+        gone = [k for k, v in notebook_data["entries"].items() if v.get("page") == pid]
+        for k in gone:
+            notebook_data["entries"].pop(k, None)
+        _notebook_write()
+    for k in gone:
+        try:
+            os.remove(_notebook_pdf_path(k))
+        except OSError:
+            pass
+    return jsonify(ok=True)
+
+
+@app.post("/api/notebook/entry")
+@login_required
+def notebook_entry_add():
+    payload = request.get_json(silent=True) or {}
+    etype = payload.get("type")
+    if etype not in NOTEBOOK_TYPES:
+        return jsonify(error="Неизвестный тип записи."), 400
+    with notebook_lock:
+        if len(notebook_data["entries"]) >= NOTEBOOK_ENTRY_LIMIT:
+            return jsonify(error="Слишком много записей."), 400
+        pages = notebook_data["pages"]
+        page = payload.get("page")
+        if not any(p["id"] == page for p in pages):
+            page = pages[0]["id"] if pages else None
+        eid = str(uuid.uuid4())
+        order = 1 + max([v.get("order", 0) for v in notebook_data["entries"].values()],
+                        default=0)
+        e = {"page": page, "type": etype, "title": "", "note": "",
+             "width": "half", "border": "solid", "accent": "#3b6cff",
+             "order": order, "created": time.time()}
+        if etype == "link":
+            e["url"] = ""
+        elif etype == "text":
+            e["text"] = ""
+        elif etype == "pdf":
+            e["pdf"] = False
+            e["filename"] = ""
+        _notebook_apply(e, payload)
+        if not e["title"]:
+            e["title"] = {"link": "Ссылка", "text": "Заметка", "pdf": "PDF"}[etype]
+        notebook_data["entries"][eid] = e
+        _notebook_write()
+    return jsonify(id=eid)
+
+
+@app.patch("/api/notebook/entry/<eid>")
+@login_required
+def notebook_entry_edit(eid):
+    payload = request.get_json(silent=True) or {}
+    with notebook_lock:
+        e = notebook_data["entries"].get(eid)
+        if not e:
+            return jsonify(error="Запись не найдена."), 404
+        _notebook_apply(e, payload)
+        if payload.get("page") and any(p["id"] == payload["page"] for p in notebook_data["pages"]):
+            e["page"] = payload["page"]
+        _notebook_write()
+    return jsonify(ok=True)
+
+
+@app.delete("/api/notebook/entry/<eid>")
+@login_required
+def notebook_entry_delete(eid):
+    with notebook_lock:
+        gone = notebook_data["entries"].pop(eid, None)
+        if gone:
+            _notebook_write()
+    if gone:
+        try:
+            os.remove(_notebook_pdf_path(eid))
+        except OSError:
+            pass
+    return jsonify(ok=True)
+
+
+@app.post("/api/notebook/entry/<eid>/pdf")
+@login_required
+def notebook_entry_pdf(eid):
+    with notebook_lock:
+        e = notebook_data["entries"].get(eid)
+        if not e or e.get("type") != "pdf":
+            return jsonify(error="Запись не найдена."), 404
+    upload = request.files.get("file")
+    if not upload:
+        return jsonify(error="Файл не выбран."), 400
+    if request.content_length and request.content_length > NOTEBOOK_PDF_MAX + 8192:
+        return jsonify(error="PDF больше 25 МБ."), 413
+    if os.path.splitext(upload.filename or "")[1].lower() != ".pdf":
+        return jsonify(error="Нужен файл PDF."), 415
+    dest = _notebook_pdf_path(eid)
+    upload.save(dest)
+    if os.path.getsize(dest) > NOTEBOOK_PDF_MAX:
+        os.remove(dest)
+        return jsonify(error="PDF больше 25 МБ."), 413
+    fname = _diy_safe_name(upload.filename) or "файл.pdf"
+    with notebook_lock:
+        e = notebook_data["entries"].get(eid)
+        if e:
+            e["pdf"] = True
+            e["filename"] = fname
+            _notebook_write()
+    return jsonify(ok=True, filename=fname)
+
+
+@app.get("/notebook/pdf/<eid>")
+@login_required
+def notebook_pdf_view(eid):
+    with notebook_lock:
+        e = notebook_data["entries"].get(eid)
+    if not e or e.get("type") != "pdf" or not e.get("pdf"):
+        return "", 404
+    path = _notebook_pdf_path(eid)
+    if not os.path.exists(path):
+        return "", 404
+    response = send_file(path, mimetype="application/pdf", conditional=True)
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'none'; object-src 'self'; img-src 'self' blob:; "
+        "style-src 'unsafe-inline'; frame-ancestors 'self'")
+    g.frameable = True
+    return response
+
+
+@app.get("/notebook")
+@login_required
+def notebook_page():
+    """Блокнот: страницы-вкладки как в браузере, записи трёх видов. Светлый
+    «виндовский» стиль — намеренно отличается от остального тёмного сайта."""
+    html = """<!doctype html>
+    <html lang="ru">
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <meta name="theme-color" content="#f3f5f8">
+      <meta name="robots" content="noindex, nofollow">
+      __ICONLINKS__
+      <link rel="manifest" href="/manifest.webmanifest">
+      <title>Блокнот · vitazgio.ru</title>
+      <style>
+        :root { --bg:#eef1f6; --card:#ffffff; --ink:#1b1f27; --muted:#5b6473;
+                --line:#d5dbe6; --accent:#0067c0; --accent-soft:#e6f0fb; }
+        * { box-sizing: border-box; }
+        body { margin:0; min-height:100svh; color:var(--ink); background:var(--bg);
+               font-family:"Segoe UI", system-ui, -apple-system, Roboto, sans-serif; }
+        .wrap { max-width:1180px; margin:0 auto; padding:20px clamp(14px,3vw,32px) 80px; }
+        .top { display:flex; align-items:center; gap:14px; margin-bottom:18px; }
+        .back { width:40px; height:40px; flex:none; display:grid; place-items:center;
+                color:var(--accent); text-decoration:none; border:1px solid var(--line);
+                border-radius:10px; background:var(--card); }
+        .back:hover { background:var(--accent-soft); }
+        .back svg { width:20px; height:20px; }
+        h1 { margin:0; font-size:clamp(1.4rem,3vw,2rem); font-weight:700; letter-spacing:-.01em; }
+        h1 span { color:var(--accent); }
+
+        /* Вкладки-страницы как в браузере */
+        .tabs { display:flex; align-items:flex-end; gap:4px; flex-wrap:wrap;
+                border-bottom:2px solid var(--line); padding-bottom:0; margin-bottom:18px; }
+        .tab { display:inline-flex; align-items:center; gap:8px; height:38px; padding:0 12px;
+               color:var(--muted); cursor:pointer; border:1px solid var(--line);
+               border-bottom:none; border-radius:9px 9px 0 0; background:#e2e7f0;
+               position:relative; top:2px; font-size:.9rem; max-width:220px; }
+        .tab.on { color:var(--ink); background:var(--card); top:2px; font-weight:600;
+                  box-shadow:0 -2px 0 var(--accent) inset; }
+        .tab .nm { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        .tab .x { width:18px; height:18px; flex:none; display:grid; place-items:center;
+                  border-radius:50%; font-size:.9rem; color:#98a1b2; }
+        .tab .x:hover { background:#d0d7e4; color:#c0392b; }
+        .tab-add { width:38px; height:34px; flex:none; display:grid; place-items:center;
+                   cursor:pointer; color:var(--accent); border:1px dashed var(--line);
+                   border-radius:9px; background:var(--card); position:relative; top:0; font-size:1.2rem; }
+        .tab-add:hover { background:var(--accent-soft); }
+
+        .bar { display:flex; align-items:center; gap:10px; margin-bottom:16px; }
+        .btn { display:inline-flex; align-items:center; gap:8px; height:38px; padding:0 16px;
+               color:#fff; cursor:pointer; font:600 .9rem inherit; border:0; border-radius:9px;
+               background:var(--accent); }
+        .btn:hover { filter:brightness(1.06); }
+        .btn.ghost { color:var(--ink); background:var(--card); border:1px solid var(--line); }
+        .btn.ghost:hover { background:#e9eef6; }
+        .btn svg { width:16px; height:16px; }
+
+        .grid { display:flex; flex-wrap:wrap; gap:14px; align-items:flex-start; }
+        .entry { background:var(--card); border-radius:12px; padding:14px 15px;
+                 box-shadow:0 1px 3px rgba(20,30,50,.08); border:2px solid var(--accent);
+                 display:flex; flex-direction:column; gap:10px; }
+        .entry.w-half { width:calc(50% - 7px); }
+        .entry.w-full { width:100%; }
+        @media (max-width:640px) { .entry.w-half { width:100%; } }
+        .entry.b-dashed { border-style:dashed; }
+        .entry.b-dotted { border-style:dotted; }
+        .entry.b-double { border-style:double; border-width:4px; }
+        .entry.b-none { border-color:transparent !important; box-shadow:0 1px 4px rgba(20,30,50,.12); }
+        .e-head { display:flex; align-items:center; gap:10px; }
+        .e-kind { flex:none; width:34px; height:34px; display:grid; place-items:center;
+                  border-radius:8px; color:#fff; font-size:.6rem; font-weight:800; }
+        .e-title { flex:1; min-width:0; font-size:.98rem; font-weight:600; cursor:pointer;
+                   overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        .e-title:hover { color:var(--accent); text-decoration:underline; }
+        .e-acts { flex:none; display:flex; gap:6px; }
+        .e-acts button { width:30px; height:30px; display:grid; place-items:center; cursor:pointer;
+                         color:var(--muted); border:1px solid var(--line); border-radius:7px; background:#f7f9fc; }
+        .e-acts button:hover { background:#eef2f8; color:var(--ink); }
+        .e-acts button.kill { color:#c0392b; }
+        .e-acts button.kill:hover { background:#fdecea; border-color:#f0b7ae; }
+        .e-acts button svg { width:15px; height:15px; }
+        .e-acts .tri svg { transition:transform .2s; }
+        .e-acts .tri.open svg { transform:rotate(180deg); }
+        .e-body { border-top:1px solid var(--line); padding-top:10px; color:#2c3340;
+                  font-size:.9rem; line-height:1.55; white-space:pre-wrap; word-break:break-word; }
+        .e-note-label { display:block; margin-bottom:4px; color:var(--muted); font-size:.72rem;
+                        font-weight:700; letter-spacing:.06em; text-transform:uppercase; }
+        .empty { padding:50px 16px; color:var(--muted); text-align:center; }
+
+        /* Диалоги */
+        .veil { position:fixed; inset:0; z-index:60; display:grid; place-items:center; padding:18px;
+                overflow:auto; background:rgba(20,28,44,.4); }
+        .sheet { width:min(500px,100%); background:var(--card); border-radius:14px; padding:22px;
+                 box-shadow:0 30px 80px rgba(10,20,40,.35); }
+        .sheet h3 { margin:0 0 16px; font-size:1.15rem; }
+        .fld { display:block; margin-bottom:13px; }
+        .fld span { display:block; margin-bottom:5px; color:var(--muted); font-size:.74rem;
+                    font-weight:700; letter-spacing:.05em; text-transform:uppercase; }
+        .fld input, .fld textarea, .fld select { width:100%; padding:10px 12px; color:var(--ink);
+                    font:inherit; border:1px solid var(--line); border-radius:9px; background:#fbfcfe; }
+        .fld textarea { min-height:120px; resize:vertical; }
+        .fld input:focus, .fld textarea:focus, .fld select:focus { outline:none; border-color:var(--accent); }
+        .row { display:flex; gap:10px; }
+        .row .fld { flex:1; }
+        .types { display:flex; gap:8px; margin-bottom:14px; }
+        .type-btn { flex:1; height:64px; display:flex; flex-direction:column; align-items:center;
+                    justify-content:center; gap:5px; cursor:pointer; color:var(--muted);
+                    border:1px solid var(--line); border-radius:10px; background:#fbfcfe; font-size:.8rem; }
+        .type-btn svg { width:20px; height:20px; }
+        .type-btn.on { color:var(--accent); border-color:var(--accent); background:var(--accent-soft); }
+        .swatch { display:flex; gap:7px; flex-wrap:wrap; }
+        .swatch button { width:26px; height:26px; border-radius:50%; cursor:pointer; border:2px solid #fff;
+                         box-shadow:0 0 0 1px var(--line); }
+        .swatch button.on { box-shadow:0 0 0 2px var(--accent); }
+        .keys { display:flex; justify-content:flex-end; gap:10px; margin-top:6px; }
+        .note-msg { margin:0 0 10px; color:#c0392b; font-size:.82rem; min-height:1em; }
+
+        .lb { position:fixed; inset:0; z-index:80; display:grid; place-items:center; padding:18px;
+              background:rgba(15,20,30,.75); }
+        .lb iframe { width:min(1000px,100%); height:100%; border:0; border-radius:6px; background:#fff; }
+        .lb .lb-x { position:absolute; top:14px; right:16px; width:40px; height:40px; cursor:pointer;
+                    color:#fff; font-size:1.4rem; border:1px solid rgba(255,255,255,.3); border-radius:8px;
+                    background:rgba(0,0,0,.35); }
+        [hidden] { display:none !important; }
+      </style>
+    </head>
+    <body>
+      <div class="wrap">
+        <div class="top">
+          <a class="back" href="/cabinet" title="В кабинет" aria-label="В кабинет"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg></a>
+          <h1>Блок<span>нот</span></h1>
+        </div>
+        <div class="tabs" id="tabs"></div>
+        <div class="bar">
+          <button class="btn" id="add-entry" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Запись</button>
+        </div>
+        <div class="grid" id="grid"></div>
+        <p class="empty" id="empty" hidden>На этой странице пусто. Нажми «Запись».</p>
+      </div>
+      <input type="file" id="pdf-input" accept="application/pdf" hidden>
+
+      <script>
+      (() => {
+        "use strict";
+        const $ = (id) => document.getElementById(id);
+        const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g,
+          (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+        const api = async (url, how, body) => {
+          const r = await fetch(url, { method: how || "GET", credentials: "same-origin",
+            headers: body ? { "Content-Type": "application/json" } : undefined,
+            body: body ? JSON.stringify(body) : undefined });
+          const d = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(d.error || "Не вышло.");
+          return d;
+        };
+        const ICON = {
+          link: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg>',
+          text: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg>',
+          pdf: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2h9l5 5v15a0 0 0 0 1 0 0H6a0 0 0 0 1 0 0z"/><path d="M14 2v6h6"/></svg>',
+          pen: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><path d="m4 20 4-1 11-11-3-3L5 16z"/></svg>',
+          kill: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M4 7h16M9 7V5h6v2m-8 0 1 13h8l1-13"/></svg>',
+          tri: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>',
+        };
+        const KIND_LABEL = { link: "URL", text: "ТЕКСТ", pdf: "PDF" };
+        const COLORS = ["#0067c0", "#2e7d32", "#c0392b", "#8e44ad", "#e67e22", "#00838f", "#455a64"];
+
+        let pages = [], entries = [], active = null;
+        const open = new Set();      // раскрытые записи
+
+        const toast = (t) => {
+          document.querySelectorAll(".nb-toast").forEach((e) => e.remove());
+          const el = document.createElement("div");
+          el.className = "nb-toast";
+          el.textContent = t;
+          el.style.cssText = "position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:200;background:#1b1f27;color:#fff;padding:10px 16px;border-radius:9px;font-size:.86rem;box-shadow:0 8px 30px rgba(0,0,0,.3)";
+          document.body.appendChild(el);
+          setTimeout(() => el.remove(), 2600);
+        };
+
+        const load = async () => {
+          const d = await api("/api/notebook");
+          pages = d.pages || [];
+          entries = d.entries || [];
+          if (!active || !pages.some((p) => p.id === active)) active = pages[0] && pages[0].id;
+          draw();
+        };
+
+        const drawTabs = () => {
+          $("tabs").innerHTML = pages.map((p) =>
+            '<div class="tab' + (p.id === active ? " on" : "") + '" data-tab="' + esc(p.id) + '">' +
+              '<span class="nm">' + esc(p.name) + '</span>' +
+              '<span class="x" data-del-page="' + esc(p.id) + '" title="Удалить страницу">×</span>' +
+            '</div>').join("") +
+            '<div class="tab-add" id="tab-add" title="Новая страница">+</div>';
+        };
+
+        const bodyHtml = (e) => {
+          if (e.type === "text") return '<div class="e-body">' + esc(e.text || "") + '</div>';
+          // у ссылки и PDF в теле — пометки
+          if (e.note) return '<div class="e-body"><span class="e-note-label">Пометки</span>' + esc(e.note) + '</div>';
+          return "";
+        };
+        const hasBody = (e) => e.type === "text" ? (e.text || "").length > 0 : (e.note || "").length > 0;
+
+        const drawGrid = () => {
+          const list = entries.filter((e) => e.page === active);
+          $("empty").hidden = list.length > 0;
+          $("grid").innerHTML = list.map((e) => {
+            const showBody = open.has(e.id);
+            const tri = hasBody(e)
+              ? '<button class="tri' + (showBody ? " open" : "") + '" data-toggle="' + e.id + '" title="Показать/скрыть">' + ICON.tri + '</button>'
+              : "";
+            return '<div class="entry w-' + e.width + ' b-' + e.border + '" style="border-color:' + esc(e.accent) + '" data-id="' + e.id + '">' +
+              '<div class="e-head">' +
+                '<span class="e-kind" style="background:' + esc(e.accent) + '">' + KIND_LABEL[e.type] + '</span>' +
+                '<span class="e-title" data-openentry="' + e.id + '" title="' + esc(openHint(e)) + '">' + esc(e.title) + '</span>' +
+                '<span class="e-acts">' + tri +
+                  '<button data-edit="' + e.id + '" title="Изменить">' + ICON.pen + '</button>' +
+                  '<button class="kill" data-kill="' + e.id + '" title="Удалить">' + ICON.kill + '</button>' +
+                '</span>' +
+              '</div>' +
+              (showBody ? bodyHtml(e) : "") +
+            '</div>';
+          }).join("");
+        };
+
+        const openHint = (e) => e.type === "link" ? "Открыть ссылку"
+          : e.type === "text" ? "Скопировать текст" : "Открыть PDF";
+
+        const draw = () => { drawTabs(); drawGrid(); };
+
+        const openEntry = async (e) => {
+          if (e.type === "link") {
+            if (e.url) window.open(e.url, "_blank", "noopener");
+            else toast("У записи нет ссылки");
+          } else if (e.type === "text") {
+            try { await navigator.clipboard.writeText(e.text || ""); toast("Текст скопирован"); }
+            catch { toast("Не удалось скопировать"); }
+          } else if (e.type === "pdf") {
+            if (!e.pdf) { toast("PDF ещё не загружен — нажми «Изменить»"); return; }
+            showPdf(e.id, e.title);
+          }
+        };
+
+        const showPdf = (eid, title) => {
+          const box = document.createElement("div");
+          box.className = "lb";
+          box.innerHTML = '<button class="lb-x" title="Закрыть">×</button>' +
+            '<iframe src="/notebook/pdf/' + encodeURIComponent(eid) + '" title="' + esc(title) + '"></iframe>';
+          document.body.appendChild(box);
+          const shut = () => box.remove();
+          box.querySelector(".lb-x").addEventListener("click", shut);
+          box.addEventListener("click", (ev) => { if (ev.target === box) shut(); });
+          document.addEventListener("keydown", function esc2(ev) {
+            if (ev.key === "Escape") { shut(); document.removeEventListener("keydown", esc2); } });
+        };
+
+        // ── Диалог создания / правки ──────────────────────────────────
+        let pdfPendingId = null;
+        const openSheet = (entry) => {
+          const fresh = !entry;
+          const e = entry || { type: "link", title: "", url: "", text: "", note: "",
+                               width: "half", border: "solid", accent: COLORS[0] };
+          const veil = document.createElement("div");
+          veil.className = "veil";
+          const typeRow = fresh
+            ? '<div class="types" id="f-types">' +
+                ['link', 'text', 'pdf'].map((t) =>
+                  '<div class="type-btn' + (t === e.type ? " on" : "") + '" data-type="' + t + '">' +
+                  ICON[t] + '<span>' + ({ link: "Ссылка", text: "Текст", pdf: "PDF" }[t]) + '</span></div>').join("") +
+              '</div>'
+            : "";
+          veil.innerHTML =
+            '<section class="sheet" role="dialog" aria-modal="true">' +
+              '<h3>' + (fresh ? "Новая запись" : "Изменить запись") + '</h3>' +
+              typeRow +
+              '<label class="fld"><span>Название</span><input id="f-title" maxlength="160" value="' + esc(e.title) + '"></label>' +
+              '<div id="f-typed"></div>' +
+              '<div class="row">' +
+                '<label class="fld"><span>Ширина</span><select id="f-width">' +
+                  '<option value="half"' + (e.width === "half" ? " selected" : "") + '>Половина (2 в ряд)</option>' +
+                  '<option value="full"' + (e.width === "full" ? " selected" : "") + '>Во всю ширину</option>' +
+                '</select></label>' +
+                '<label class="fld"><span>Рамка</span><select id="f-border">' +
+                  [["solid", "Сплошная"], ["dashed", "Пунктир"], ["dotted", "Точки"], ["double", "Двойная"], ["none", "Без рамки"]]
+                    .map(([v, n]) => '<option value="' + v + '"' + (e.border === v ? " selected" : "") + '>' + n + '</option>').join("") +
+                '</select></label>' +
+              '</div>' +
+              '<div class="fld"><span>Цвет</span><div class="swatch" id="f-swatch">' +
+                COLORS.map((c) => '<button type="button" data-color="' + c + '" class="' + (c === e.accent ? "on" : "") + '" style="background:' + c + '"></button>').join("") +
+              '</div></div>' +
+              '<p class="note-msg" id="f-msg"></p>' +
+              '<div class="keys"><button class="btn ghost" type="button" id="f-no">Отмена</button>' +
+              '<button class="btn" type="button" id="f-ok">Сохранить</button></div>' +
+            '</section>';
+          document.body.appendChild(veil);
+          const state = { veil, e: Object.assign({}, e), fresh, id: entry ? entry.id : null,
+                          accent: e.accent };
+          const msg = (t) => { veil.querySelector("#f-msg").textContent = t || ""; };
+
+          const paintTyped = () => {
+            const t = state.e.type;
+            const box = veil.querySelector("#f-typed");
+            if (t === "link") {
+              box.innerHTML = '<label class="fld"><span>Ссылка</span><input id="f-url" placeholder="https://…" value="' + esc(state.e.url || "") + '"></label>' +
+                '<label class="fld"><span>Пометки (по желанию)</span><textarea id="f-note" style="min-height:70px">' + esc(state.e.note || "") + '</textarea></label>';
+            } else if (t === "text") {
+              box.innerHTML = '<label class="fld"><span>Текст</span><textarea id="f-text">' + esc(state.e.text || "") + '</textarea></label>';
+            } else {
+              const has = entry && entry.pdf;
+              box.innerHTML = '<label class="fld"><span>Файл PDF</span></label>' +
+                '<button class="btn ghost" type="button" id="f-pdf">' + (has ? "Заменить PDF (" + esc(entry.filename || "загружен") + ")" : "Загрузить PDF") + '</button>' +
+                '<p style="margin:8px 0 0;color:#5b6473;font-size:.78rem" id="f-pdf-hint">' + (has ? "" : (state.fresh ? "Сначала сохрани запись, потом загрузишь файл." : "Файл ещё не загружен.")) + '</p>' +
+                '<label class="fld" style="margin-top:12px"><span>Пометки (по желанию)</span><textarea id="f-note" style="min-height:70px">' + esc(state.e.note || "") + '</textarea></label>';
+            }
+          };
+          paintTyped();
+
+          if (fresh) veil.querySelectorAll("#f-types .type-btn").forEach((b) =>
+            b.addEventListener("click", () => {
+              state.e.type = b.dataset.type;
+              veil.querySelectorAll("#f-types .type-btn").forEach((x) => x.classList.toggle("on", x === b));
+              paintTyped(); wirePdf();
+            }));
+          veil.querySelectorAll("#f-swatch button").forEach((b) =>
+            b.addEventListener("click", () => {
+              state.accent = b.dataset.color;
+              veil.querySelectorAll("#f-swatch button").forEach((x) => x.classList.toggle("on", x === b));
+            }));
+
+          const wirePdf = () => {
+            const btn = veil.querySelector("#f-pdf");
+            if (btn) btn.addEventListener("click", async () => {
+              if (!state.id) { await saveCore(true); if (!state.id) return; }
+              pdfPendingId = state.id;
+              $("pdf-input").click();
+            });
+          };
+          wirePdf();
+
+          const readCore = () => {
+            const g = (id) => { const el = veil.querySelector(id); return el ? el.value : ""; };
+            const data = { type: state.e.type, title: g("#f-title"),
+              width: veil.querySelector("#f-width").value, border: veil.querySelector("#f-border").value,
+              accent: state.accent };
+            if (state.e.type === "link") { data.url = g("#f-url"); data.note = g("#f-note"); }
+            else if (state.e.type === "text") { data.text = g("#f-text"); }
+            else { data.note = g("#f-note"); }
+            return data;
+          };
+          const saveCore = async (silent) => {
+            const data = readCore();
+            try {
+              if (state.id) await api("/api/notebook/entry/" + state.id, "PATCH", data);
+              else { const r = await api("/api/notebook/entry", "POST",
+                       Object.assign({ page: active }, data)); state.id = r.id; state.fresh = false; }
+            } catch (err) { msg(err.message); return; }
+            if (!silent) { veil.remove(); await load(); toast("Сохранено"); }
+          };
+          veil.querySelector("#f-ok").addEventListener("click", () => saveCore(false));
+          veil.querySelector("#f-no").addEventListener("click", () => { veil.remove(); load(); });
+          veil.addEventListener("click", (ev) => { if (ev.target === veil) { veil.remove(); load(); } });
+          state.reopenId = () => state.id;
+          openSheet._state = state;
+        };
+
+        $("pdf-input").addEventListener("change", async (ev) => {
+          const file = ev.target.files[0];
+          ev.target.value = "";
+          if (!file || !pdfPendingId) return;
+          const form = new FormData();
+          form.append("file", file);
+          try {
+            const r = await fetch("/api/notebook/entry/" + pdfPendingId + "/pdf",
+              { method: "POST", credentials: "same-origin", body: form });
+            const d = await r.json().catch(() => ({}));
+            if (!r.ok) throw new Error(d.error || "Не вышло.");
+            toast("PDF загружен");
+            const st = openSheet._state;
+            if (st && st.veil && document.body.contains(st.veil)) {
+              const hint = st.veil.querySelector("#f-pdf-hint");
+              const btn = st.veil.querySelector("#f-pdf");
+              if (hint) hint.textContent = "";
+              if (btn) btn.textContent = "Заменить PDF (" + (d.filename || "загружен") + ")";
+            }
+          } catch (err) { toast(err.message); }
+        });
+
+        // ── общие нажатия ─────────────────────────────────────────────
+        document.addEventListener("click", async (e) => {
+          const add = e.target.closest("#tab-add");
+          if (add) {
+            const name = prompt("Название страницы:");
+            if (!name) return;
+            const r = await api("/api/notebook/page", "POST", { name });
+            active = r.id; await load(); return;
+          }
+          const delPage = e.target.closest("[data-del-page]");
+          if (delPage) {
+            e.stopPropagation();
+            if (pages.length <= 1) { toast("Единственную страницу удалить нельзя"); return; }
+            if (!confirm("Удалить страницу со всеми записями?")) return;
+            try { await api("/api/notebook/page/" + delPage.dataset.delPage, "DELETE"); }
+            catch (err) { toast(err.message); return; }
+            await load(); return;
+          }
+          const tab = e.target.closest("[data-tab]");
+          if (tab) { active = tab.dataset.tab; draw(); return; }
+          const oe = e.target.closest("[data-openentry]");
+          if (oe) { const en = entries.find((x) => x.id === oe.dataset.openentry); if (en) openEntry(en); return; }
+          const tg = e.target.closest("[data-toggle]");
+          if (tg) { const id = tg.dataset.toggle; if (open.has(id)) open.delete(id); else open.add(id); drawGrid(); return; }
+          const ed = e.target.closest("[data-edit]");
+          if (ed) { openSheet(entries.find((x) => x.id === ed.dataset.edit)); return; }
+          const kl = e.target.closest("[data-kill]");
+          if (kl) {
+            const en = entries.find((x) => x.id === kl.dataset.kill);
+            if (!confirm("Удалить «" + (en ? en.title : "") + "»?")) return;
+            try { await api("/api/notebook/entry/" + kl.dataset.kill, "DELETE"); }
+            catch (err) { toast(err.message); return; }
+            await load(); return;
+          }
+        });
+        // двойной клик по вкладке — переименовать
+        $("tabs").addEventListener("dblclick", async (e) => {
+          const tab = e.target.closest("[data-tab]");
+          if (!tab) return;
+          const p = pages.find((x) => x.id === tab.dataset.tab);
+          const name = prompt("Переименовать страницу:", p ? p.name : "");
+          if (!name) return;
+          try { await api("/api/notebook/page/" + tab.dataset.tab, "PATCH", { name }); }
+          catch (err) { toast(err.message); return; }
+          await load();
+        });
+        $("add-entry").addEventListener("click", () => openSheet(null));
+
+        load().catch(() => { $("grid").innerHTML = '<p class="empty">Не отвечает</p>'; });
+      })();
+      </script>
+    </body>
+    </html>
+    """
+    return html.replace("__ICONLINKS__", ICON_LINKS)
+
+
 def _soon_page(name, kicker, headline, lead, points):
     """Заготовка под раздел: страница уже есть и открывается с полки, а
     содержимое появится позже. Пустая страница выглядела бы поломкой,
