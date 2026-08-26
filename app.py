@@ -3655,6 +3655,45 @@ def cabinet():
             </span>
           </a>
 
+          <!-- Блокнот — логотип слева. Ставим сразу после дропа; следом идёт
+               «Музыка» справа, так что чередование ниже не сбивается. -->
+          <a class="panel" href="/notebook" style="--accent:#0067c0">
+            <span class="panel-head">
+              <span class="panel-logo">
+                <svg viewBox="0 0 48 40" aria-hidden="true">
+                  <rect x="6" y="4" width="36" height="32" rx="4" fill="#eaf1fb" stroke="#0067c0" stroke-width="2"/>
+                  <rect x="6" y="4" width="9" height="32" rx="4" fill="#0067c0" fill-opacity=".14"/>
+                  <path d="M20 13h16M20 20h16M20 27h11" stroke="#0067c0" stroke-width="2.2" stroke-linecap="round"/>
+                  <path d="M15 2v6M23 2v6" stroke="#0067c0" stroke-width="2.4" stroke-linecap="round"/>
+                </svg>
+              </span>
+              <span class="panel-text">
+                <span class="panel-title">Блокнот</span>
+                <span class="panel-sub">заметки, ссылки и файлы по вкладкам</span>
+              </span>
+              <span class="panel-arrow panel-arrow--go" aria-hidden="true">⟶</span>
+            </span>
+          </a>
+
+          <!-- Музыка — логотип справа. Ведёт в фонотеку, где кнопка «плеер в
+               окне» открывает плеер, играющий, пока окно не закроют. -->
+          <a class="panel panel--right" href="/music" style="--accent:#35e0f0">
+            <span class="panel-head">
+              <span class="panel-logo">
+                <svg viewBox="0 0 48 40" aria-hidden="true">
+                  <path d="M18 8l20-4v22" fill="none" stroke="#35e0f0" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+                  <circle cx="13" cy="30" r="6" fill="#35e0f0" fill-opacity=".2" stroke="#35e0f0" stroke-width="3"/>
+                  <circle cx="33" cy="26" r="6" fill="#35e0f0" fill-opacity=".2" stroke="#35e0f0" stroke-width="3"/>
+                </svg>
+              </span>
+              <span class="panel-text">
+                <span class="panel-title">Музыка</span>
+                <span class="panel-sub">фонотека и плеер в отдельном окне</span>
+              </span>
+              <span class="panel-arrow panel-arrow--go" aria-hidden="true">⟶</span>
+            </span>
+          </a>
+
           <!-- Журнал входов — логотип слева -->
           <section class="panel" style="--accent:#2de2ff">
             <button class="panel-head" id="loginlog-toggle" type="button" aria-expanded="false" aria-controls="loginlog-body">
