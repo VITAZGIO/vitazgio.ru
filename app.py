@@ -6788,6 +6788,14 @@ def drop_page():
 
         // ── Отрисовка ──
         const renderCrumbs = crumbs => {
+          // В корне цепочка ни к чему — там был бы одинокий ярлык «Дроп».
+          // Показываем крошки только когда зашли в папку.
+          if (!crumbs.length) {
+            $("crumbs").innerHTML = "";
+            upTo = null;
+            $("go-up").hidden = true;
+            return;
+          }
           const parts = ['<button class="crumb" data-go="">Дроп</button>'];
           crumbs.forEach((c, i) => {
             parts.push("<span>/</span>");
@@ -6830,10 +6838,10 @@ def drop_page():
               <span class="nm">${esc(it.name)}</span>
               <span class="acts">
                 ${isText ? `<button class="act" data-act="copy" title="Копировать">⧉</button>` : ""}
+                ${isFolder ? "" : `<button class="act${it.share ? " on" : ""}" data-act="share" title="Ссылка для скачивания">🔗</button>`}
                 ${isFolder
                   ? `<button class="act" data-act="zip" title="Скачать папку архивом">⤓</button>`
                   : `<button class="act" data-act="dl" title="Скачать">⤓</button>`}
-                ${isFolder ? "" : `<button class="act${it.share ? " on" : ""}" data-act="share" title="Ссылка для скачивания">🔗</button>`}
                 <button class="act" data-act="ren" title="Переименовать">✎</button>
                 <button class="act del" data-act="del" title="Удалить">🗑</button>
               </span>
@@ -7610,6 +7618,36 @@ def _diy_cover_path(item_id):
     return os.path.join(DIY_DIR, f"{item_id}.jpg")
 
 
+# Вложения статьи (фото и файлы) лежат в своей папке на запись. В самом
+# коде статьи хозяин ссылается на них по имени через {{имя.jpg}} — страница
+# статьи подставит настоящий адрес. Так в исходник сайта не попадает ни
+# байта содержимого, и всё переживает деплой, как личный дроп.
+DIY_ASSET_MAX = 25 * 1024 * 1024          # 25 МБ на одно вложение
+DIY_ASSET_SIDE = 1600                     # фото ужимаем по большей стороне
+DIY_ASSET_LIMIT = 40                      # сколько вложений на запись
+DIY_BODY_MAX = 200_000                    # столько символов кода статьи
+DIY_IMAGE_EXT = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
+
+
+def _diy_asset_dir(item_id):
+    return os.path.join(DIY_DIR, item_id)
+
+
+def _diy_safe_name(raw):
+    """Имя вложения: без путей и опасных символов, но кириллицу оставляем —
+    хозяин зовёт файлы по-русски, и по этим же именам ссылается в коде."""
+    name = os.path.basename((raw or "").strip()).replace("\\", "").replace("/", "")
+    name = re.sub(r'[\x00-\x1f<>:"|?*]', "", name).strip(". ")
+    return name[:80]
+
+
+def _diy_asset_path(item_id, name):
+    safe = _diy_safe_name(name)
+    if not safe:
+        return None
+    return os.path.join(_diy_asset_dir(item_id), safe)
+
+
 def _diy_write_index():
     """Вызывать под diy_lock."""
     try:
@@ -7632,6 +7670,8 @@ def _diy_load():
         work.setdefault("hidden", False)
         work.setdefault("pinned", False)
         work.setdefault("kind", "другое")
+        work.setdefault("body", "")
+        work.setdefault("assets", [])
 
 
 _diy_load()
@@ -7665,9 +7705,12 @@ def _diy_public(item_id, work, can_edit):
         "created": work.get("created", 0),
         "updated": work.get("updated", 0),
         "pinned": bool(work.get("pinned")),
+        "assets": [dict(a) for a in work.get("assets", [])],
+        "has_body": bool((work.get("body") or "").strip()),
     }
     if can_edit:
         row["hidden"] = bool(work.get("hidden"))
+        row["body"] = work.get("body", "")
     return row
 
 
@@ -7736,6 +7779,8 @@ def diy_create_api():
             "summary": (payload.get("summary") or "").strip()[:600],
             "kind": kind,
             "links": _diy_clean_links(payload.get("links")),
+            "body": (payload.get("body") or "")[:DIY_BODY_MAX],
+            "assets": [],
             "cover": False,
             "hidden": bool(payload.get("hidden")),
             "pinned": bool(payload.get("pinned")),
@@ -7761,6 +7806,8 @@ def diy_update_api(item_id):
             work["title"] = title
         if "summary" in payload:
             work["summary"] = (payload.get("summary") or "").strip()[:600]
+        if "body" in payload:
+            work["body"] = (payload.get("body") or "")[:DIY_BODY_MAX]
         if "kind" in payload and payload["kind"] in DIY_KINDS:
             work["kind"] = payload["kind"]
         if "links" in payload:
@@ -7785,7 +7832,116 @@ def diy_delete_api(item_id):
             os.remove(_diy_cover_path(item_id))
         except OSError:
             pass
+        shutil.rmtree(_diy_asset_dir(item_id), ignore_errors=True)
     return jsonify(ok=True)
+
+
+@app.post("/api/diy/<item_id>/asset")
+@diy_editor_required
+def diy_asset_upload_api(item_id):
+    """Фото или файл к статье. Картинки ужимаем, прочее кладём как есть.
+    Имя сохраняем узнаваемым — по нему хозяин ссылается в коде статьи."""
+    with diy_lock:
+        work = diy_items.get(item_id)
+        if not work:
+            return jsonify(error="Запись не найдена."), 404
+        if len(work.get("assets", [])) >= DIY_ASSET_LIMIT:
+            return jsonify(error=f"Больше {DIY_ASSET_LIMIT} вложений на запись нельзя."), 400
+    upload = request.files.get("file")
+    if not upload:
+        return jsonify(error="Файл не выбран."), 400
+    if request.content_length and request.content_length > DIY_ASSET_MAX + 8192:
+        return jsonify(error="Вложение больше 25 МБ."), 413
+    name = _diy_safe_name(upload.filename)
+    if not name:
+        return jsonify(error="Не разобрать имя файла."), 400
+    os.makedirs(_diy_asset_dir(item_id), exist_ok=True)
+    dest = _diy_asset_path(item_id, name)
+    ext = os.path.splitext(name)[1].lower()
+    is_image = ext in DIY_IMAGE_EXT
+    try:
+        if is_image and ext != ".gif":
+            # GIF мог бы быть анимацией — её не трогаем; остальное ужимаем.
+            from PIL import Image
+
+            Image.MAX_IMAGE_PIXELS = 80_000_000
+            with Image.open(upload.stream) as image:
+                keep_alpha = ext in (".png", ".webp")
+                image = image.convert("RGBA" if keep_alpha else "RGB")
+                image.thumbnail((DIY_ASSET_SIDE, DIY_ASSET_SIDE))
+                if ext == ".png":
+                    image.save(dest, "PNG", optimize=True)
+                elif ext == ".webp":
+                    image.save(dest, "WEBP", quality=85, method=4)
+                else:
+                    image.save(dest, "JPEG", quality=84, optimize=True)
+        else:
+            upload.save(dest)
+            if os.path.getsize(dest) > DIY_ASSET_MAX:
+                os.remove(dest)
+                return jsonify(error="Вложение больше 25 МБ."), 413
+    except Exception:
+        try:
+            os.remove(dest)
+        except OSError:
+            pass
+        return jsonify(error="Не вышло сохранить вложение."), 415
+    size = os.path.getsize(dest)
+    kind = "image" if is_image else "file"
+    with diy_lock:
+        work = diy_items.get(item_id)
+        if not work:
+            os.remove(dest)
+            return jsonify(error="Запись не найдена."), 404
+        assets = [a for a in work.get("assets", []) if a.get("name") != name]
+        assets.append({"name": name, "kind": kind, "size": size})
+        work["assets"] = assets
+        work["updated"] = time.time()
+        _diy_write_index()
+    return jsonify(ok=True, name=name, kind=kind, size=size)
+
+
+@app.delete("/api/diy/<item_id>/asset/<path:name>")
+@diy_editor_required
+def diy_asset_delete_api(item_id, name):
+    safe = _diy_safe_name(name)
+    with diy_lock:
+        work = diy_items.get(item_id)
+        if not work:
+            return jsonify(error="Запись не найдена."), 404
+        work["assets"] = [a for a in work.get("assets", []) if a.get("name") != safe]
+        work["updated"] = time.time()
+        _diy_write_index()
+    path = _diy_asset_path(item_id, safe)
+    if path:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+    return jsonify(ok=True)
+
+
+@app.get("/diy/asset/<item_id>/<path:name>")
+def diy_asset_api(item_id, name):
+    """Вложение статьи. Открыто всем, как и обложка — статью смотрит любой.
+    У скрытой записи вложения видит только хозяин."""
+    with diy_lock:
+        work = diy_items.get(item_id)
+        hidden = bool(work and work.get("hidden"))
+        known = {a.get("name") for a in (work.get("assets", []) if work else [])}
+    if not work:
+        return "", 404
+    if hidden and not _diy_can_edit():
+        return "", 404
+    safe = _diy_safe_name(name)
+    if safe not in known:
+        return "", 404
+    path = _diy_asset_path(item_id, safe)
+    if not path or not os.path.exists(path):
+        return "", 404
+    response = send_file(path, conditional=True)
+    response.headers["Cache-Control"] = "public, max-age=86400"
+    return response
 
 
 @app.post("/api/diy/<item_id>/cover")
@@ -7853,6 +8009,181 @@ def diy_cover_api(item_id):
     return response
 
 
+def _diy_render_body(item_id, body):
+    """Подставляет в код статьи адреса вложений: {{имя.jpg}} превращается в
+    ссылку на /diy/asset/<id>/имя.jpg. Больше ничего не трогаем — остальное
+    хозяин пишет как обычный HTML."""
+    from urllib.parse import quote
+
+    def swap(match):
+        name = _diy_safe_name(match.group(1))
+        if not name:
+            return match.group(0)
+        return "/diy/asset/" + item_id + "/" + quote(name)
+
+    return re.sub(r"\{\{\s*([^{}]+?)\s*\}\}", swap, body or "")
+
+
+@app.get("/diy/a/<item_id>")
+def diy_article_page(item_id):
+    """Отдельная страница одного творения: полная статья, что открывается из
+    короткой карточки в новом окне. Содержимое — код, написанный хозяином;
+    вложения он подставляет по имени через {{…}}."""
+    with diy_lock:
+        work = diy_items.get(item_id)
+        if not work or (work.get("hidden") and not _diy_can_edit()):
+            snapshot = None
+        else:
+            snapshot = {
+                "title": work.get("title", ""),
+                "summary": work.get("summary", ""),
+                "kind": work.get("kind", ""),
+                "body": work.get("body", ""),
+                "links": list(work.get("links", [])),
+                "cover": bool(work.get("cover")),
+                "hidden": bool(work.get("hidden")),
+            }
+    if snapshot is None:
+        return "Творение не найдено", 404
+
+    body_html = _diy_render_body(item_id, snapshot["body"])
+    if not body_html.strip():
+        # Кода статьи ещё нет — показываем хотя бы название и описание,
+        # чтобы страница не выглядела сломанной.
+        body_html = ("<p class=\"lead\">" + str(escape(snapshot["summary"])) + "</p>"
+                     if snapshot["summary"] else
+                     "<p class=\"lead\">Статья ещё пишется.</p>")
+    links_html = ""
+    if snapshot["links"]:
+        chips = "".join(
+            f'<a href="{escape(l["url"])}" target="_blank" rel="noopener">{escape(l["label"])}</a>'
+            for l in snapshot["links"])
+        links_html = f'<div class="links">{chips}</div>'
+    draft = ('<span class="draft">черновик</span>' if snapshot["hidden"] else "")
+
+    html = """<!doctype html>
+    <html lang="ru">
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <meta name="theme-color" content="#080b12">
+      <meta name="description" content="__DESC__">
+      __ICONLINKS__
+      <title>__TITLE__ · Страна DIY</title>
+      <style>
+        :root { color-scheme: dark; --bg:#0d1321; --line:rgba(255,255,255,.1);
+                --muted:#98a2b6; --ink:#f2f5fb; --pc:#2de2ff; --warm:#ffd84a; }
+        * { box-sizing: border-box; }
+        body { margin:0; min-height:100svh; color:var(--ink);
+               font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+               background:
+                 radial-gradient(circle at 12% 4%, rgba(57,126,255,.16), transparent 34rem),
+                 radial-gradient(circle at 88% 90%, rgba(149,65,255,.14), transparent 36rem),
+                 var(--bg); }
+        .wrap { width:min(820px, calc(100% - 36px)); margin:0 auto;
+                padding: clamp(20px,4vw,44px) 0 80px; }
+        .top { display:flex; align-items:center; gap:12px; margin-bottom:26px; }
+        .back { display:inline-flex; align-items:center; gap:8px; height:36px;
+                padding:0 14px; color:#cdd6e6; text-decoration:none;
+                font:600 .8rem "Cascadia Code", Consolas, monospace;
+                background:rgba(255,255,255,.05); border:1px solid var(--line);
+                border-radius:10px; transition:.16s; }
+        .back:hover { color:#fff; border-color:var(--pc); background:rgba(45,226,255,.1); }
+        .back svg { width:16px; height:16px; }
+        .kind { display:inline-flex; align-items:center; padding:4px 12px; color:#9fe8ff;
+                background:rgba(45,226,255,.12); border-radius:999px;
+                font:700 .64rem "Cascadia Code", Consolas, monospace;
+                letter-spacing:.14em; text-transform:uppercase; }
+        .draft { display:inline-flex; align-items:center; padding:4px 12px; color:#ffd0a0;
+                 background:rgba(255,140,60,.16); border-radius:999px;
+                 font:700 .64rem "Cascadia Code", Consolas, monospace;
+                 letter-spacing:.14em; text-transform:uppercase; }
+        .tags { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px; }
+        h1.title { margin:0 0 10px; font-size:clamp(1.7rem,5vw,2.9rem); line-height:1.08;
+                   letter-spacing:-.02em;
+                   font-family:"Cascadia Code", Consolas, monospace; color:#dffaff;
+                   text-shadow: 1px 0 rgba(255,63,164,.5), -1px 0 rgba(33,220,255,.5); }
+        .summary { margin:0 0 22px; color:var(--muted); font-size:1.05rem; line-height:1.6; }
+        .links { display:flex; flex-wrap:wrap; gap:8px; margin:0 0 26px; }
+        .links a { display:inline-flex; align-items:center; gap:6px; padding:7px 13px;
+                   color:#cfe6ff; text-decoration:none; font-size:.84rem;
+                   background:rgba(255,255,255,.06); border:1px solid var(--line);
+                   border-radius:9px; }
+        .links a:hover { color:#04121a; background:var(--pc); border-color:var(--pc); }
+        hr.sep { border:0; border-top:1px solid var(--line); margin:0 0 26px; }
+
+        /* Оформление самого содержимого статьи. Хозяин может задавать своё
+           прямо в коде, а это — разумные значения по умолчанию, чтобы даже
+           голый текст выглядел опрятно. */
+        .article { font-size:1.06rem; line-height:1.72; color:#e7ebf3; }
+        .article > *:first-child { margin-top:0; }
+        .article h2 { margin:2em 0 .5em; font-size:1.5rem; letter-spacing:-.01em;
+                      font-family:"Cascadia Code", Consolas, monospace; color:#dffaff; }
+        .article h3 { margin:1.6em 0 .4em; font-size:1.2rem;
+                      font-family:"Cascadia Code", Consolas, monospace; color:#cfeaff; }
+        .article p { margin:0 0 1.05em; }
+        .article a { color:var(--pc); }
+        .article img { max-width:100%; height:auto; border-radius:14px;
+                       border:1px solid var(--line); display:block; margin:1.4em 0; }
+        .article figure { margin:1.4em 0; }
+        .article figure img { margin:0; }
+        .article figcaption { margin-top:8px; color:var(--muted); font-size:.86rem;
+                              text-align:center; }
+        .article ul, .article ol { margin:0 0 1.1em; padding-left:1.4em; }
+        .article li { margin:.3em 0; }
+        .article blockquote { margin:1.3em 0; padding:.6em 1.1em; color:#cdd6e6;
+                              border-left:3px solid var(--pc); background:rgba(45,226,255,.06);
+                              border-radius:0 10px 10px 0; }
+        .article pre { margin:1.3em 0; padding:16px 18px; overflow-x:auto;
+                       background:rgba(4,9,18,.85); border:1px solid var(--line);
+                       border-radius:12px; font:.9rem/1.55 "Cascadia Code", Consolas, monospace;
+                       color:#d6e2f0; }
+        .article code { font-family:"Cascadia Code", Consolas, monospace;
+                        font-size:.9em; background:rgba(255,255,255,.08);
+                        padding:.12em .4em; border-radius:6px; }
+        .article pre code { background:none; padding:0; }
+        /* Скачиваемый файл-вложение: <a class="dl" href="{{файл.zip}}">…</a> */
+        .article a.dl { display:inline-flex; align-items:center; gap:9px; margin:.4em 0;
+                        padding:11px 16px; color:#04121a; text-decoration:none;
+                        background:var(--warm); border-radius:11px; font-weight:700; }
+        .article a.dl:hover { filter:brightness(1.08); }
+        .article .gallery { display:grid; gap:12px; margin:1.4em 0;
+                            grid-template-columns:repeat(auto-fit, minmax(200px,1fr)); }
+        .article .gallery img { margin:0; }
+        @media (prefers-reduced-motion: reduce) { * { transition:none !important; } }
+      </style>
+    </head>
+    <body>
+      <main class="wrap">
+        <div class="top">
+          <a class="back" href="/diy">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                 stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg>
+            Страна DIY
+          </a>
+        </div>
+        <div class="tags">__TAGS__</div>
+        <h1 class="title">__TITLE__</h1>
+        __SUMMARY__
+        __LINKS__
+        <hr class="sep">
+        <article class="article">__BODY__</article>
+      </main>
+    </body>
+    </html>
+    """
+    summary_html = (f'<p class="summary">{escape(snapshot["summary"])}</p>'
+                    if snapshot["summary"] else "")
+    tags = (f'<span class="kind">{escape(snapshot["kind"])}</span>' if snapshot["kind"] else "") + draft
+    return (html.replace("__ICONLINKS__", ICON_LINKS)
+                .replace("__DESC__", str(escape(snapshot["summary"] or snapshot["title"])))
+                .replace("__TAGS__", tags)
+                .replace("__SUMMARY__", summary_html)
+                .replace("__LINKS__", links_html)
+                .replace("__TITLE__", str(escape(snapshot["title"])))
+                .replace("__BODY__", body_html))
+
+
 def _soon_page(name, kicker, headline, lead, points):
     """Заготовка под раздел: страница уже есть и открывается с полки, а
     содержимое появится позже. Пустая страница выглядела бы поломкой,
@@ -7882,7 +8213,13 @@ def _soon_page(name, kicker, headline, lead, points):
         }
         .page { width: min(1380px, calc(100% - 40px)); margin: 0 auto;
                 padding: clamp(24px, 5vw, 56px) 0 40px; }
-        .top { position: relative; display: flex; align-items: center; margin-bottom: 22px; }
+        .top { position: relative; display: flex; align-items: center; gap: 14px; margin-bottom: 22px; }
+        .back { display: inline-flex; align-items: center; justify-content: center;
+                width: 42px; height: 42px; flex: none; color: #7ce0ff; text-decoration: none;
+                border: 1px solid rgba(45,226,255,.3); border-radius: 50%;
+                background: rgba(45,226,255,.07); transition: .18s; }
+        .back svg { width: 20px; height: 20px; }
+        .back:hover { color: #fff; border-color: var(--pc); background: rgba(45,226,255,.18); }
         .eyebrow { display: inline-flex; align-items: center; gap: 10px; color: #cdd2df;
                    font-size: .76rem; font-weight: 700; letter-spacing: .16em;
                    text-transform: uppercase; text-decoration: none; }
@@ -7914,6 +8251,7 @@ def _soon_page(name, kicker, headline, lead, points):
     <body>
       <main class="page">
         <div class="top">
+          <a class="back" href="/" title="На главную" aria-label="На главную"><svg viewBox="0 0 24 24" fill="none"><path d="M19 12H5m0 0 6-6m-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
           <a class="eyebrow" href="/">__KICKER__</a>
           <img class="mark" src="/static/icons/vg-plain.svg" alt="Vitaz Gio"
                width="512" height="512">
@@ -7968,7 +8306,13 @@ def diy_page():
         .page { width: min(1380px, calc(100% - 40px)); margin: 0 auto;
                 padding: clamp(24px, 5vw, 52px) 0 0; }
 
-        .top { position: relative; display: flex; align-items: center; margin-bottom: 22px; }
+        .top { position: relative; display: flex; align-items: center; gap: 14px; margin-bottom: 22px; }
+        .back { display: inline-flex; align-items: center; justify-content: center;
+                width: 42px; height: 42px; flex: none; color: #7ce0ff; text-decoration: none;
+                border: 1px solid rgba(45,226,255,.3); border-radius: 50%;
+                background: rgba(45,226,255,.07); transition: .18s; }
+        .back svg { width: 20px; height: 20px; }
+        .back:hover { color: #fff; border-color: var(--pc); background: rgba(45,226,255,.18); }
         .eyebrow { display: inline-flex; align-items: center; gap: 10px; color: #cdd2df;
                    font-size: .76rem; font-weight: 700; letter-spacing: .16em;
                    text-transform: uppercase; text-decoration: none; }
@@ -8082,6 +8426,38 @@ def diy_page():
         .sheet-keys .btn { flex: 1; justify-content: center; }
         .note { margin: 0 0 14px; color: #ff9aa6; font-size: .82rem; min-height: 1em; }
 
+        /* Код статьи — моноширинное поле пошире: сюда ложится HTML творения. */
+        .field textarea.code { min-height: 220px; font-family: "Cascadia Code", Consolas, monospace;
+                               font-size: .82rem; line-height: 1.5; white-space: pre; overflow-wrap: normal; }
+        .hint { margin: -8px 0 14px; color: #7f8aa0; font-size: .74rem; line-height: 1.5; }
+        .hint code { padding: 1px 5px; color: #cfe6ff; background: rgba(255,255,255,.08);
+                     border-radius: 5px; font-size: .92em; }
+        /* Список вложений: каждое — имя (тык копирует {{имя}}), вес и «×». */
+        .assets { display: flex; flex-direction: column; gap: 6px; margin: 4px 0 8px; }
+        .asset { display: flex; align-items: center; gap: 10px; padding: 8px 10px;
+                 background: rgba(0,0,0,.3); border: 1px solid var(--line); border-radius: 9px; }
+        .asset .tk { flex: none; width: 26px; height: 26px; display: grid; place-items: center;
+                     border-radius: 6px; color: #04121a; font-size: .62rem; font-weight: 800; }
+        .asset .tk.img { background: #63f5ad; }
+        .asset .tk.file { background: var(--warm); }
+        .asset .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+                     white-space: nowrap; color: #dbe4f2; font-size: .82rem; cursor: copy;
+                     font-family: "Cascadia Code", Consolas, monospace; }
+        .asset .nm:hover { color: var(--pc); }
+        .asset .sz { flex: none; color: var(--muted); font-size: .72rem; }
+        .asset .rm { flex: none; width: 26px; height: 26px; padding: 0; cursor: pointer;
+                     color: #ff9aa6; background: transparent; border: 1px solid rgba(255,90,110,.3);
+                     border-radius: 7px; }
+        .asset .rm:hover { background: rgba(255,90,110,.14); border-color: #ff5a6e; }
+        .asset-keys { display: flex; gap: 8px; }
+        .asset-keys .btn { flex: 1; justify-content: center; height: 34px; font-size: .8rem; }
+        /* «Открыть» на карточке — заметная строка снизу для всех гостей. */
+        .open-row { margin-top: auto; padding-top: 4px; }
+        .open-row .btn { width: 100%; justify-content: center; color: #04121a;
+                         background: var(--pc); border-color: var(--pc); height: 34px; }
+        .open-row .btn:hover { filter: brightness(1.08); }
+        .work .shot { cursor: pointer; }
+
         .toast { position: fixed; left: 50%; bottom: 26px; z-index: 90;
                  transform: translateX(-50%); padding: 11px 18px;
                  color: #04121a; background: var(--pc); border-radius: 10px;
@@ -8100,6 +8476,7 @@ def diy_page():
     <body>
       <main class="page">
         <div class="top">
+          <a class="back" href="/" title="На главную" aria-label="На главную"><svg viewBox="0 0 24 24" fill="none"><path d="M19 12H5m0 0 6-6m-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
           <a class="eyebrow" href="/">vitazgio.ru · страна diy</a>
           <img class="mark" src="/static/icons/vg-plain.svg" alt="Vitaz Gio"
                width="512" height="512">
@@ -8112,6 +8489,8 @@ def diy_page():
       </main>
 
       <input type="file" id="pick" accept="image/*" hidden>
+      <input type="file" id="pick-img" accept="image/*" hidden>
+      <input type="file" id="pick-file" hidden>
 
       <script>
       (() => {
@@ -8119,6 +8498,12 @@ def diy_page():
         const $ = (id) => document.getElementById(id);
         const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g,
           (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+        const fmtBytes = (n) => {
+          n = n || 0;
+          if (n < 1024) return n + " Б";
+          if (n < 1048576) return (n / 1024).toFixed(0) + " КБ";
+          return (n / 1048576).toFixed(1) + " МБ";
+        };
 
         const SVG = {
           plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
@@ -8194,8 +8579,8 @@ def diy_page():
             : "Пока пусто";
           grid.innerHTML = list.map((w) => {
             const shot = w.cover
-              ? '<div class="shot" style="background-image:url(/diy/cover/' + w.id + ')"></div>'
-              : '<div class="shot none">без фото</div>';
+              ? '<div class="shot" data-open="' + w.id + '" style="background-image:url(/diy/cover/' + w.id + ')"></div>'
+              : '<div class="shot none" data-open="' + w.id + '">без фото</div>';
             const flags = [];
             if (w.hidden) flags.push('<span class="flag hid">черновик</span>');
             if (w.pinned) flags.push('<span class="flag pin">закреплено</span>');
@@ -8212,6 +8597,7 @@ def diy_page():
               "<h2>" + esc(w.title) + "</h2>" +
               (w.summary ? "<p>" + esc(w.summary) + "</p>" : "") +
               (w.links && w.links.length ? '<div class="links">' + linkChips(w.links) + "</div>" : "") +
+              '<div class="open-row"><button class="btn" data-open="' + w.id + '">Открыть статью →</button></div>' +
               tools + "</div></article>";
           }).join("");
         };
@@ -8242,6 +8628,19 @@ def diy_page():
             "</select></label>" +
             '<label class="field"><span>Описание</span>' +
             '<textarea id="f-summary" maxlength="600">' + esc(work.summary) + "</textarea></label>" +
+            '<label class="field"><span>Код статьи</span>' +
+            '<textarea id="f-body" class="code" spellcheck="false" ' +
+            'placeholder="HTML статьи. Вложения — по имени: {{плата.jpg}}">' +
+            esc(work.body || "") + "</textarea></label>" +
+            '<p class="hint">Обычный HTML. Фото по имени: <code>&lt;img src="{{плата.jpg}}"&gt;</code>. ' +
+            'Файл на скачивание: <code>&lt;a class="dl" href="{{прошивка.zip}}"&gt;Скачать&lt;/a&gt;</code>. ' +
+            'Имена вложений — ниже; тык по имени копирует <code>{{…}}</code>.</p>' +
+            '<div class="field"><span>Фото и файлы</span>' +
+            '<div class="assets" id="f-assets"></div>' +
+            '<div class="asset-keys">' +
+            '<button class="btn" type="button" id="f-add-img">Загрузить фото</button>' +
+            '<button class="btn" type="button" id="f-add-file">Загрузить файл</button>' +
+            "</div></div>" +
             '<div class="field"><span>Ссылки</span><div id="f-links">' +
             (work.links && work.links.length
               ? work.links.map((l) => linkRow(l.label, l.url)).join("")
@@ -8264,7 +8663,59 @@ def diy_page():
             "</div></section>";
           document.body.appendChild(veil);
           sheet = { veil, work, fresh, id: work.id || null };
+          sheet.assets = (work.assets || []).slice();
           veil.querySelector("#f-title").focus();
+
+          // Список вложений: имя (тык копирует {{имя}}), вес и удаление.
+          const paintAssets = () => {
+            const box = veil.querySelector("#f-assets");
+            if (!sheet.assets.length) {
+              box.innerHTML = '<p class="hint" style="margin:0">Пока нет вложений.</p>';
+              return;
+            }
+            box.innerHTML = sheet.assets.map((a) =>
+              '<div class="asset">' +
+              '<span class="tk ' + (a.kind === "image" ? "img" : "file") + '">' +
+              (a.kind === "image" ? "IMG" : "ФАЙЛ") + "</span>" +
+              '<span class="nm" data-copy="' + esc(a.name) + '" title="Скопировать тег">' +
+              esc(a.name) + "</span>" +
+              '<span class="sz">' + fmtBytes(a.size) + "</span>" +
+              '<button class="rm" type="button" data-rmasset="' + esc(a.name) + '">×</button>' +
+              "</div>").join("");
+          };
+          paintAssets();
+          sheet.paintAssets = paintAssets;
+
+          const needSaved = () => {
+            if (sheet.id) return true;
+            note("Сначала сохрани запись — вложения цепляются к ней.");
+            return false;
+          };
+          veil.querySelector("#f-add-img").addEventListener("click", () => {
+            if (needSaved()) $("pick-img").click();
+          });
+          veil.querySelector("#f-add-file").addEventListener("click", () => {
+            if (needSaved()) $("pick-file").click();
+          });
+          veil.querySelector("#f-assets").addEventListener("click", async (e) => {
+            const copy = e.target.closest("[data-copy]");
+            if (copy) {
+              const tag = "{{" + copy.dataset.copy + "}}";
+              try { await navigator.clipboard.writeText(tag); toast("Скопировано: " + tag); }
+              catch (err) { toast(tag, false); }
+              return;
+            }
+            const rm = e.target.closest("[data-rmasset]");
+            if (rm && sheet.id) {
+              const name = rm.dataset.rmasset;
+              try {
+                await send("/api/diy/" + sheet.id + "/asset/" +
+                  encodeURIComponent(name), "DELETE");
+              } catch (err) { toast(err.message, true); return; }
+              sheet.assets = sheet.assets.filter((a) => a.name !== name);
+              paintAssets();
+            }
+          });
 
           const shut = () => { veil.remove(); sheet = null; };
           veil.addEventListener("click", (e) => { if (e.target === veil) shut(); });
@@ -8307,6 +8758,7 @@ def diy_page():
             title: veil.querySelector("#f-title").value,
             kind: veil.querySelector("#f-kind").value,
             summary: veil.querySelector("#f-summary").value,
+            body: veil.querySelector("#f-body").value,
             links,
             hidden: veil.querySelector("#f-hidden").checked,
             pinned: veil.querySelector("#f-pinned").checked,
@@ -8349,8 +8801,35 @@ def diy_page():
           } catch (err) { sheet.note(err.message); }
         });
 
+        // Вложения статьи (фото и файлы). Грузятся к сохранённой записи и
+        // сразу появляются в списке — оттуда хозяин копирует их имена в код.
+        const uploadAsset = async (input) => {
+          const file = input.files[0];
+          input.value = "";
+          if (!file || !sheet || !sheet.id) return;
+          const form = new FormData();
+          form.append("file", file);
+          try {
+            const r = await fetch("/api/diy/" + sheet.id + "/asset",
+              { method: "POST", credentials: "same-origin", body: form });
+            const d = await r.json().catch(() => ({}));
+            if (!r.ok) throw new Error(d.error || "Не вышло.");
+            sheet.assets = sheet.assets.filter((a) => a.name !== d.name);
+            sheet.assets.push({ name: d.name, kind: d.kind, size: d.size });
+            if (sheet.paintAssets) sheet.paintAssets();
+            toast("Загружено: " + d.name);
+          } catch (err) { if (sheet) sheet.note(err.message); }
+        };
+        $("pick-img").addEventListener("change", (e) => uploadAsset(e.target));
+        $("pick-file").addEventListener("change", (e) => uploadAsset(e.target));
+
         /* ── общие нажатия ─────────────────────────────────────────── */
         document.addEventListener("click", async (e) => {
+          const open = e.target.closest("[data-open]");
+          if (open) {
+            window.open("/diy/a/" + open.dataset.open, "_blank", "noopener");
+            return;
+          }
           const act = e.target.closest("[data-act]");
           if (act) {
             const what = act.dataset.act;
@@ -8463,6 +8942,13 @@ def music_page():
                  padding: clamp(20px, 4vw, 44px) 0 24px; }
 
         .mtop { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+        .mtop-left { display: flex; align-items: center; gap: 14px; }
+        .back { display: inline-flex; align-items: center; justify-content: center;
+                width: 42px; height: 42px; flex: none; color: #7ce0ff; text-decoration: none;
+                border: 1px solid rgba(45,226,255,.3); border-radius: 50%;
+                background: rgba(45,226,255,.07); transition: .18s; }
+        .back svg { width: 20px; height: 20px; }
+        .back:hover { color: #fff; border-color: var(--pc); background: rgba(45,226,255,.18); }
         .eyebrow { display: inline-flex; align-items: center; gap: 10px; color: #cdd2df;
                    font-size: .76rem; font-weight: 700; letter-spacing: .16em;
                    text-transform: uppercase; text-decoration: none; }
@@ -8639,7 +9125,10 @@ def music_page():
     <body>
       <main class="mpage">
         <header class="mtop">
-          <a class="eyebrow" href="/">vitazgio.ru · музыка</a>
+          <div class="mtop-left">
+            <a class="back" href="/" title="На главную" aria-label="На главную"><svg viewBox="0 0 24 24" fill="none"><path d="M19 12H5m0 0 6-6m-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
+            <a class="eyebrow" href="/">vitazgio.ru · музыка</a>
+          </div>
           <img class="hero-mark" src="/static/icons/vg-plain.svg" alt="Vitaz Gio"
                width="512" height="512">
         </header>
