@@ -8734,7 +8734,7 @@ def _notebook_load():
         e.setdefault("note", "")
         e.setdefault("width", "half")
         e.setdefault("border", "solid")
-        e.setdefault("accent", "#3b6cff")
+        e.setdefault("accent", "#2de2ff")
         e.setdefault("order", 0)
 
 
@@ -8754,7 +8754,7 @@ def _notebook_entry_public(eid, e):
     row = {
         "id": eid, "page": e.get("page"), "type": e.get("type"),
         "title": e.get("title", ""), "width": e.get("width", "half"),
-        "border": e.get("border", "solid"), "accent": e.get("accent", "#3b6cff"),
+        "border": e.get("border", "solid"), "accent": e.get("accent", "#2de2ff"),
         "note": e.get("note", ""), "order": e.get("order", 0),
     }
     if e.get("type") == "link":
@@ -8863,7 +8863,7 @@ def notebook_entry_add():
         order = 1 + max([v.get("order", 0) for v in notebook_data["entries"].values()],
                         default=0)
         e = {"page": page, "type": etype, "title": "", "note": "",
-             "width": "half", "border": "solid", "accent": "#3b6cff",
+             "width": "half", "border": "solid", "accent": "#2de2ff",
              "order": order, "created": time.time()}
         if etype == "link":
             e["url"] = ""
@@ -8960,8 +8960,8 @@ def notebook_pdf_view(eid):
 @app.get("/notebook")
 @login_required
 def notebook_page():
-    """Блокнот: страницы-вкладки как в браузере, записи трёх видов. Светлый
-    «виндовский» стиль — намеренно отличается от остального тёмного сайта."""
+    """Блокнот: страницы-вкладки как в браузере, записи трёх видов. Оформлен
+    в едином тёмном стиле сайта — бирюзовый акцент, шрифт Cascadia."""
     html = """<!doctype html>
     <html lang="ru">
     <head>
@@ -8973,51 +8973,55 @@ def notebook_page():
       <link rel="manifest" href="/manifest.webmanifest">
       <title>Блокнот · vitazgio.ru</title>
       <style>
-        :root { --bg:#eef1f6; --card:#ffffff; --ink:#1b1f27; --muted:#5b6473;
-                --line:#d5dbe6; --accent:#0067c0; --accent-soft:#e6f0fb; }
+        /* Единый тёмный стиль сайта: тот же фон, бирюзовый акцент, Cascadia.
+           Белый — только значок блокнота на карточке кабинета, не страница. */
+        :root { --card:#111a2b; --ink:#e9fbff; --muted:#8f99ab;
+                --line:rgba(255,255,255,.1); --accent:#2de2ff; }
         * { box-sizing: border-box; }
-        body { margin:0; min-height:100svh; color:var(--ink); background:var(--bg);
-               font-family:"Segoe UI", system-ui, -apple-system, Roboto, sans-serif; }
-        .wrap { max-width:1180px; margin:0 auto; padding:20px clamp(14px,3vw,32px) 80px; }
-        .top { display:flex; align-items:center; gap:14px; margin-bottom:18px; }
-        .back { width:40px; height:40px; flex:none; display:grid; place-items:center;
-                color:var(--accent); text-decoration:none; border:1px solid var(--line);
-                border-radius:10px; background:var(--card); }
-        .back:hover { background:var(--accent-soft); }
+        body { margin:0; min-height:100svh; color:var(--ink);
+               font-family:"Cascadia Code", Consolas, monospace;
+               background:radial-gradient(circle at top left, #192a44, #0d1321 55%); }
+        .wrap { max-width:1180px; margin:0 auto; padding:clamp(18px,3vw,40px) clamp(14px,3vw,32px) 80px; }
+        .top { display:flex; align-items:center; gap:14px; margin-bottom:20px; }
+        .back { width:44px; height:44px; flex:none; display:grid; place-items:center;
+                color:var(--accent); text-decoration:none; border:1px solid rgba(45,226,255,.3);
+                border-radius:50%; background:rgba(45,226,255,.07); transition:.18s; }
+        .back:hover { color:#fff; border-color:var(--accent); background:rgba(45,226,255,.18); }
         .back svg { width:20px; height:20px; }
-        h1 { margin:0; font-size:clamp(1.4rem,3vw,2rem); font-weight:700; letter-spacing:-.01em; }
-        h1 span { color:var(--accent); }
+        h1 { margin:0; font-size:clamp(1.5rem,3.5vw,2.3rem); font-weight:700; letter-spacing:-.02em;
+             color:#eaf6ff; text-shadow:0 0 22px rgba(45,226,255,.35); }
+        h1 span { color:var(--accent); text-shadow:0 0 22px rgba(45,226,255,.5); }
 
         /* Вкладки-страницы как в браузере */
         .tabs { display:flex; align-items:flex-end; gap:4px; flex-wrap:wrap;
-                border-bottom:2px solid var(--line); padding-bottom:0; margin-bottom:18px; }
-        .tab { display:inline-flex; align-items:center; gap:8px; height:38px; padding:0 12px;
+                border-bottom:1px solid var(--line); margin-bottom:18px; }
+        .tab { display:inline-flex; align-items:center; gap:8px; height:38px; padding:0 13px;
                color:var(--muted); cursor:pointer; border:1px solid var(--line);
-               border-bottom:none; border-radius:9px 9px 0 0; background:#e2e7f0;
-               position:relative; top:2px; font-size:.9rem; max-width:220px; }
-        .tab.on { color:var(--ink); background:var(--card); top:2px; font-weight:600;
+               border-bottom:none; border-radius:8px 8px 0 0; background:rgba(255,255,255,.03);
+               position:relative; top:1px; font-size:.82rem; max-width:220px; }
+        .tab.on { color:#eaf6ff; background:rgba(45,226,255,.08); font-weight:600;
                   box-shadow:0 -2px 0 var(--accent) inset; }
         .tab .nm { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
         .tab .x { width:18px; height:18px; flex:none; display:grid; place-items:center;
-                  border-radius:50%; font-size:.9rem; color:#98a1b2; }
-        .tab .x:hover { background:#d0d7e4; color:#c0392b; }
+                  border-radius:50%; font-size:.9rem; color:#6b7385; }
+        .tab .x:hover { background:rgba(255,90,110,.18); color:#ff6b81; }
         .tab-add { width:38px; height:34px; flex:none; display:grid; place-items:center;
-                   cursor:pointer; color:var(--accent); border:1px dashed var(--line);
-                   border-radius:9px; background:var(--card); position:relative; top:0; font-size:1.2rem; }
-        .tab-add:hover { background:var(--accent-soft); }
+                   cursor:pointer; color:var(--accent); border:1px dashed rgba(45,226,255,.35);
+                   border-radius:8px; background:rgba(45,226,255,.05); position:relative; top:0; font-size:1.2rem; }
+        .tab-add:hover { background:rgba(45,226,255,.14); }
 
         .bar { display:flex; align-items:center; gap:10px; margin-bottom:16px; }
         .btn { display:inline-flex; align-items:center; gap:8px; height:38px; padding:0 16px;
-               color:#fff; cursor:pointer; font:600 .9rem inherit; border:0; border-radius:9px;
-               background:var(--accent); }
-        .btn:hover { filter:brightness(1.06); }
-        .btn.ghost { color:var(--ink); background:var(--card); border:1px solid var(--line); }
-        .btn.ghost:hover { background:#e9eef6; }
+               color:#04121c; cursor:pointer; font:700 .8rem inherit; letter-spacing:.03em; border:0; border-radius:9px;
+               background:linear-gradient(90deg,#2de2ff,#63f5ad); }
+        .btn:hover { filter:brightness(1.08); }
+        .btn.ghost { color:#cfe2ee; background:rgba(255,255,255,.05); border:1px solid var(--line); }
+        .btn.ghost:hover { color:#fff; border-color:var(--accent); background:rgba(45,226,255,.1); }
         .btn svg { width:16px; height:16px; }
 
         .grid { display:flex; flex-wrap:wrap; gap:14px; align-items:flex-start; }
-        .entry { background:var(--card); border-radius:12px; padding:14px 15px;
-                 box-shadow:0 1px 3px rgba(20,30,50,.08); border:2px solid var(--accent);
+        .entry { background:rgba(10,17,30,.72); border-radius:12px; padding:14px 15px;
+                 box-shadow:0 8px 26px rgba(0,0,0,.28); border:2px solid var(--accent);
                  display:flex; flex-direction:column; gap:10px; }
         .entry.w-half { width:calc(50% - 7px); }
         .entry.w-full { width:100%; }
@@ -9025,62 +9029,66 @@ def notebook_page():
         .entry.b-dashed { border-style:dashed; }
         .entry.b-dotted { border-style:dotted; }
         .entry.b-double { border-style:double; border-width:4px; }
-        .entry.b-none { border-color:transparent !important; box-shadow:0 1px 4px rgba(20,30,50,.12); }
+        .entry.b-none { border-color:transparent !important; box-shadow:0 0 0 1px var(--line), 0 8px 26px rgba(0,0,0,.28); }
         .e-head { display:flex; align-items:center; gap:10px; }
         .e-kind { flex:none; width:34px; height:34px; display:grid; place-items:center;
-                  border-radius:8px; color:#fff; font-size:.6rem; font-weight:800; }
-        .e-title { flex:1; min-width:0; font-size:.98rem; font-weight:600; cursor:pointer;
+                  border-radius:8px; color:#04121c; font-size:.58rem; font-weight:800; }
+        .e-title { flex:1; min-width:0; font-size:.9rem; font-weight:600; cursor:pointer; color:#dfe7f3;
                    overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
         .e-title:hover { color:var(--accent); text-decoration:underline; }
         .e-acts { flex:none; display:flex; gap:6px; }
         .e-acts button { width:30px; height:30px; display:grid; place-items:center; cursor:pointer;
-                         color:var(--muted); border:1px solid var(--line); border-radius:7px; background:#f7f9fc; }
-        .e-acts button:hover { background:#eef2f8; color:var(--ink); }
-        .e-acts button.kill { color:#c0392b; }
-        .e-acts button.kill:hover { background:#fdecea; border-color:#f0b7ae; }
+                         color:#8f99ab; border:1px solid var(--line); border-radius:7px; background:rgba(255,255,255,.04); }
+        .e-acts button:hover { background:rgba(45,226,255,.1); color:#fff; border-color:rgba(45,226,255,.4); }
+        .e-acts button.kill { color:#ff8f9c; }
+        .e-acts button.kill:hover { background:rgba(255,90,110,.12); border-color:rgba(255,90,110,.45); }
         .e-acts button svg { width:15px; height:15px; }
         .e-acts .tri svg { transition:transform .2s; }
         .e-acts .tri.open svg { transform:rotate(180deg); }
-        .e-body { border-top:1px solid var(--line); padding-top:10px; color:#2c3340;
-                  font-size:.9rem; line-height:1.55; white-space:pre-wrap; word-break:break-word; }
-        .e-note-label { display:block; margin-bottom:4px; color:var(--muted); font-size:.72rem;
-                        font-weight:700; letter-spacing:.06em; text-transform:uppercase; }
+        .e-body { border-top:1px solid var(--line); padding-top:10px; color:#b8c2d4;
+                  font-size:.86rem; line-height:1.55; white-space:pre-wrap; word-break:break-word; }
+        .e-note-label { display:block; margin-bottom:4px; color:var(--muted); font-size:.68rem;
+                        font-weight:700; letter-spacing:.08em; text-transform:uppercase; }
         .empty { padding:50px 16px; color:var(--muted); text-align:center; }
 
         /* Диалоги */
         .veil { position:fixed; inset:0; z-index:60; display:grid; place-items:center; padding:18px;
-                overflow:auto; background:rgba(20,28,44,.4); }
-        .sheet { width:min(500px,100%); background:var(--card); border-radius:14px; padding:22px;
-                 box-shadow:0 30px 80px rgba(10,20,40,.35); }
-        .sheet h3 { margin:0 0 16px; font-size:1.15rem; }
+                overflow:auto; background:rgba(3,6,13,.72); backdrop-filter:blur(3px); }
+        .sheet { width:min(500px,100%); color:#e8fbff; border:1px solid rgba(45,226,255,.28);
+                 background:linear-gradient(150deg, rgba(16,30,47,.99), rgba(20,16,37,.99));
+                 border-radius:14px; padding:22px; box-shadow:0 30px 90px rgba(0,0,0,.6); }
+        .sheet h3 { margin:0 0 16px; font-size:1.1rem; letter-spacing:.02em; }
         .fld { display:block; margin-bottom:13px; }
-        .fld span { display:block; margin-bottom:5px; color:var(--muted); font-size:.74rem;
-                    font-weight:700; letter-spacing:.05em; text-transform:uppercase; }
-        .fld input, .fld textarea, .fld select { width:100%; padding:10px 12px; color:var(--ink);
-                    font:inherit; border:1px solid var(--line); border-radius:9px; background:#fbfcfe; }
+        .fld span { display:block; margin-bottom:5px; color:var(--muted); font-size:.7rem;
+                    font-weight:700; letter-spacing:.06em; text-transform:uppercase; }
+        .fld input, .fld textarea, .fld select { width:100%; padding:10px 12px; color:#f4fbff;
+                    font:inherit; border:1px solid var(--line); border-radius:9px; background:rgba(4,10,20,.6); }
         .fld textarea { min-height:120px; resize:vertical; }
         .fld input:focus, .fld textarea:focus, .fld select:focus { outline:none; border-color:var(--accent); }
+        .fld select option { background:#111a2b; color:#e9fbff; }
         .row { display:flex; gap:10px; }
         .row .fld { flex:1; }
         .types { display:flex; gap:8px; margin-bottom:14px; }
         .type-btn { flex:1; height:64px; display:flex; flex-direction:column; align-items:center;
                     justify-content:center; gap:5px; cursor:pointer; color:var(--muted);
-                    border:1px solid var(--line); border-radius:10px; background:#fbfcfe; font-size:.8rem; }
+                    border:1px solid var(--line); border-radius:10px; background:rgba(255,255,255,.03); font-size:.76rem; }
         .type-btn svg { width:20px; height:20px; }
-        .type-btn.on { color:var(--accent); border-color:var(--accent); background:var(--accent-soft); }
+        .type-btn.on { color:var(--accent); border-color:var(--accent); background:rgba(45,226,255,.12); }
         .swatch { display:flex; gap:7px; flex-wrap:wrap; }
-        .swatch button { width:26px; height:26px; border-radius:50%; cursor:pointer; border:2px solid #fff;
+        .swatch button { width:26px; height:26px; border-radius:50%; cursor:pointer; border:2px solid rgba(255,255,255,.15);
                          box-shadow:0 0 0 1px var(--line); }
         .swatch button.on { box-shadow:0 0 0 2px var(--accent); }
         .keys { display:flex; justify-content:flex-end; gap:10px; margin-top:6px; }
-        .note-msg { margin:0 0 10px; color:#c0392b; font-size:.82rem; min-height:1em; }
+        .note-msg { margin:0 0 10px; color:#ff9aa6; font-size:.8rem; min-height:1em; }
 
         .lb { position:fixed; inset:0; z-index:80; display:grid; place-items:center; padding:18px;
-              background:rgba(15,20,30,.75); }
-        .lb iframe { width:min(1000px,100%); height:100%; border:0; border-radius:6px; background:#fff; }
-        .lb .lb-x { position:absolute; top:14px; right:16px; width:40px; height:40px; cursor:pointer;
-                    color:#fff; font-size:1.4rem; border:1px solid rgba(255,255,255,.3); border-radius:8px;
-                    background:rgba(0,0,0,.35); }
+              background:rgba(2,5,10,.9); }
+        .lb iframe { width:min(1000px,100%); height:100%; border:1px solid rgba(45,226,255,.25);
+                     border-radius:6px; background:#fff; }
+        .lb .lb-x { position:absolute; top:16px; right:16px; width:44px; height:44px; cursor:pointer;
+                    color:#eaf6ff; font-size:1.5rem; border:1px solid rgba(255,255,255,.22); border-radius:6px;
+                    background:rgba(10,16,26,.85); }
+        .lb .lb-x:hover { color:#04060b; background:#2de2ff; }
         [hidden] { display:none !important; }
       </style>
     </head>
@@ -9122,7 +9130,7 @@ def notebook_page():
           tri: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>',
         };
         const KIND_LABEL = { link: "URL", text: "ТЕКСТ", pdf: "PDF" };
-        const COLORS = ["#0067c0", "#2e7d32", "#c0392b", "#8e44ad", "#e67e22", "#00838f", "#455a64"];
+        const COLORS = ["#2de2ff", "#63f5ad", "#ff6b81", "#b57cff", "#ff9d42", "#ffd84a", "#35e0f0"];
 
         let pages = [], entries = [], active = null;
         const open = new Set();      // раскрытые записи
