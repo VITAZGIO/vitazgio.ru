@@ -8219,11 +8219,67 @@ def _diy_clean_links(raw):
     return out
 
 
+def _diy_head(body):
+    """Разбирает «шапку» кода статьи: пары «ключ: значение» между строками из
+    трёх дефисов в самом начале. Так вся карточка описывается тем же кодом,
+    что и статья, и руками в форме ничего заполнять не нужно.
+
+        ---
+        кратко: Свой прокси через SSH под три системы
+        теги: Go, Android, сети
+        цвет: #2de2ff
+        обложка: главный-экран.png
+        ссылка: https://github.com/…
+        ---
+
+    Возвращает (словарь шапки, остаток кода)."""
+    text = (body or "").lstrip("﻿ \t\r\n")
+    if not text.startswith("---"):
+        return {}, body or ""
+    lines = text.split("\n")
+    out, rest_at = {}, None
+    for i, raw in enumerate(lines[1:], start=1):
+        line = raw.strip()
+        if line.startswith("---"):
+            rest_at = i + 1
+            break
+        if not line or ":" not in line:
+            continue
+        key, _, value = line.partition(":")
+        out[key.strip().lower()] = value.strip()
+    if rest_at is None:                     # закрывающих дефисов нет — не шапка
+        return {}, body or ""
+    return out, "\n".join(lines[rest_at:])
+
+
+def _diy_card(work):
+    """Что показать на короткой карточке. Всё берём из шапки кода, а если её
+    нет — из старых полей записи, чтобы прежние записи не осыпались."""
+    head, _ = _diy_head(work.get("body", ""))
+    tags = [t.strip() for t in (head.get("теги") or head.get("tags") or "").split(",")]
+    accent = (head.get("цвет") or head.get("color") or "").strip()
+    if not re.match(r"^#[0-9a-fA-F]{6}$", accent):
+        accent = ""
+    return {
+        "summary": (head.get("кратко") or head.get("summary")
+                    or work.get("summary", ""))[:400],
+        "tags": [t for t in tags if t][:6],
+        "accent": accent,
+        "shot": _diy_safe_name(head.get("обложка") or head.get("cover") or ""),
+        "link": _notebook_clean_url(head.get("ссылка") or head.get("link") or ""),
+    }
+
+
 def _diy_public(item_id, work, can_edit):
+    card = _diy_card(work)
     row = {
         "id": item_id,
         "title": work.get("title", ""),
-        "summary": work.get("summary", ""),
+        "summary": card["summary"],
+        "tags": card["tags"],
+        "accent": card["accent"],
+        "shot": card["shot"],
+        "link": card["link"],
         "kind": work.get("kind", "другое"),
         "links": work.get("links", []),
         "cover": bool(work.get("cover")),
@@ -8559,11 +8615,16 @@ def diy_article_page(item_id):
         if not work or (work.get("hidden") and not _diy_can_edit()):
             snapshot = None
         else:
+            card = _diy_card(work)
+            _, text = _diy_head(work.get("body", ""))     # шапку в текст не пускаем
             snapshot = {
                 "title": work.get("title", ""),
-                "summary": work.get("summary", ""),
+                "summary": card["summary"],
+                "tags": card["tags"],
+                "accent": card["accent"] or "#2de2ff",
+                "link": card["link"],
                 "kind": work.get("kind", ""),
-                "body": work.get("body", ""),
+                "body": text,
                 "links": list(work.get("links", [])),
                 "cover": bool(work.get("cover")),
                 "hidden": bool(work.get("hidden")),
@@ -8591,94 +8652,167 @@ def diy_article_page(item_id):
     <head>
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width, initial-scale=1">
-      <meta name="theme-color" content="#080b12">
+      <meta name="theme-color" content="#0d1321">
       <meta name="description" content="__DESC__">
       __ICONLINKS__
       <title>__TITLE__ · Страна DIY</title>
       <style>
-        :root { color-scheme: dark; --bg:#0d1321; --line:rgba(255,255,255,.1);
-                --muted:#98a2b6; --ink:#f2f5fb; --pc:#2de2ff; --warm:#ffd84a; }
-        * { box-sizing: border-box; }
+        :root { color-scheme:dark; --bg:#0d1321; --line:rgba(255,255,255,.1);
+                --muted:#8e9bb0; --ink:#eaf3fb; --pc:#2de2ff; --warm:#ffd84a;
+                --ok:#63f5ad; --hot:#ff7a59; --ac:__ACCENT__; }
+        * { box-sizing:border-box; }
         body { margin:0; min-height:100svh; color:var(--ink);
-               font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-               background:
-                 radial-gradient(circle at 12% 4%, rgba(57,126,255,.16), transparent 34rem),
-                 radial-gradient(circle at 88% 90%, rgba(149,65,255,.14), transparent 36rem),
-                 var(--bg); }
-        .wrap { width:min(820px, calc(100% - 36px)); margin:0 auto;
-                padding: clamp(20px,4vw,44px) 0 80px; }
+               font-family:"Cascadia Code", Consolas, monospace;
+               background:radial-gradient(circle at top left, #192a44, #0d1321 55%); }
+
+        /* полоска прочитанного наверху */
+        .prog { position:fixed; left:0; top:0; height:2px; width:0; z-index:50;
+                background:linear-gradient(90deg, var(--ac), var(--ok));
+                box-shadow:0 0 12px var(--ac); transition:width .1s linear; }
+
+        .wrap { width:min(840px, calc(100% - 34px)); margin:0 auto; padding:clamp(18px,3vw,38px) 0 90px; }
         .top { display:flex; align-items:center; gap:12px; margin-bottom:26px; }
-        .back { display:inline-flex; align-items:center; gap:8px; height:36px;
-                padding:0 14px; color:#cdd6e6; text-decoration:none;
-                font:600 .8rem "Cascadia Code", Consolas, monospace;
+        .back { display:inline-flex; align-items:center; gap:8px; height:38px; padding:0 15px;
+                color:#cdd6e6; text-decoration:none; font:600 .78rem inherit;
                 background:rgba(255,255,255,.05); border:1px solid var(--line);
                 border-radius:10px; transition:.16s; }
-        .back:hover { color:#fff; border-color:var(--pc); background:rgba(45,226,255,.1); }
-        .back svg { width:16px; height:16px; }
-        .kind { display:inline-flex; align-items:center; padding:4px 12px; color:#9fe8ff;
-                background:rgba(45,226,255,.12); border-radius:999px;
-                font:700 .64rem "Cascadia Code", Consolas, monospace;
-                letter-spacing:.14em; text-transform:uppercase; }
-        .draft { display:inline-flex; align-items:center; padding:4px 12px; color:#ffd0a0;
-                 background:rgba(255,140,60,.16); border-radius:999px;
-                 font:700 .64rem "Cascadia Code", Consolas, monospace;
-                 letter-spacing:.14em; text-transform:uppercase; }
-        .tags { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px; }
-        h1.title { margin:0 0 10px; font-size:clamp(1.7rem,5vw,2.9rem); line-height:1.08;
-                   letter-spacing:-.02em;
-                   font-family:"Cascadia Code", Consolas, monospace; color:#dffaff;
-                   text-shadow: 1px 0 rgba(255,63,164,.5), -1px 0 rgba(33,220,255,.5); }
-        .summary { margin:0 0 22px; color:var(--muted); font-size:1.05rem; line-height:1.6; }
-        .links { display:flex; flex-wrap:wrap; gap:8px; margin:0 0 26px; }
-        .links a { display:inline-flex; align-items:center; gap:6px; padding:7px 13px;
-                   color:#cfe6ff; text-decoration:none; font-size:.84rem;
-                   background:rgba(255,255,255,.06); border:1px solid var(--line);
-                   border-radius:9px; }
-        .links a:hover { color:#04121a; background:var(--pc); border-color:var(--pc); }
-        hr.sep { border:0; border-top:1px solid var(--line); margin:0 0 26px; }
+        .back:hover { color:#fff; border-color:var(--ac); background:color-mix(in srgb, var(--ac) 12%, transparent); }
+        .back svg { width:15px; height:15px; }
+        .tags { display:flex; flex-wrap:wrap; gap:7px; margin-bottom:15px; }
+        .kind, .tag, .draft { display:inline-flex; align-items:center; padding:4px 11px;
+                border-radius:999px; font:700 .62rem inherit; letter-spacing:.13em; text-transform:uppercase; }
+        .kind { color:#04121c; background:var(--ac); }
+        .tag { color:#cfe0f0; background:rgba(255,255,255,.06); border:1px solid var(--line); }
+        .draft { color:#ffd0a0; background:rgba(255,140,60,.16); }
 
-        /* Оформление самого содержимого статьи. Хозяин может задавать своё
-           прямо в коде, а это — разумные значения по умолчанию, чтобы даже
-           голый текст выглядел опрятно. */
-        .article { font-size:1.06rem; line-height:1.72; color:#e7ebf3; }
+        h1.title { margin:0 0 12px; font-size:clamp(1.7rem,5vw,2.9rem); line-height:1.06;
+                   letter-spacing:-.03em; font-weight:800; color:#eaf6ff;
+                   text-shadow:0 0 30px color-mix(in srgb, var(--ac) 35%, transparent); }
+        .summary { margin:0 0 22px; max-width:64ch; color:var(--muted); font-size:1rem; line-height:1.65; }
+        .srcline { display:flex; flex-wrap:wrap; gap:9px; margin:0 0 26px; }
+        .srcline a { display:inline-flex; align-items:center; gap:8px; height:38px; padding:0 15px;
+                     color:#04121c; text-decoration:none; font:700 .76rem inherit;
+                     border-radius:10px; background:var(--ac); }
+        .srcline a:hover { filter:brightness(1.08); }
+        .srcline a.ghost { color:#cfe0f0; background:rgba(255,255,255,.05); border:1px solid var(--line); }
+        .srcline a.ghost:hover { color:#fff; border-color:var(--ac); }
+        .srcline svg { width:15px; height:15px; }
+        hr.sep { border:0; border-top:1px solid var(--line); margin:0 0 30px; }
+
+        /* ── тело статьи ────────────────────────────────────────────── */
+        .article { font-size:.97rem; line-height:1.78; color:#dfe8f3; }
         .article > *:first-child { margin-top:0; }
-        .article h2 { margin:2em 0 .5em; font-size:1.5rem; letter-spacing:-.01em;
-                      font-family:"Cascadia Code", Consolas, monospace; color:#dffaff; }
-        .article h3 { margin:1.6em 0 .4em; font-size:1.2rem;
-                      font-family:"Cascadia Code", Consolas, monospace; color:#cfeaff; }
-        .article p { margin:0 0 1.05em; }
-        .article a { color:var(--pc); }
-        .article img { max-width:100%; height:auto; border-radius:14px;
-                       border:1px solid var(--line); display:block; margin:1.4em 0; }
-        .article figure { margin:1.4em 0; }
+        .article h2 { margin:2.2em 0 .6em; font-size:1.42rem; font-weight:800; letter-spacing:-.02em;
+                      color:#eaf6ff; scroll-margin-top:20px; }
+        .article h2::before { content:""; display:inline-block; width:16px; height:3px; border-radius:2px;
+                              margin-right:11px; vertical-align:middle; background:var(--ac); }
+        .article h3 { margin:1.7em 0 .5em; font-size:1.1rem; font-weight:700; color:#cfeaff; }
+        .article p { margin:0 0 1.1em; }
+        .article a { color:var(--pc); text-underline-offset:3px; }
+        .article strong, .article b { color:#fff; }
+        .article ul, .article ol { margin:0 0 1.2em; padding-left:1.35em; }
+        .article li { margin:.35em 0; }
+        .article li::marker { color:var(--ac); }
+        .article hr { border:0; border-top:1px solid var(--line); margin:2em 0; }
+
+        /* картинки: клик открывает во весь экран */
+        .article img { max-width:100%; height:auto; display:block; margin:1.5em 0; cursor:zoom-in;
+                       border-radius:14px; border:1px solid var(--line);
+                       box-shadow:0 18px 44px rgba(0,0,0,.4); transition:transform .2s, border-color .2s; }
+        .article img:hover { transform:translateY(-2px); border-color:color-mix(in srgb, var(--ac) 45%, transparent); }
+        .article figure { margin:1.5em 0; }
         .article figure img { margin:0; }
-        .article figcaption { margin-top:8px; color:var(--muted); font-size:.86rem;
-                              text-align:center; }
-        .article ul, .article ol { margin:0 0 1.1em; padding-left:1.4em; }
-        .article li { margin:.3em 0; }
-        .article blockquote { margin:1.3em 0; padding:.6em 1.1em; color:#cdd6e6;
-                              border-left:3px solid var(--pc); background:rgba(45,226,255,.06);
-                              border-radius:0 10px 10px 0; }
-        .article pre { margin:1.3em 0; padding:16px 18px; overflow-x:auto;
-                       background:rgba(4,9,18,.85); border:1px solid var(--line);
-                       border-radius:12px; font:.9rem/1.55 "Cascadia Code", Consolas, monospace;
-                       color:#d6e2f0; }
-        .article code { font-family:"Cascadia Code", Consolas, monospace;
-                        font-size:.9em; background:rgba(255,255,255,.08);
-                        padding:.12em .4em; border-radius:6px; }
-        .article pre code { background:none; padding:0; }
-        /* Скачиваемый файл-вложение: <a class="dl" href="{{файл.zip}}">…</a> */
-        .article a.dl { display:inline-flex; align-items:center; gap:9px; margin:.4em 0;
-                        padding:11px 16px; color:#04121a; text-decoration:none;
-                        background:var(--warm); border-radius:11px; font-weight:700; }
+        .article figcaption { margin-top:9px; color:var(--muted); font-size:.78rem; text-align:center; }
+        /* .shots — ряд картинок, сам раскладывается по ширине */
+        .article .shots { display:grid; gap:12px; margin:1.5em 0;
+                          grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); }
+        .article .shots img, .article .shots figure { margin:0; }
+        .article .phone img { max-height:560px; width:auto; margin:0 auto; }
+
+        /* врезки */
+        .article .note, .article .warn, .article .ok {
+          margin:1.5em 0; padding:14px 16px 14px 46px; position:relative; border-radius:12px;
+          font-size:.9rem; line-height:1.65; border:1px solid var(--line); background:rgba(255,255,255,.03); }
+        .article .note::before, .article .warn::before, .article .ok::before {
+          position:absolute; left:16px; top:13px; font-weight:800; }
+        .article .note { border-left:3px solid var(--pc); }
+        .article .note::before { content:"i"; color:var(--pc); }
+        .article .warn { border-left:3px solid var(--warm); }
+        .article .warn::before { content:"!"; color:var(--warm); }
+        .article .ok { border-left:3px solid var(--ok); }
+        .article .ok::before { content:"✓"; color:var(--ok); }
+
+        .article blockquote { margin:1.5em 0; padding:.7em 1.2em; color:#cdd6e6;
+                              border-left:3px solid var(--ac);
+                              background:color-mix(in srgb, var(--ac) 7%, transparent);
+                              border-radius:0 12px 12px 0; }
+
+        /* код */
+        .article pre { margin:1.5em 0; padding:16px 18px; overflow-x:auto; border-radius:12px;
+                       background:rgba(4,9,18,.9); border:1px solid var(--line);
+                       font-size:.84rem; line-height:1.6; color:#d6e2f0; }
+        .article code { font-family:inherit; font-size:.9em; padding:.12em .42em; border-radius:6px;
+                        background:rgba(255,255,255,.08); color:#cfe6ff; }
+        .article pre code { background:none; padding:0; color:inherit; }
+
+        /* таблица характеристик */
+        .article table { width:100%; margin:1.5em 0; border-collapse:collapse; font-size:.86rem; }
+        .article th, .article td { padding:9px 12px; text-align:left; border-bottom:1px solid var(--line); }
+        .article th { color:var(--muted); font-size:.7rem; letter-spacing:.09em; text-transform:uppercase; font-weight:700; }
+        .article tr:hover td { background:rgba(255,255,255,.03); }
+
+        /* чипы и кнопки-файлы */
+        .article .chips { display:flex; flex-wrap:wrap; gap:7px; margin:1.2em 0; }
+        .article .chips span { padding:5px 11px; border-radius:8px; font-size:.74rem;
+                               color:#cfe0f0; background:rgba(255,255,255,.05); border:1px solid var(--line); }
+        .article a.dl { display:inline-flex; align-items:center; gap:9px; margin:.4em 8px .4em 0;
+                        padding:11px 17px; color:#04121c; text-decoration:none; font-weight:700;
+                        border-radius:11px; background:var(--warm); }
         .article a.dl:hover { filter:brightness(1.08); }
-        .article .gallery { display:grid; gap:12px; margin:1.4em 0;
-                            grid-template-columns:repeat(auto-fit, minmax(200px,1fr)); }
-        .article .gallery img { margin:0; }
-        @media (prefers-reduced-motion: reduce) { * { transition:none !important; } }
+        .article a.dl::before { content:"⤓"; font-size:1.05em; }
+
+        /* плитки и шаги */
+        .article .cards { display:grid; gap:12px; margin:1.5em 0;
+                          grid-template-columns:repeat(auto-fit,minmax(215px,1fr)); }
+        .article .cards > div { padding:15px 16px; border-radius:13px; border:1px solid var(--line);
+                                background:linear-gradient(160deg, rgba(18,28,45,.7), rgba(9,14,24,.8)); }
+        .article .cards b { display:block; margin-bottom:5px; color:#eaf6ff; font-size:.92rem; }
+        .article .cards p { margin:0; color:var(--muted); font-size:.82rem; line-height:1.6; }
+        .article .steps { counter-reset:st; list-style:none; padding:0; margin:1.5em 0; }
+        .article .steps li { counter-increment:st; position:relative; margin:0 0 13px; padding:13px 16px 13px 52px;
+                             border-radius:12px; border:1px solid var(--line); background:rgba(255,255,255,.03); }
+        .article .steps li::before { content:counter(st); position:absolute; left:14px; top:12px;
+                             width:24px; height:24px; display:grid; place-items:center; border-radius:8px;
+                             font-size:.72rem; font-weight:800; color:#04121c; background:var(--ac); }
+
+        /* лайтбокс */
+        .lb { position:fixed; inset:0; z-index:120; display:grid; place-items:center; padding:22px;
+              background:rgba(3,6,12,.93); backdrop-filter:blur(4px); }
+        .lb img { max-width:100%; max-height:100%; border-radius:10px; border:1px solid rgba(255,255,255,.16); }
+        .lb button { position:absolute; top:16px; right:18px; width:44px; height:44px; cursor:pointer;
+                     color:#eaf6ff; font-size:1.5rem; border:1px solid rgba(255,255,255,.22);
+                     border-radius:9px; background:rgba(10,16,26,.85); }
+        .lb button:hover { color:#04121c; background:var(--pc); }
+
+        /* наверх */
+        .up { position:fixed; right:20px; bottom:96px; z-index:40; width:42px; height:42px;
+              display:grid; place-items:center; cursor:pointer; opacity:0; pointer-events:none;
+              color:#cfe0f0; border:1px solid var(--line); border-radius:12px;
+              background:rgba(12,20,33,.9); transition:opacity .2s, color .16s, border-color .16s; }
+        .up.on { opacity:1; pointer-events:auto; }
+        .up:hover { color:#fff; border-color:var(--ac); }
+        .up svg { width:17px; height:17px; }
+
+        footer { margin-top:46px; padding-top:20px; border-top:1px solid var(--line);
+                 display:flex; flex-wrap:wrap; gap:12px; align-items:center;
+                 color:#66707f; font-size:.75rem; }
+        footer a { color:#8fa2b8; text-decoration:none; }
+        footer a:hover { color:var(--pc); }
+        @media (prefers-reduced-motion: reduce) { * { transition:none !important; animation:none !important; } }
       </style>
     </head>
     <body>
+      <div class="prog" id="prog"></div>
       <main class="wrap">
         <div class="top">
           <a class="back" href="/diy">
@@ -8690,21 +8824,83 @@ def diy_article_page(item_id):
         <div class="tags">__TAGS__</div>
         <h1 class="title">__TITLE__</h1>
         __SUMMARY__
+        __SRC__
         __LINKS__
         <hr class="sep">
-        <article class="article">__BODY__</article>
+        <article class="article" id="art">__BODY__</article>
+        <footer>
+          <span>vitazgio.ru · страна DIY</span>
+          <a href="/diy">← ко всем творениям</a>
+        </footer>
       </main>
+      <button class="up" id="up" type="button" title="Наверх" aria-label="Наверх">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5m0 0-6 6m6-6 6 6"/></svg>
+      </button>
+
+      <script>
+      (() => {
+        "use strict";
+        /* полоска прочитанного */
+        const prog = document.getElementById("prog");
+        const up = document.getElementById("up");
+        const onScroll = () => {
+          const h = document.documentElement;
+          const max = h.scrollHeight - h.clientHeight;
+          const k = max > 0 ? h.scrollTop / max : 0;
+          prog.style.width = (k * 100) + "%";
+          up.classList.toggle("on", h.scrollTop > 500);
+        };
+        addEventListener("scroll", onScroll, { passive: true });
+        onScroll();
+        up.addEventListener("click", () => scrollTo({ top: 0, behavior: "smooth" }));
+
+        /* картинки открываются во весь экран */
+        document.getElementById("art").addEventListener("click", (e) => {
+          const img = e.target.closest("img");
+          if (!img) return;
+          const box = document.createElement("div");
+          box.className = "lb";
+          const big = document.createElement("img");
+          big.src = img.currentSrc || img.src;
+          big.alt = img.alt || "";
+          const x = document.createElement("button");
+          x.type = "button"; x.textContent = "×"; x.setAttribute("aria-label", "Закрыть");
+          box.append(big, x);
+          document.body.appendChild(box);
+          const shut = () => { box.remove(); document.removeEventListener("keydown", esc); };
+          const esc = (ev) => { if (ev.key === "Escape") shut(); };
+          x.addEventListener("click", shut);
+          box.addEventListener("click", (ev) => { if (ev.target === box) shut(); });
+          document.addEventListener("keydown", esc);
+        });
+      })();
+      </script>
       <script src="/vg-player.js" defer></script>
     </body>
     </html>
     """
     summary_html = (f'<p class="summary">{escape(snapshot["summary"])}</p>'
                     if snapshot["summary"] else "")
-    tags = (f'<span class="kind">{escape(snapshot["kind"])}</span>' if snapshot["kind"] else "") + draft
+    tags = "".join([
+        f'<span class="kind">{escape(snapshot["kind"])}</span>' if snapshot["kind"] else "",
+        "".join(f'<span class="tag">{escape(t)}</span>' for t in snapshot["tags"]),
+        draft,
+    ])
+    src_html = ""
+    if snapshot["link"]:
+        src_html = (
+            '<div class="srcline"><a href="' + str(escape(snapshot["link"])) + '" target="_blank" rel="noopener">'
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+            'stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M21 3l-9 9"/>'
+            '<path d="M10 5H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5"/></svg>'
+            'Исходники и сборки</a></div>')
     return (html.replace("__ICONLINKS__", ICON_LINKS)
+                .replace("__ACCENT__", snapshot["accent"])
                 .replace("__DESC__", str(escape(snapshot["summary"] or snapshot["title"])))
                 .replace("__TAGS__", tags)
                 .replace("__SUMMARY__", summary_html)
+                .replace("__SRC__", src_html)
                 .replace("__LINKS__", links_html)
                 .replace("__TITLE__", str(escape(snapshot["title"])))
                 .replace("__BODY__", body_html))
@@ -10090,15 +10286,31 @@ def diy_page():
         .grid { display: grid; gap: 18px; margin: 26px 0 0;
                 grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
 
-        .work { position: relative; display: flex; flex-direction: column;
+        /* Цвет карточки задаётся в шапке кода строкой «цвет:», отсюда --ac. */
+        .work { --ac: var(--pc); position: relative; display: flex; flex-direction: column;
                 overflow: hidden; background: rgba(25,32,48,.82);
                 border: 1px solid var(--line); border-radius: 18px;
                 transition: transform .2s, border-color .2s, box-shadow .2s; }
-        .work:hover { transform: translateY(-4px); border-color: rgba(45,226,255,.5);
-                      box-shadow: 0 20px 50px rgba(0,0,0,.4); }
+        .work::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 3px; z-index: 2;
+                        background: linear-gradient(90deg, var(--ac), transparent 78%); }
+        .work:hover { transform: translateY(-4px);
+                      border-color: color-mix(in srgb, var(--ac) 55%, transparent);
+                      box-shadow: 0 20px 50px rgba(0,0,0,.4),
+                                  0 0 34px color-mix(in srgb, var(--ac) 12%, transparent); }
         .work.draft { border-style: dashed; opacity: .82; }
-        .shot { aspect-ratio: 16 / 9; background: #0a0f18 center/cover no-repeat;
+        .shot { position: relative; aspect-ratio: 16 / 10; overflow: hidden; background: #0a0f18;
                 border-bottom: 1px solid var(--line); }
+        .shot-bg { position: absolute; inset: -12%; background: center/cover no-repeat;
+                   filter: blur(18px) saturate(1.15) brightness(.55); }
+        .shot img { position: relative; z-index: 1; width: 100%; height: 100%;
+                    object-fit: contain; display: block; }
+        /* лёгкое затемнение снизу, чтобы обложка не спорила с текстом */
+        .shot::after { content: ""; position: absolute; inset: 0; z-index: 2;
+                       background: linear-gradient(180deg, transparent 62%, rgba(10,15,24,.5)); }
+        .tagrow { display: flex; flex-wrap: wrap; gap: 6px; }
+        .tagrow i { font-style: normal; padding: 3px 9px; border-radius: 7px; font-size: .68rem;
+                    color: #cfe0f0; background: rgba(255,255,255,.05);
+                    border: 1px solid var(--line); }
         .shot.none { display: grid; place-items: center; color: #3d4759;
                      font: 700 .74rem "Cascadia Code", Consolas, monospace;
                      letter-spacing: .2em; }
@@ -10393,8 +10605,19 @@ def diy_page():
             ? "Пока пусто. Нажми «Добавить» — и появится первая запись."
             : "Пока пусто";
           grid.innerHTML = list.map((w) => {
-            const shot = w.cover
-              ? '<div class="shot" data-open="' + w.id + '" style="background-image:url(/diy/cover/' + w.id + ')"></div>'
+            // Обложка: сперва картинка, названная в шапке кода, потом старая
+            // загруженная обложка, и только если нет ни той ни другой — заглушка.
+            const src = w.shot
+              ? "/diy/asset/" + w.id + "/" + encodeURIComponent(w.shot)
+              : (w.cover ? "/diy/cover/" + w.id : "");
+            // Картинку показываем целиком: вертикальные скриншоты программ
+            // при обрезке по центру превращались в кашу. Фон — та же картинка,
+            // размытая и растянутая, чтобы не было пустых полей по бокам.
+            const shot = src
+              ? '<div class="shot" data-open="' + w.id + '">' +
+                  '<div class="shot-bg" style="background-image:url(' + src + ')"></div>' +
+                  '<img src="' + src + '" alt="" loading="lazy">' +
+                '</div>'
               : '<div class="shot none" data-open="' + w.id + '">без фото</div>';
             const flags = [];
             if (w.hidden) flags.push('<span class="flag hid">черновик</span>');
@@ -10405,12 +10628,17 @@ def diy_page():
                 '<button class="btn bad" data-kill="' + w.id + '">' + SVG.del + "<span>Удалить</span></button>" +
                 "</div>"
               : "";
-            return '<article class="work' + (w.hidden ? " draft" : "") + '">' + shot +
+            const tags = (w.tags || []).length
+              ? '<div class="tagrow">' + w.tags.map((t) => "<i>" + esc(t) + "</i>").join("") + "</div>"
+              : "";
+            const style = w.accent ? ' style="--ac:' + esc(w.accent) + '"' : "";
+            return '<article class="work' + (w.hidden ? " draft" : "") + '"' + style + '>' + shot +
               '<div class="body">' +
               (flags.length ? '<div class="flags">' + flags.join("") + "</div>" : "") +
               '<span class="kind">' + esc(w.kind) + "</span>" +
               "<h2>" + esc(w.title) + "</h2>" +
               (w.summary ? "<p>" + esc(w.summary) + "</p>" : "") +
+              tags +
               (w.links && w.links.length ? '<div class="links">' + linkChips(w.links) + "</div>" : "") +
               '<div class="open-row"><button class="btn" data-open="' + w.id + '">Открыть статью →</button></div>' +
               tools + "</div></article>";
@@ -10443,11 +10671,17 @@ def diy_page():
             "</select></label>" +
             '<label class="field"><span>Код статьи</span>' +
             '<textarea id="f-body" class="code" spellcheck="false" ' +
-            'placeholder="HTML статьи. Вложения — по имени: {{плата.jpg}}">' +
+            'placeholder="---&#10;кратко: о чём это в двух строках&#10;теги: ESP32, Zigbee&#10;цвет: #2de2ff&#10;обложка: главное-фото.jpg&#10;ссылка: https://github.com/…&#10;---&#10;&#10;&lt;p&gt;Текст статьи…&lt;/p&gt;">' +
             esc(work.body || "") + "</textarea></label>" +
-            '<p class="hint">Обычный HTML. Фото по имени: <code>&lt;img src="{{плата.jpg}}"&gt;</code>. ' +
-            'Файл на скачивание: <code>&lt;a class="dl" href="{{прошивка.zip}}"&gt;Скачать&lt;/a&gt;</code>. ' +
-            'Имена вложений — ниже; тык по имени копирует <code>{{…}}</code>.</p>' +
+            '<p class="hint"><b>Шапка</b> между строками из трёх дефисов задаёт короткую ' +
+            'карточку: <code>кратко</code>, <code>теги</code>, <code>цвет</code>, ' +
+            '<code>обложка</code> (имя фото), <code>ссылка</code>. Ниже — обычный HTML. ' +
+            'Фото: <code>&lt;img src="{{плата.jpg}}"&gt;</code>, ряд фото — ' +
+            '<code>&lt;div class="shots"&gt;…&lt;/div&gt;</code>, файл: ' +
+            '<code>&lt;a class="dl" href="{{прошивка.zip}}"&gt;Скачать&lt;/a&gt;</code>. ' +
+            'Готовые блоки: <code>note</code>, <code>warn</code>, <code>ok</code>, ' +
+            '<code>cards</code>, <code>steps</code>, <code>chips</code>. ' +
+            'Тык по имени вложения копирует <code>{{…}}</code>.</p>' +
             '<div class="field"><span>Фото и файлы</span>' +
             '<div class="assets" id="f-assets"></div>' +
             '<div class="asset-keys">' +
