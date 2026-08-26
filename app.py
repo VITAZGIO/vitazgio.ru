@@ -1114,7 +1114,9 @@ def password_matches(password):
 @app.after_request
 def security_headers(response):
     response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
+    # По умолчанию встраивание в рамку запрещено. Исключение — свой же
+    # просмотр PDF внутри дропа: там нужен собственный iframe того же домена.
+    response.headers["X-Frame-Options"] = "SAMEORIGIN" if getattr(g, "frameable", False) else "DENY"
     response.headers["Referrer-Policy"] = "no-referrer"
     token = getattr(g, "new_device_cookie", None)
     if token:
@@ -2723,7 +2725,16 @@ def drop_view(item_id):
         item = drop_items.get(item_id)
     if not item or item["kind"] == "folder":
         return "Не найдено", 404
-    return _drop_send(item_id, item, inline=True)
+    response = _drop_send(item_id, item, inline=True)
+    if os.path.splitext(item["name"])[1].lower() == ".pdf":
+        # Родному просмотрщику PDF жёсткий sandbox мешает работать, а рамку
+        # того же домена мы разрешаем — чтобы показать файл прямо в дропе.
+        # PDF скриптов страницы не исполняет, nosniff остаётся.
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'none'; object-src 'self'; img-src 'self' blob:; "
+            "style-src 'unsafe-inline'; frame-ancestors 'self'")
+        g.frameable = True
+    return response
 
 
 @app.patch("/api/drop/<item_id>")
@@ -6297,8 +6308,8 @@ def drop_page():
         .ico.play::after { content: ""; position: absolute; right: 2px; bottom: 2px;
                width: 0; height: 0; border-left: 8px solid currentColor;
                border-top: 5px solid transparent; border-bottom: 5px solid transparent; }
-        .ico.img, .ico.play { cursor: pointer; }
-        .ico.play:hover { background: color-mix(in srgb, var(--tint, #7d8798) 26%, transparent); }
+        .ico.img, .ico.play, .ico.doc { cursor: pointer; }
+        .ico.play:hover, .ico.doc:hover { background: color-mix(in srgb, var(--tint, #7d8798) 26%, transparent); }
         /* Та же ширина, что у бейджей, иначе значок папки съезжает на пару пикселей. */
         .ico.dir { width: 34px; height: 34px; border: 0; border-radius: 0; background: none;
                    cursor: pointer; transition: transform .16s; }
@@ -6459,6 +6470,9 @@ def drop_page():
         .lightbox img, .lightbox video { max-width: 100%; max-height: 100%; object-fit: contain;
                         border: 1px solid rgba(45,226,255,.25); box-shadow: 0 24px 70px rgba(0,0,0,.7); }
         .lightbox audio { width: min(560px, calc(100% - 40px)); }
+        /* Читалка PDF занимает почти весь экран, со своей прокруткой и зумом */
+        .lightbox .lb-pdf { width: min(1000px, 100%); height: 100%; border: 1px solid rgba(45,226,255,.25);
+                            border-radius: 4px; background: #fff; box-shadow: 0 24px 70px rgba(0,0,0,.7); }
         .lightbox .lb-close { position: absolute; top: 16px; right: 16px; width: 44px; height: 44px; display: grid; place-items: center;
                               color: #eaf6ff; font-size: 1.5rem; line-height: 1; cursor: pointer; border: 1px solid rgba(255,255,255,.22);
                               border-radius: 6px; background: rgba(10,16,26,.85); }
@@ -6597,6 +6611,7 @@ def drop_page():
           image: ["png", "jpg", "jpeg", "gif", "webp", "bmp", "avif", "ico"],
           video: ["mp4", "webm", "m4v", "mov", "ogv"],
           audio: ["mp3", "ogg", "wav", "m4a", "opus", "flac", "aac"],
+          pdf: ["pdf"],
         };
         const viewKind = name => {
           const ext = extOf(name);
@@ -6711,6 +6726,12 @@ def drop_page():
           }
           const label = ext ? ext.slice(0, 4).toUpperCase() : "ФАЙЛ";
           const kind = viewKind(it.name);
+          if (kind === "pdf") {
+            // PDF открываем прямо в дропе — значок кликабелен, но без
+            // треугольника: это не воспроизведение, а просмотр.
+            return `<span class="ico doc" data-act="view" title="Открыть PDF"
+              style="--tint:${tintOf(ext)}">PDF</span>`;
+          }
           if (kind) {
             // У видео и звука миниатюры нет, но открывать их тоже надо —
             // значок становится кнопкой и получает треугольник в углу.
@@ -7094,6 +7115,12 @@ def drop_page():
             img = document.createElement("audio");
             img.controls = true;
             img.autoplay = true;
+          } else if (kind === "pdf") {
+            // Читалка PDF — родной просмотрщик браузера: листается и
+            // масштабируется сам. Занимает почти весь экран.
+            img = document.createElement("iframe");
+            img.className = "lb-pdf";
+            img.title = item.name;
           } else {
             img = document.createElement("img");
             img.alt = item.name;
