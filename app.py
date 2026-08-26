@@ -8661,6 +8661,220 @@ def _soon_page(name, kicker, headline, lead, points):
                 .replace("__ITEMS__", items))
 
 
+@app.get("/player")
+@login_required
+def player_window():
+    """Плеер в отдельном окошке. Открывается из кабинета и с музыки в
+    маленьком всплывающем окне (window.open): играет непрерывно, пока окно
+    не закроют, что бы ни делали в основных вкладках сайта. Окно можно
+    двигать средствами системы и сворачивать до одной строки."""
+    html = """<!doctype html>
+    <html lang="ru">
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <meta name="theme-color" content="#0d1321">
+      __ICONLINKS__
+      <title>Плеер · vitazgio.ru</title>
+      <style>
+        :root { --pc: #2de2ff; --bg: #0d1321; --line: rgba(255,255,255,.1); --muted: #8593a8; }
+        * { box-sizing: border-box; }
+        html, body { height: 100%; }
+        body { margin: 0; color: #eaf3fb; overflow: hidden;
+               font-family: "Cascadia Code", Consolas, monospace;
+               background: radial-gradient(circle at top, #182a44, #0b111d 60%);
+               display: flex; flex-direction: column; }
+        .bar { display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+               border-bottom: 1px solid var(--line); }
+        .bar .tt { flex: 1; min-width: 0; }
+        .bar .tt b { display: block; font-size: .82rem; overflow: hidden;
+                     text-overflow: ellipsis; white-space: nowrap; }
+        .bar .tt span { display: block; color: var(--muted); font-size: .68rem;
+                        overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .mini { flex: none; width: 30px; height: 30px; display: grid; place-items: center;
+                cursor: pointer; color: #bcd; border: 1px solid var(--line);
+                border-radius: 8px; background: rgba(255,255,255,.05); }
+        .mini:hover { color: #fff; border-color: var(--pc); background: rgba(45,226,255,.12); }
+        .mini svg { width: 15px; height: 15px; }
+
+        .seek { display: flex; align-items: center; gap: 9px; padding: 8px 12px 4px; }
+        .seek input { flex: 1; accent-color: var(--pc); height: 4px; }
+        .seek .t { color: var(--muted); font-size: .66rem; font-variant-numeric: tabular-nums; }
+        .ctrls { display: flex; align-items: center; justify-content: center; gap: 14px;
+                 padding: 4px 12px 12px; }
+        .ctrls button { display: grid; place-items: center; cursor: pointer; color: #dbe7f3;
+                        border: 1px solid var(--line); background: rgba(255,255,255,.05);
+                        border-radius: 999px; }
+        .ctrls .side { width: 40px; height: 40px; }
+        .ctrls .play { width: 52px; height: 52px; color: #04121c;
+                       background: linear-gradient(180deg, #6df0ff, #21c8e6); border: 0; }
+        .ctrls button:hover { border-color: var(--pc); }
+        .ctrls .play:hover { filter: brightness(1.08); }
+        .ctrls svg { width: 20px; height: 20px; }
+        .ctrls .play svg { width: 24px; height: 24px; }
+
+        .list { flex: 1; overflow-y: auto; border-top: 1px solid var(--line); }
+        .trk { display: flex; align-items: center; gap: 10px; padding: 9px 12px; cursor: pointer;
+               border-bottom: 1px solid rgba(255,255,255,.05); }
+        .trk:hover { background: rgba(45,226,255,.07); }
+        .trk.on { background: rgba(45,226,255,.13); }
+        .trk .n { flex: 1; min-width: 0; }
+        .trk .n b { display: block; font-size: .78rem; font-weight: 600; overflow: hidden;
+                    text-overflow: ellipsis; white-space: nowrap; }
+        .trk .n span { display: block; color: var(--muted); font-size: .66rem; overflow: hidden;
+                       text-overflow: ellipsis; white-space: nowrap; }
+        .trk.on .n b { color: var(--pc); }
+        .empty { padding: 30px 16px; color: var(--muted); text-align: center; font-size: .8rem; }
+
+        /* Свёрнуто в строку: остаётся только верхняя панель с названием и
+           кнопкой разворота, всё остальное прячется. */
+        body.mini-mode .seek, body.mini-mode .ctrls, body.mini-mode .list { display: none; }
+      </style>
+    </head>
+    <body>
+      <div class="bar">
+        <button class="mini" id="foldBtn" title="Свернуть в строку" aria-label="Свернуть">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/></svg>
+        </button>
+        <div class="tt"><b id="npTitle">Ничего не играет</b><span id="npSub">фонотека</span></div>
+      </div>
+      <div class="seek">
+        <span class="t" id="cur">0:00</span>
+        <input type="range" id="seek" min="0" max="0" value="0" step="1" aria-label="Перемотка">
+        <span class="t" id="dur">0:00</span>
+      </div>
+      <div class="ctrls">
+        <button class="side" id="prev" title="Назад" aria-label="Предыдущий"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 6v12H5V6h2Zm12 0v12l-9-6 9-6Z"/></svg></button>
+        <button class="play" id="play" title="Играть" aria-label="Играть/пауза"><svg id="playIcon" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7L8 5Z"/></svg></button>
+        <button class="side" id="next" title="Вперёд" aria-label="Следующий"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M17 6v12h2V6h-2ZM5 6v12l9-6-9-6Z"/></svg></button>
+      </div>
+      <div class="list" id="list"><p class="empty">Загрузка…</p></div>
+      <audio id="au"></audio>
+
+      <script>
+      (() => {
+        "use strict";
+        const $ = (id) => document.getElementById(id);
+        const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g,
+          (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+        const mmss = (s) => {
+          s = Math.max(0, Math.floor(s || 0));
+          return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
+        };
+        const au = $("au");
+        let queue = [];
+        let idx = -1;
+
+        const PLAY_SVG = '<path d="M8 5v14l11-7L8 5Z"/>';
+        const PAUSE_SVG = '<path d="M7 5h4v14H7zM13 5h4v14h-4z"/>';
+
+        const save = () => {
+          try {
+            const t = queue[idx];
+            localStorage.setItem("vgPlayer", JSON.stringify({
+              id: t ? t.id : null, time: au.currentTime || 0, playing: !au.paused }));
+          } catch (e) { /* приватное окно — и ладно */ }
+        };
+
+        const paintNow = () => {
+          const t = queue[idx];
+          $("npTitle").textContent = t ? t.title : "Ничего не играет";
+          $("npSub").textContent = t ? (t.artist || "фонотека") + (t.folder ? " · " + t.folder : "") : "фонотека";
+          document.querySelectorAll(".trk").forEach((el, i) =>
+            el.classList.toggle("on", i === idx));
+          $("playIcon").innerHTML = au.paused ? PLAY_SVG : PAUSE_SVG;
+        };
+
+        const load = (i, autoplay) => {
+          if (i < 0 || i >= queue.length) return;
+          idx = i;
+          au.src = "/api/music/file/" + encodeURIComponent(queue[i].id);
+          au.load();
+          if (autoplay) au.play().catch(() => {});
+          paintNow();
+          save();
+        };
+
+        $("play").addEventListener("click", () => {
+          if (idx < 0 && queue.length) { load(0, true); return; }
+          if (au.paused) au.play().catch(() => {}); else au.pause();
+        });
+        $("prev").addEventListener("click", () => {
+          if (au.currentTime > 3) { au.currentTime = 0; return; }
+          if (idx > 0) load(idx - 1, true);
+        });
+        $("next").addEventListener("click", () => {
+          if (idx < queue.length - 1) load(idx + 1, true);
+        });
+        au.addEventListener("ended", () => { if (idx < queue.length - 1) load(idx + 1, true); });
+        au.addEventListener("play", paintNow);
+        au.addEventListener("pause", () => { paintNow(); save(); });
+        au.addEventListener("loadedmetadata", () => {
+          $("seek").max = Math.floor(au.duration || 0);
+          $("dur").textContent = mmss(au.duration);
+        });
+        au.addEventListener("timeupdate", () => {
+          if (!$("seek").matches(":active")) $("seek").value = Math.floor(au.currentTime || 0);
+          $("cur").textContent = mmss(au.currentTime);
+        });
+        setInterval(save, 4000);
+        $("seek").addEventListener("input", () => { au.currentTime = +$("seek").value; });
+
+        // Свернуть окно в одну строку и обратно (окно всплывающее — размер
+        // ему можно менять). Запоминаем прежнюю высоту, чтобы вернуть.
+        let fullH = 0;
+        $("foldBtn").addEventListener("click", () => {
+          const mini = document.body.classList.toggle("mini-mode");
+          try {
+            if (mini) { fullH = window.outerHeight; window.resizeTo(window.outerWidth, 92); }
+            else { window.resizeTo(window.outerWidth, fullH || 560); }
+          } catch (e) { /* обычная вкладка — просто CSS */ }
+        });
+
+        const drawList = () => {
+          $("list").innerHTML = queue.length
+            ? queue.map((t, i) =>
+                '<div class="trk" data-i="' + i + '"><div class="n"><b>' + esc(t.title) +
+                '</b><span>' + esc(t.artist || "") + (t.folder ? " · " + esc(t.folder) : "") +
+                '</span></div></div>').join("")
+            : '<p class="empty">В фонотеке пока пусто.</p>';
+          $("list").querySelectorAll(".trk").forEach((el) =>
+            el.addEventListener("click", () => load(+el.dataset.i, true)));
+        };
+
+        fetch("/api/music", { credentials: "same-origin" })
+          .then((r) => r.json())
+          .then((d) => {
+            const folderName = {};
+            (d.folders || []).forEach((f) => { folderName[f.id] = f.name; });
+            queue = (d.tracks || []).map((t) => ({
+              id: t.id, title: t.title, artist: t.artist,
+              folder: folderName[t.folder] || "" }));
+            drawList();
+            // Восстановить прошлый трек и позицию.
+            let start = null;
+            try { start = JSON.parse(localStorage.getItem("vgPlayer") || "null"); } catch (e) {}
+            if (start && start.id) {
+              const at = queue.findIndex((t) => t.id === start.id);
+              if (at >= 0) {
+                idx = at; paintNow();
+                au.src = "/api/music/file/" + encodeURIComponent(queue[at].id);
+                au.addEventListener("loadedmetadata", function once() {
+                  au.removeEventListener("loadedmetadata", once);
+                  if (start.time) au.currentTime = start.time;
+                }, { once: true });
+              }
+            }
+          })
+          .catch(() => { $("list").innerHTML = '<p class="empty">Не удалось загрузить.</p>'; });
+      })();
+      </script>
+    </body>
+    </html>
+    """
+    return html.replace("__ICONLINKS__", ICON_LINKS)
+
+
 @app.get("/diy")
 def diy_page():
     """Страна DIY: витрина своих творений.
@@ -9383,7 +9597,13 @@ def music_page():
                  padding: clamp(20px, 4vw, 44px) 0 24px; }
 
         .mtop { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-        .mtop-left { display: flex; align-items: center; gap: 14px; }
+        .mtop-left { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+        .popout { display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 14px;
+                  color: #04121c; cursor: pointer; font: 700 .74rem "Cascadia Code", Consolas, monospace;
+                  letter-spacing: .04em; border: 0; border-radius: 999px;
+                  background: linear-gradient(90deg, #2de2ff, #65f2bd); }
+        .popout:hover { filter: brightness(1.08); }
+        .popout svg { width: 15px; height: 15px; }
         .back { display: inline-flex; align-items: center; justify-content: center;
                 width: 42px; height: 42px; flex: none; color: #7ce0ff; text-decoration: none;
                 border: 1px solid rgba(45,226,255,.3); border-radius: 50%;
@@ -9569,6 +9789,12 @@ def music_page():
           <div class="mtop-left">
             <a class="back" href="/" title="На главную" aria-label="На главную"><svg viewBox="0 0 24 24" fill="none"><path d="M19 12H5m0 0 6-6m-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
             <a class="eyebrow" href="/">vitazgio.ru · музыка</a>
+            <button class="popout" type="button"
+                    onclick="window.open('/player','vgplayer','width=380,height=580')"
+                    title="Открыть плеер в отдельном окне — играет, пока окно открыто">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M21 3l-9 9M10 5H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5"/></svg>
+              <span>Плеер в окне</span>
+            </button>
           </div>
           <img class="hero-mark" src="/static/icons/vg-plain.svg" alt="Vitaz Gio"
                width="512" height="512">
