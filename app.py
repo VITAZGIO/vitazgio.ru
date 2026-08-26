@@ -9753,6 +9753,10 @@ def vg_player_js():
              display:grid; place-items:center; overflow:hidden;
              background:linear-gradient(145deg, rgba(45,226,255,.22), rgba(99,245,173,.12));
              box-shadow:0 0 0 1px rgba(45,226,255,.28) inset; }
+  /* пока молчит — нота, заиграло — живые полоски */
+  .vgp-note { width:21px; height:21px; color:#8ef2ff; opacity:.85; }
+  .vgp.vgp-on .vgp-note { display:none; }
+  .vgp:not(.vgp-on) .vgp-eq { display:none; }
   .vgp-eq { display:flex; align-items:flex-end; gap:3px; height:20px; }
   .vgp-eq i { width:3px; height:5px; border-radius:2px; background:linear-gradient(180deg,#7df0ff,#2de2ff);
               box-shadow:0 0 7px rgba(45,226,255,.75); }
@@ -9858,7 +9862,10 @@ def vg_player_js():
       '<div class="vgp-head">' +
         '<svg class="vgp-ring" viewBox="0 0 60 60"><circle class="bg" cx="30" cy="30" r="27"/>' +
           '<circle class="fg" cx="30" cy="30" r="27" stroke-dasharray="169.6" stroke-dashoffset="169.6"/></svg>' +
-        '<div class="vgp-art"><div class="vgp-eq"><i></i><i></i><i></i><i></i></div></div>' +
+        '<div class="vgp-art">' +
+          '<svg class="vgp-note" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">' +
+            '<path d="M9 18V6l10-2v12"/><circle cx="6.5" cy="18" r="2.8"/><circle cx="16.5" cy="16" r="2.8"/></svg>' +
+          '<div class="vgp-eq"><i></i><i></i><i></i><i></i></div></div>' +
         '<div class="vgp-meta"><div class="vgp-t">Фонотека</div><div class="vgp-a">ничего не играет</div></div>' +
         '<button class="vgp-x" data-fold title="Свернуть">' + I.fold + '</button>' +
       '</div>' +
@@ -10655,18 +10662,469 @@ def diy_page():
 
 @app.get("/servers")
 def servers_page():
-    return _soon_page(
-        "Хозяйство", "vitazgio.ru · хозяйство", "ХОЗЯЙСТВО",
-        "Рассказ про сервера: какие машины, что на них крутится и как это "
-        "связано в одну систему. Без адресов и версий — их знать посторонним "
-        "незачем.",
-        [
-            "Машины: имя, роль, процессор, память, диски",
-            "Схема связи: от заграничного сервера до домашней сети",
-            "Что где живёт — по названиям сервисов",
-            "Сколько всего ядер, памяти и терабайт",
-            "История: что было год назад и что стало",
-        ])
+    """Хозяйство: три машины, их роли и что на них крутится.
+
+    Страница открыта всем, поэтому наружу не выносим ни публичный адрес VPS,
+    ни адреса mesh-сети — только домашние 192.168.x, которые одинаковы у
+    половины страны и ничего не выдают."""
+    html = """<!doctype html>
+    <html lang="ru">
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <meta name="theme-color" content="#0d1321">
+      <meta name="description" content="Домашний кластер vitazgio.ru: VPS, Proxmox и Orange Pi — что где крутится">
+      __ICONLINKS__
+      <link rel="manifest" href="/manifest.webmanifest">
+      <title>Хозяйство · vitazgio.ru</title>
+      <style>
+        :root { color-scheme: dark;
+                --bg:#0d1321; --line:rgba(255,255,255,.1); --muted:#8b97ac;
+                --pc:#2de2ff; --ok:#63f5ad; --warm:#ffd84a; --hot:#ff7a59; --vio:#b57cff; }
+        * { box-sizing: border-box; }
+        body { margin:0; min-width:320px; color:#eaf3fb; padding-bottom:70px;
+               font-family:"Cascadia Code", Consolas, monospace;
+               background:radial-gradient(circle at top left, #192a44, #0d1321 55%); }
+        .page { width:min(1180px, calc(100% - 36px)); margin:0 auto; padding:clamp(18px,3vw,40px) 0 0; }
+
+        .top { position:relative; display:flex; align-items:center; gap:14px; margin-bottom:22px; }
+        .back { width:44px; height:44px; flex:none; display:grid; place-items:center;
+                color:var(--pc); text-decoration:none; border:1px solid rgba(45,226,255,.3);
+                border-radius:50%; background:rgba(45,226,255,.07); transition:.18s; }
+        .back:hover { color:#fff; border-color:var(--pc); background:rgba(45,226,255,.18); }
+        .back svg { width:20px; height:20px; }
+        .eyebrow { display:inline-flex; align-items:center; gap:10px; color:#cdd2df;
+                   font-size:.74rem; font-weight:700; letter-spacing:.16em;
+                   text-transform:uppercase; text-decoration:none; }
+        .eyebrow::before { content:""; width:7px; height:7px; border-radius:50%;
+                           background:var(--ok); box-shadow:0 0 16px var(--ok); }
+        .eyebrow:hover { color:#fff; }
+        .mark { position:absolute; right:0; top:50%; transform:translateY(-55%);
+                width:clamp(1.2rem,4.4vw,3.4rem); height:clamp(1.2rem,4.4vw,3.4rem); }
+
+        h1 { position:relative; min-height:112px; display:flex; align-items:center; margin:0;
+             padding:22px clamp(20px,4vw,46px);
+             font-size:clamp(1.1rem,4.2vw,3.2rem); font-weight:800; letter-spacing:-.05em;
+             color:#dffaff; border:1px solid rgba(54,228,255,.24);
+             background:linear-gradient(110deg, rgba(12,28,43,.92), rgba(20,17,38,.82));
+             clip-path:polygon(0 0, calc(100% - 25px) 0, 100% 25px, 100% 100%, 25px 100%, 0 calc(100% - 25px));
+             text-shadow:2px 0 #ff3fa4, -2px 0 #21dcff; }
+        .lead { max-width:70ch; margin:22px 0 0; color:var(--muted); font-size:.94rem; line-height:1.65; }
+
+        /* ── сводка цифрами ─────────────────────────────────────────── */
+        .tally { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+                 gap:12px; margin:26px 0 0; }
+        .tile { padding:16px 18px; border:1px solid var(--line); border-radius:14px;
+                background:linear-gradient(160deg, rgba(18,28,45,.8), rgba(10,15,26,.85));
+                position:relative; overflow:hidden; }
+        .tile::after { content:""; position:absolute; inset:auto -30% -60% -30%; height:90px;
+                       background:radial-gradient(60% 100% at 50% 100%, var(--tc,var(--pc)), transparent 70%);
+                       opacity:.14; }
+        .tile b { display:block; font-size:1.9rem; font-weight:800; letter-spacing:-.03em;
+                  color:var(--tc,var(--pc)); font-variant-numeric:tabular-nums; }
+        .tile span { display:block; margin-top:4px; color:var(--muted); font-size:.7rem;
+                     letter-spacing:.1em; text-transform:uppercase; }
+
+        h2.sec { display:flex; align-items:center; gap:14px; margin:46px 0 18px;
+                 font-size:1.05rem; font-weight:700; letter-spacing:.12em; text-transform:uppercase;
+                 color:#a9b6c9; }
+        h2.sec::after { content:""; flex:1; height:1px;
+                        background:linear-gradient(90deg, rgba(255,255,255,.16), transparent); }
+
+        /* ── схема сети ─────────────────────────────────────────────── */
+        .mapbox { padding:8px 4px 4px; border:1px solid var(--line); border-radius:16px;
+                  background:linear-gradient(160deg, rgba(15,24,40,.75), rgba(9,14,24,.85));
+                  overflow-x:auto; }
+        .mapbox svg { display:block; width:100%; min-width:660px; height:auto; }
+        .n-box { fill:rgba(14,24,40,.95); stroke:rgba(255,255,255,.14); }
+        .n-box.pc  { stroke:rgba(45,226,255,.55); }
+        .n-box.ok  { stroke:rgba(99,245,173,.5); }
+        .n-box.vio { stroke:rgba(181,124,255,.5); }
+        .n-t  { fill:#eaf3fb; font:700 13px "Cascadia Code",monospace; }
+        .n-s  { fill:#7f8ea3; font:400 10.5px "Cascadia Code",monospace; }
+        .wire { stroke:rgba(255,255,255,.14); stroke-width:1.6; fill:none; }
+        .wire.lit { stroke:rgba(45,226,255,.34); }
+        .pkt { fill:var(--pc); filter:drop-shadow(0 0 5px var(--pc)); }
+        .pkt.g { fill:var(--ok); filter:drop-shadow(0 0 5px var(--ok)); }
+        .pulse { animation:pulse 2.6s ease-in-out infinite; transform-origin:center; }
+        @keyframes pulse { 0%,100%{opacity:.35} 50%{opacity:1} }
+
+        /* ── карточки машин ─────────────────────────────────────────── */
+        .rigs { display:grid; gap:16px; grid-template-columns:repeat(auto-fit,minmax(330px,1fr)); }
+        .rig { position:relative; display:flex; flex-direction:column; overflow:hidden;
+               border:1px solid var(--line); border-radius:18px;
+               background:linear-gradient(160deg, rgba(18,28,45,.86), rgba(9,14,24,.9));
+               transition:transform .25s, border-color .25s, box-shadow .25s; }
+        .rig:hover { transform:translateY(-4px); border-color:color-mix(in srgb, var(--ac) 55%, transparent);
+                     box-shadow:0 22px 50px rgba(0,0,0,.45), 0 0 34px color-mix(in srgb, var(--ac) 12%, transparent); }
+        .rig::before { content:""; position:absolute; left:0; right:0; top:0; height:3px;
+                       background:linear-gradient(90deg, var(--ac), transparent 75%); }
+        .rig-head { display:flex; align-items:center; gap:13px; padding:18px 18px 12px; }
+        .rig-ico { width:46px; height:46px; flex:none; display:grid; place-items:center;
+                   border-radius:13px; color:var(--ac);
+                   background:color-mix(in srgb, var(--ac) 13%, transparent);
+                   box-shadow:0 0 0 1px color-mix(in srgb, var(--ac) 30%, transparent) inset; }
+        .rig-ico svg { width:24px; height:24px; }
+        .rig-name { flex:1; min-width:0; }
+        .rig-name b { display:block; font-size:1.06rem; font-weight:800; letter-spacing:-.01em; }
+        .rig-name span { display:block; margin-top:3px; color:var(--muted); font-size:.7rem;
+                         letter-spacing:.1em; text-transform:uppercase; }
+        .dot { width:9px; height:9px; flex:none; border-radius:50%; background:var(--ok);
+               box-shadow:0 0 12px var(--ok); animation:beat 2.4s ease-in-out infinite; }
+        @keyframes beat { 0%,100%{ transform:scale(1); opacity:1 } 50%{ transform:scale(.7); opacity:.55 } }
+
+        .specs { padding:0 18px; display:grid; gap:9px; }
+        .spec { display:flex; align-items:center; gap:10px; font-size:.78rem; }
+        .spec .k { flex:none; width:82px; color:#6f7d92; font-size:.68rem;
+                   letter-spacing:.08em; text-transform:uppercase; }
+        .spec .v { flex:1; min-width:0; color:#dce6f3; }
+        .meter { flex:1; height:5px; border-radius:3px; background:rgba(255,255,255,.08); overflow:hidden; }
+        .meter i { display:block; height:100%; width:0; border-radius:3px;
+                   background:linear-gradient(90deg, var(--ac), color-mix(in srgb, var(--ac) 35%, #ffffff));
+                   transition:width 1.1s cubic-bezier(.22,1,.36,1); }
+
+        .svc { display:flex; flex-wrap:wrap; gap:6px; padding:14px 18px 18px; margin-top:auto; }
+        .svc i { font-style:normal; padding:4px 9px; border-radius:7px; font-size:.68rem;
+                 color:#cfe0f0; background:rgba(255,255,255,.05); border:1px solid var(--line); }
+        .svc i.hi { color:#04121c; background:var(--ac); border-color:var(--ac); font-weight:700; }
+        .vm { margin:12px 18px 0; padding:11px 13px; border-radius:12px;
+              border:1px dashed rgba(255,255,255,.14); background:rgba(255,255,255,.02); }
+        .vm b { display:block; font-size:.82rem; margin-bottom:3px; }
+        .vm span { color:var(--muted); font-size:.7rem; line-height:1.5; }
+
+        /* ── конвейер Себастьяна ────────────────────────────────────── */
+        .flow { display:flex; align-items:stretch; gap:0; flex-wrap:wrap;
+                border:1px solid var(--line); border-radius:16px; overflow:hidden;
+                background:linear-gradient(160deg, rgba(16,26,42,.8), rgba(9,14,24,.86)); }
+        .step { flex:1 1 150px; min-width:150px; padding:18px 16px; position:relative;
+                border-right:1px solid var(--line); }
+        .step:last-child { border-right:0; }
+        .step .num { color:var(--sc,var(--pc)); font-size:.66rem; font-weight:800; letter-spacing:.16em; }
+        .step b { display:block; margin:7px 0 5px; font-size:.92rem; }
+        .step span { display:block; color:var(--muted); font-size:.72rem; line-height:1.5; }
+        .step em { display:inline-block; margin-top:8px; font-style:normal; padding:3px 8px;
+                   border-radius:6px; font-size:.66rem; color:#04121c; background:var(--sc,var(--pc)); font-weight:700; }
+        .step::after { content:""; position:absolute; left:0; right:0; bottom:0; height:2px;
+                       background:linear-gradient(90deg, transparent, var(--sc,var(--pc)), transparent);
+                       opacity:0; }
+        .flow.run .step::after { animation:sweep 4.4s linear infinite; }
+        .flow.run .step:nth-child(2)::after { animation-delay:.55s }
+        .flow.run .step:nth-child(3)::after { animation-delay:1.1s }
+        .flow.run .step:nth-child(4)::after { animation-delay:1.65s }
+        .flow.run .step:nth-child(5)::after { animation-delay:2.2s }
+        @keyframes sweep { 0%,88%{opacity:0} 6%,20%{opacity:.9} 40%{opacity:0} }
+
+        /* ── дом ────────────────────────────────────────────────────── */
+        .home { display:grid; gap:14px; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); }
+        .card { padding:18px; border:1px solid var(--line); border-radius:16px;
+                background:linear-gradient(160deg, rgba(17,27,44,.8), rgba(9,14,24,.86)); }
+        .card h3 { margin:0 0 10px; font-size:.95rem; letter-spacing:.02em; }
+        .card p { margin:0; color:var(--muted); font-size:.8rem; line-height:1.65; }
+        .card ul { margin:10px 0 0; padding-left:18px; color:var(--muted); font-size:.8rem; line-height:1.75; }
+        .card li::marker { color:var(--pc); }
+
+        .plans { display:grid; gap:10px; }
+        .plan { display:flex; align-items:flex-start; gap:12px; padding:13px 15px;
+                border:1px solid var(--line); border-radius:12px; background:rgba(255,255,255,.02); }
+        .plan .tick { flex:none; width:22px; height:22px; display:grid; place-items:center;
+                      border-radius:6px; font-size:.62rem; font-weight:800; color:#04121c; background:var(--warm); }
+        .plan b { display:block; font-size:.84rem; margin-bottom:3px; }
+        .plan span { color:var(--muted); font-size:.74rem; line-height:1.55; }
+
+        footer { margin-top:44px; padding-top:20px; border-top:1px solid var(--line);
+                 color:#66707f; font-size:.74rem; }
+
+        /* появление при прокрутке */
+        .rise { opacity:0; transform:translateY(18px); transition:opacity .6s ease, transform .6s cubic-bezier(.22,1,.36,1); }
+        .rise.in { opacity:1; transform:none; }
+        @media (prefers-reduced-motion: reduce) {
+          * { animation:none !important; transition:none !important; }
+          .rise { opacity:1; transform:none; }
+        }
+      </style>
+    </head>
+    <body>
+      <main class="page">
+        <div class="top">
+          <a class="back" href="/" title="На главную" aria-label="На главную"><svg viewBox="0 0 24 24" fill="none"><path d="M19 12H5m0 0 6-6m-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
+          <a class="eyebrow" href="/">vitazgio.ru · хозяйство</a>
+          <img class="mark" src="/static/icons/vg-plain.svg" alt="Vitaz Gio" width="512" height="512">
+        </div>
+        <h1>ХОЗЯЙСТВО</h1>
+        <p class="lead">Три машины, связанные в одну систему: арендованный сервер в Амстердаме
+          держит домены и сертификаты, домашний Proxmox тянет виртуалки и видеокарту под
+          нейросети, а маленькая Orange Pi круглосуточно рулит умной квартирой. Между собой
+          они общаются по своей mesh-сети, наружу — только через один шлюз.</p>
+
+        <div class="tally rise">
+          <div class="tile" style="--tc:#2de2ff"><b data-count="3">0</b><span>машины</span></div>
+          <div class="tile" style="--tc:#63f5ad"><b data-count="2">0</b><span>виртуалки</span></div>
+          <div class="tile" style="--tc:#b57cff"><b data-count="10" data-suffix=" ГБ">0</b><span>видеопамять</span></div>
+          <div class="tile" style="--tc:#ffd84a"><b data-count="20" data-prefix="~">0</b><span>сервисов</span></div>
+          <div class="tile" style="--tc:#ff7a59"><b data-count="16" data-suffix=" шт">0</b><span>умных устройств</span></div>
+        </div>
+
+        <h2 class="sec">Как это связано</h2>
+        <div class="mapbox rise">
+          <svg viewBox="0 62 960 232" role="img" aria-label="Схема: интернет, VPS, домашняя сеть">
+            <defs>
+              <linearGradient id="gwire" x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0" stop-color="#2de2ff" stop-opacity=".05"/>
+                <stop offset="1" stop-color="#2de2ff" stop-opacity=".4"/>
+              </linearGradient>
+            </defs>
+
+            <!-- провода -->
+            <path id="w1" class="wire lit" d="M120 150 H255"/>
+            <path id="w2" class="wire lit" d="M400 150 H520"/>
+            <path id="w3" class="wire lit" d="M665 118 H700"/>
+            <path id="w4" class="wire lit" d="M665 182 H700"/>
+            <path id="w5" class="wire lit" d="M400 150 C455 150, 455 252, 520 252"/>
+
+            <!-- бегущие пакеты -->
+            <circle r="3.5" class="pkt"><animateMotion dur="2.2s" repeatCount="indefinite"><mpath href="#w1"/></animateMotion></circle>
+            <circle r="3.5" class="pkt"><animateMotion dur="2.2s" begin="1.1s" repeatCount="indefinite"><mpath href="#w1"/></animateMotion></circle>
+            <circle r="3.5" class="pkt g"><animateMotion dur="1.9s" repeatCount="indefinite"><mpath href="#w2"/></animateMotion></circle>
+            <circle r="3" class="pkt g"><animateMotion dur="2.6s" begin=".8s" repeatCount="indefinite"><mpath href="#w5"/></animateMotion></circle>
+
+            <!-- интернет -->
+            <g>
+              <rect class="n-box" x="16" y="118" width="104" height="64" rx="14"/>
+              <text class="n-t" x="68" y="146" text-anchor="middle">Интернет</text>
+              <text class="n-s" x="68" y="164" text-anchor="middle">весь мир</text>
+            </g>
+
+            <!-- VPS -->
+            <g>
+              <rect class="n-box pc" x="255" y="104" width="145" height="92" rx="16"/>
+              <circle cx="278" cy="128" r="4" fill="#63f5ad" class="pulse"/>
+              <text class="n-t" x="294" y="132">VPS</text>
+              <text class="n-s" x="270" y="154">Амстердам</text>
+              <text class="n-s" x="270" y="172">Nginx Proxy Manager</text>
+              <text class="n-s" x="270" y="188">10 доменов · SSL</text>
+            </g>
+
+            <!-- mesh-облако -->
+            <g>
+              <rect class="n-box vio" x="520" y="104" width="145" height="92" rx="16"/>
+              <circle cx="543" cy="128" r="4" fill="#b57cff" class="pulse"/>
+              <text class="n-t" x="559" y="132">NetBird</text>
+              <text class="n-s" x="535" y="154">mesh поверх</text>
+              <text class="n-s" x="535" y="172">WireGuard</text>
+              <text class="n-s" x="535" y="188">все машины рядом</text>
+            </g>
+
+            <!-- Proxmox -->
+            <g>
+              <rect class="n-box ok" x="700" y="76" width="244" height="84" rx="16"/>
+              <circle cx="723" cy="102" r="4" fill="#63f5ad" class="pulse"/>
+              <text class="n-t" x="739" y="106">Proxmox</text>
+              <text class="n-s" x="715" y="128">i5-10505 · 16 ГБ · CMP 50HX</text>
+              <text class="n-s" x="715" y="147">Ubuntu VM + Windows VM</text>
+            </g>
+
+            <!-- Orange Pi -->
+            <g>
+              <rect class="n-box" x="700" y="172" width="244" height="76" rx="16"/>
+              <circle cx="723" cy="198" r="4" fill="#ffd84a" class="pulse"/>
+              <text class="n-t" x="739" y="202">Orange Pi Zero 3</text>
+              <text class="n-s" x="715" y="224">Home Assistant · Zigbee2MQTT</text>
+              <text class="n-s" x="715" y="242">Mosquitto · мониторинг</text>
+            </g>
+
+            <!-- дом -->
+            <g>
+              <rect class="n-box" x="520" y="222" width="145" height="60" rx="14"/>
+              <text class="n-t" x="592" y="248" text-anchor="middle">Квартира</text>
+              <text class="n-s" x="592" y="266" text-anchor="middle">лампы, розетки, лента</text>
+            </g>
+          </svg>
+        </div>
+
+        <h2 class="sec">Машины</h2>
+        <section class="rigs">
+
+          <article class="rig rise" style="--ac:#63f5ad">
+            <div class="rig-head">
+              <span class="rig-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/></svg></span>
+              <span class="rig-name"><b>Proxmox</b><span>главный сервер · 192.168.1.200</span></span>
+              <span class="dot" title="в строю"></span>
+            </div>
+            <div class="specs">
+              <div class="spec"><span class="k">Процессор</span><span class="v">Intel i5-10505 · 6 ядер</span></div>
+              <div class="spec"><span class="k">Память</span><span class="meter"><i data-fill="50"></i></span><span class="v" style="flex:none">16 ГБ</span></div>
+              <div class="spec"><span class="k">Видео</span><span class="meter"><i data-fill="100"></i></span><span class="v" style="flex:none">10 ГБ</span></div>
+              <div class="spec"><span class="k">Роль</span><span class="v">виртуалки, диски и проброс видеокарты</span></div>
+            </div>
+            <div class="vm">
+              <b>Ubuntu VM · 192.168.1.201</b>
+              <span>Docker: Nextcloud, Jellyfin, Syncthing. Сюда проброшена видеокарта —
+                на ней живёт весь голосовой ИИ.</span>
+            </div>
+            <div class="vm">
+              <b>Windows 10 VM · 192.168.1.193</b>
+              <span>Будится по сети (Wake-on-LAN) и управляется по SSH прямо из умного дома.</span>
+            </div>
+            <div class="svc">
+              <i class="hi">CMP 50HX 10 ГБ</i><i>Nextcloud</i><i>Jellyfin</i><i>Syncthing</i><i>Docker</i><i>Gitea (в планах)</i>
+            </div>
+          </article>
+
+          <article class="rig rise" style="--ac:#2de2ff">
+            <div class="rig-head">
+              <span class="rig-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.6 2.7 2.6 15.3 0 18M12 3c-2.6 2.7-2.6 15.3 0 18"/></svg></span>
+              <span class="rig-name"><b>VPS</b><span>шлюз наружу · Амстердам</span></span>
+              <span class="dot" title="в строю"></span>
+            </div>
+            <div class="specs">
+              <div class="spec"><span class="k">Роль</span><span class="v">единственная дверь из интернета внутрь</span></div>
+              <div class="spec"><span class="k">Домены</span><span class="meter"><i data-fill="80"></i></span><span class="v" style="flex:none">10</span></div>
+              <div class="spec"><span class="k">Сертификаты</span><span class="v">Let's Encrypt, обновляются сами</span></div>
+              <div class="spec"><span class="k">Потоки</span><span class="v">Syncthing проброшен напрямую, TCP и UDP</span></div>
+            </div>
+            <div class="vm">
+              <b>Nginx Proxy Manager</b>
+              <span>Раздаёт запросы по поддоменам на нужную машину внутри mesh-сети.
+                Панель управления наружу не смотрит — только через свою сеть.</span>
+            </div>
+            <div class="svc">
+              <i class="hi">Nginx Proxy Manager</i><i>Let's Encrypt</i><i>NetBird</i><i>Syncthing relay</i>
+            </div>
+          </article>
+
+          <article class="rig rise" style="--ac:#ffd84a">
+            <div class="rig-head">
+              <span class="rig-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="3"/><rect x="9" y="9" width="6" height="6" rx="1"/><path d="M9 2v2M15 2v2M9 20v2M15 20v2M2 9h2M2 15h2M20 9h2M20 15h2"/></svg></span>
+              <span class="rig-name"><b>Orange Pi Zero 3</b><span>мозг квартиры · 192.168.1.195</span></span>
+              <span class="dot" title="в строю"></span>
+            </div>
+            <div class="specs">
+              <div class="spec"><span class="k">Система</span><span class="v">Armbian, поверх — CasaOS как оболочка Docker</span></div>
+              <div class="spec"><span class="k">Работает</span><span class="meter"><i data-fill="100"></i></span><span class="v" style="flex:none">24/7</span></div>
+              <div class="spec"><span class="k">Питание</span><span class="v">пара ватт — потому и не выключается</span></div>
+              <div class="spec"><span class="k">Роль</span><span class="v">умный дом, Zigbee, MQTT, мониторинг</span></div>
+            </div>
+            <div class="vm">
+              <b>Почему отдельная машина</b>
+              <span>Свет и розетки должны слушаться даже когда большой сервер выключен
+                или на нём идут работы. Маленькая плата на это и поставлена.</span>
+            </div>
+            <div class="svc">
+              <i class="hi">Home Assistant</i><i>Zigbee2MQTT</i><i>Mosquitto</i><i>Uptime Kuma</i><i>Glances</i><i>веб-терминал</i>
+            </div>
+          </article>
+
+        </section>
+
+        <h2 class="sec">Себастьян · голосовой дворецкий</h2>
+        <p class="lead" style="margin-top:0">Свой голосовой помощник целиком на домашнем железе:
+          ничего не уходит наружу, всё крутится на одной видеокарте. От вопроса до ответа
+          голосом — от 3.7 секунды.</p>
+        <div class="flow rise">
+          <div class="step" style="--sc:#2de2ff"><span class="num">01</span><b>Слышит</b>
+            <span>Микрофон отдаёт запись распознавалке речи.</span><em>Whisper</em></div>
+          <div class="step" style="--sc:#63f5ad"><span class="num">02</span><b>Разбирает</b>
+            <span>Расшифровка уходит в языковую модель на видеокарте.</span><em>1–1.5 с</em></div>
+          <div class="step" style="--sc:#b57cff"><span class="num">03</span><b>Думает</b>
+            <span>Модель отвечает и сама решает, дёрнуть ли инструмент: погода, время, свет.</span><em>Ollama · qwen3</em></div>
+          <div class="step" style="--sc:#ffd84a"><span class="num">04</span><b>Делает</b>
+            <span>Команды уходят в умный дом через отдельный сервис с белым списком устройств.</span><em>16 устройств</em></div>
+          <div class="step" style="--sc:#ff7a59"><span class="num">05</span><b>Отвечает</b>
+            <span>Синтез речи своим голосом — слепок голоса считается один раз при старте.</span><em>XTTS v2</em></div>
+        </div>
+
+        <h2 class="sec">Умная квартира</h2>
+        <div class="home">
+          <div class="card rise">
+            <h3>Zigbee вместо Wi-Fi</h3>
+            <p>Лампы, розетки и удлинители держатся на своей сети Zigbee: она не забивает
+              Wi-Fi и живёт, даже когда роутер перезагружается. Каждое устройство с питанием
+              от розетки заодно работает ретранслятором — сеть тем крепче, чем её больше.</p>
+          </div>
+          <div class="card rise">
+            <h3>Своё железо</h3>
+            <p>Часть устройств собрана руками на ESP32 — их прошивки лежат в
+              <a href="/diy" style="color:var(--pc)">стране DIY</a>:</p>
+            <ul>
+              <li>лента-«корона» на 5 метров с пультом на кнопках</li>
+              <li>автомагнитола как домашний усилитель, через ИК-светодиод</li>
+              <li>панель мониторинга сервера с экраном и кнопками</li>
+              <li>реле под столом с термометром и управлением вентилятором</li>
+            </ul>
+          </div>
+          <div class="card rise">
+            <h3>Правило простое</h3>
+            <p>Всё, что можно сделать локально, делается локально. Облака подключены
+              только там, где без них никак. Свет продолжает включаться, даже если
+              интернет отвалился совсем.</p>
+          </div>
+        </div>
+
+        <h2 class="sec">Что дальше</h2>
+        <div class="plans rise">
+          <div class="plan"><span class="tick">1</span><span><b>Резервные копии по-взрослому</b>
+            <span>Отдельный диск под Proxmox Backup Server для виртуалок и restic для мелких машин.</span></span></div>
+          <div class="plan"><span class="tick">2</span><span><b>Свой Gitea на домене</b>
+            <span>Зеркало репозиториев с GitHub и сборка прямо дома, без чужих раннеров.</span></span></div>
+          <div class="plan"><span class="tick">3</span><span><b>Память до 32 ГБ</b>
+            <span>Вторая планка — виртуалкам и нейросети станет заметно свободнее.</span></span></div>
+          <div class="plan"><span class="tick">4</span><span><b>Магнитола на Zigbee</b>
+            <span>Переезд с Wi-Fi на ESP32-C6: меньше проводов в логике, одна сеть на всё.</span></span></div>
+        </div>
+
+        <footer>Схема без публичных адресов: наружу смотрит только один шлюз, остальное живёт
+          в закрытой сети. Домашние адреса 192.168.x одинаковы у половины страны и ничего не выдают.</footer>
+      </main>
+
+      <script>
+      (() => {
+        "use strict";
+        const slow = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+        /* появление блоков при прокрутке */
+        const rise = document.querySelectorAll(".rise");
+        if (slow || !("IntersectionObserver" in window)) {
+          rise.forEach((el) => el.classList.add("in"));
+          document.querySelectorAll("[data-fill]").forEach((el) => { el.style.width = el.dataset.fill + "%"; });
+          document.querySelectorAll("[data-count]").forEach((el) => {
+            el.textContent = (el.dataset.prefix || "") + el.dataset.count + (el.dataset.suffix || ""); });
+          document.querySelector(".flow").classList.add("run");
+          return;
+        }
+
+        const io = new IntersectionObserver((items) => {
+          items.forEach((it) => {
+            if (!it.isIntersecting) return;
+            it.target.classList.add("in");
+            io.unobserve(it.target);
+            // полоски наливаются, цифры набегают — только когда блок виден
+            it.target.querySelectorAll("[data-fill]").forEach((b, i) =>
+              setTimeout(() => { b.style.width = b.dataset.fill + "%"; }, 120 + i * 90));
+            it.target.querySelectorAll("[data-count]").forEach((n) => countUp(n));
+            if (it.target.classList.contains("flow")) it.target.classList.add("run");
+          });
+        }, { threshold: .18 });
+        rise.forEach((el) => io.observe(el));
+
+        const countUp = (el) => {
+          const to = +el.dataset.count || 0;
+          const pre = el.dataset.prefix || "", suf = el.dataset.suffix || "";
+          const t0 = performance.now(), ms = 900;
+          const tick = (t) => {
+            const k = Math.min(1, (t - t0) / ms);
+            const eased = 1 - Math.pow(1 - k, 3);
+            el.textContent = pre + Math.round(to * eased) + suf;
+            if (k < 1) requestAnimationFrame(tick);
+          };
+          requestAnimationFrame(tick);
+        };
+      })();
+      </script>
+      <script src="/vg-player.js" defer></script>
+    </body>
+    </html>
+    """
+    return html.replace("__ICONLINKS__", ICON_LINKS)
 
 
 @app.get("/music")
