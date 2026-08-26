@@ -6126,23 +6126,23 @@ def drop_page():
         h1 { margin: 0; font-size: clamp(1.5rem, 3.5vw, 2.3rem); font-weight: 700; letter-spacing: -.02em;
              color: #eaf6ff; text-shadow: 0 0 22px rgba(45,226,255,.35); }
         h1 span { color: #2de2ff; text-shadow: 0 0 22px rgba(45,226,255,.5); }
-        .quota { margin-left: auto; min-width: 315px; }
+        .quota { margin-left: auto; min-width: 262px; }
         /* Две подписи вокруг шкалы: сверху сколько занято всего (папка),
-           снизу сколько в корзине (кликабельно). Всё крупнее в полтора раза. */
-        .quota-line { display: flex; align-items: center; gap: 10px; color: #8f99ab;
-                      font-size: 1.08rem; font-family: inherit; text-align: left;
+           снизу сколько в корзине (кликабельно). */
+        .quota-line { display: flex; align-items: center; gap: 8px; color: #8f99ab;
+                      font-size: .9rem; font-family: inherit; text-align: left;
                       background: none; border: 0; padding: 0; width: 100%; }
         .quota-line b { color: #cfe2ee; font-weight: 700; }
-        .quota-line .qi { width: 22px; height: 22px; flex: none; display: grid; place-items: center; }
-        .quota-line .qi svg { width: 22px; height: 22px; display: block; }
-        .quota-used { margin-bottom: 8px; }
+        .quota-line .qi { width: 18px; height: 18px; flex: none; display: grid; place-items: center; }
+        .quota-line .qi svg { width: 18px; height: 18px; display: block; }
+        .quota-used { margin-bottom: 6px; }
         .quota-used .qi { color: #f5c344; }
-        .quota-can { margin-top: 8px; cursor: pointer; transition: color .16s; }
+        .quota-can { margin-top: 6px; cursor: pointer; transition: color .16s; }
         .quota-can .qi { color: #e8eef6; }
         .quota-can:hover { color: #ffffff; }
         .quota-can:hover .qi { color: #ffffff; }
         /* Шкала: слева обычная заливка (живые файлы), дальше белым — корзина. */
-        .quota-bar { position: relative; height: 9px; background: rgba(255,255,255,.08); overflow: hidden; }
+        .quota-bar { position: relative; height: 7px; background: rgba(255,255,255,.08); overflow: hidden; }
         .quota-fill { position: absolute; left: 0; top: 0; height: 100%; width: 0;
                       background: linear-gradient(90deg, #2de2ff, #63f5ad); transition: width .4s; }
         .quota-fill.hot { background: linear-gradient(90deg, #ffb35c, #ff6b81); }
@@ -6410,6 +6410,22 @@ def drop_page():
         .btn.bad:hover { color: #fff; border-color: #ff5a6e; background: rgba(255,90,110,.14); }
         .trash-empty { padding: 26px 0; color: #6b7c8f; text-align: center; font-size: .82rem; }
         .trash-keys { display: flex; justify-content: flex-end; }
+
+        /* Окно ввода пароля от корзины */
+        .trash-lock { width: min(390px, 100%); text-align: left; }
+        .trash-lock .tl-badge { display: grid; place-items: center; width: 46px; height: 46px;
+                     margin-bottom: 16px; color: #dfe9f3; border: 1px solid rgba(255,255,255,.14);
+                     border-radius: 12px; background: rgba(255,255,255,.05); }
+        .trash-lock .tl-badge svg { width: 24px; height: 24px; }
+        .trash-lock .tl-kick { color: #2de2ff; font: 700 .68rem/1 "Cascadia Code", Consolas, monospace;
+                     letter-spacing: .16em; text-transform: uppercase; }
+        .trash-lock h3 { margin: 10px 0 6px; font-size: 1.4rem; letter-spacing: -.02em; }
+        .trash-lock .tl-sub { margin: 0 0 18px; color: #7f8ca0; font-size: .8rem; }
+        .trash-lock input { width: 100%; height: 46px; padding: 0 14px; color: #f4fbff;
+                     font: 700 1rem "Cascadia Code", Consolas, monospace;
+                     border: 1px solid rgba(255,255,255,.14); outline: none; background: rgba(4,10,20,.65); }
+        .trash-lock input:focus { border-color: #2de2ff; box-shadow: 0 0 0 3px rgba(45,226,255,.09); }
+        .trash-lock .tl-err { min-height: 16px; margin: 8px 0 12px; color: #ff6ba8; font-size: .76rem; }
 
         /* Карточка папки: сколько весит и каким значком её пометить */
         .fi-stat { margin: 0 0 16px; color: #7f93a8; font-size: .76rem; line-height: 1.7; }
@@ -6855,16 +6871,67 @@ def drop_page():
             '<div class="trash-keys"><button class="btn" type="button" id="trash-close">Закрыть</button></div>';
         };
 
+        // Красивое окно ввода пароля от корзины: тот же тёмный стиль, что и
+        // остальные окошки дропа, с подсказкой и ошибкой прямо в панели.
+        const askTrashUnlock = () => new Promise((resolve) => {
+          const box = document.createElement("div");
+          box.className = "lightbox share-ask";
+          box.innerHTML =
+            '<div class="share-panel trash-lock">' +
+              '<span class="tl-badge">' +
+                '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V5h6v2m-8 0 1 13h8l1-13"/></svg>' +
+              '</span>' +
+              '<div class="tl-kick">Корзина · доступ</div>' +
+              '<h3>Введите пароль</h3>' +
+              '<p class="tl-sub">Пароль для прав админа.</p>' +
+              '<input id="tl-pass" type="password" autocomplete="current-password" placeholder="Пароль">' +
+              '<p class="tl-err" id="tl-err"></p>' +
+              '<div class="share-btns">' +
+                '<button type="button" id="tl-no">Отмена</button>' +
+                '<button type="button" class="go" id="tl-ok">Открыть</button>' +
+              '</div>' +
+            '</div>';
+          document.body.appendChild(box);
+          document.body.classList.add("modal-open");
+          const input = box.querySelector("#tl-pass");
+          const err = box.querySelector("#tl-err");
+          const okBtn = box.querySelector("#tl-ok");
+          requestAnimationFrame(() => input.focus());
+          const shut = (val) => {
+            box.remove();
+            document.body.classList.remove("modal-open");
+            document.removeEventListener("keydown", onKey);
+            resolve(val);
+          };
+          const tryOpen = async () => {
+            okBtn.disabled = true;
+            err.textContent = "";
+            try {
+              const r = await fetch("/api/drop/trash/unlock", {
+                method: "POST", credentials: "same-origin",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ password: input.value }) });
+              if (r.ok) { shut(true); return; }
+              err.textContent = "Неверный пароль.";
+              input.select();
+            } catch { err.textContent = "Сервер недоступен."; }
+            finally { okBtn.disabled = false; }
+          };
+          const onKey = (e) => {
+            if (e.key === "Escape") shut(false);
+            if (e.key === "Enter") tryOpen();
+          };
+          okBtn.addEventListener("click", tryOpen);
+          box.querySelector("#tl-no").addEventListener("click", () => shut(false));
+          box.addEventListener("click", (e) => { if (e.target === box) shut(false); });
+          document.addEventListener("keydown", onKey);
+        });
+
         const openTrash = async () => {
           let data = await trashList();
           if (!data) {                                   // закрыта — просим пароль
-            const pass = prompt("Пароль корзины:");
-            if (pass === null) return;
-            const r = await fetch("/api/drop/trash/unlock", {
-              method: "POST", credentials: "same-origin",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ password: pass }) });
-            if (!r.ok) { toast("Неверный пароль", true); return; }
+            const ok = await askTrashUnlock();
+            if (!ok) return;
             data = await trashList();
           }
           if (!data) { toast("Корзина недоступна", true); return; }
