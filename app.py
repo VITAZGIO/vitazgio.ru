@@ -10293,9 +10293,29 @@ def home():
         }
         .arcade-picks {
           display: flex; flex-wrap: wrap; justify-content: center;
-          gap: 14px; margin-top: 16px;
+          gap: 18px; margin-top: 18px;
         }
-        .arcade-picks .pick { width: clamp(104px, 16vw, 132px); }
+        /* Значки в «Рубке» вдвое крупнее и с подписью под каждым. Каждый —
+           это ячейка-колонка: сверху квадратная кнопка, снизу ярлык. */
+        .pick-cell {
+          display: flex; flex-direction: column; align-items: center; gap: 11px;
+          width: clamp(150px, 30vw, 232px);
+        }
+        .pick-cell .pick { width: 100%; }
+        .pick-label {
+          font: 700 .82rem "Cascadia Code", Consolas, monospace;
+          letter-spacing: .22em; color: #93a1b8; transition: color .2s;
+        }
+        .pick-cell:hover .pick-label,
+        .pick-cell:focus-within .pick-label { color: #eaf3ff; }
+        /* Красный замок в углу карточки: она под паролем. Со знакомого
+           устройства скрипт его убирает. */
+        .pick-lock {
+          position: absolute; top: 8px; right: 8px; z-index: 4;
+          width: 24px; height: 24px; display: grid; place-items: center;
+          color: #ff4d4d; filter: drop-shadow(0 0 6px rgba(255,60,60,.55));
+        }
+        .pick-lock svg { width: 100%; height: 100%; }
         .pick {
           --pc: #2de2ff;
           position: relative; display: grid; place-items: center;
@@ -10444,8 +10464,9 @@ def home():
           .arcade-bar-line { font-size: .86rem; letter-spacing: .26em; }
           /* Пять кнопок в строку на телефоне не влезают — раскладываем
              тремя и двумя, ширину считаем от полосы, а не подбираем. */
-          .arcade-picks { gap: 10px; }
-          .arcade-picks .pick { width: calc((100% - 20px) / 3); max-width: 132px; }
+          .arcade-picks { gap: 12px; }
+          .arcade-picks .pick-cell { width: calc((100% - 24px) / 3); max-width: 180px; }
+          .pick-label { font-size: .72rem; letter-spacing: .16em; }
           footer { font-size: .95rem; }
           .service { width: 78vw; min-height: 280px; }
           /* На телефоне листают пальцем, а поля по бокам всего 20 пикселей —
@@ -10561,31 +10582,48 @@ def home():
                Стойка переехала сюда из кабинета — теперь она про сервера,
                а у кабинета свой значок: человек за компом. -->
           <div class="arcade-picks">
-            <button class="pick pick--pad" type="button" data-games
-                    title="Игры" aria-label="Открыть игры">
-              <span class="pick-art">__ICON_PAD__</span>
-              <span class="pick-glow"></span>
-            </button>
-            <a class="pick pick--diy" href="/diy"
-               title="Страна DIY" aria-label="Открыть страну DIY">
-              <span class="pick-art">__ICON_CODE__</span>
-              <span class="pick-glow"></span>
-            </a>
-            <a class="pick pick--rack" href="/servers"
-               title="Хозяйство" aria-label="Открыть рассказ о серверах">
-              <span class="pick-art">__ICON_RACK__</span>
-              <span class="pick-glow"></span>
-            </a>
-            <a class="pick pick--music" href="/music"
-               title="Музыка" aria-label="Открыть музыку">
-              <span class="pick-art">__ICON_SPEAKER__</span>
-              <span class="pick-glow"></span>
-            </a>
-            <button class="pick pick--me" type="button" id="cabinet-pick"
-                    title="Личный кабинет" aria-label="Открыть личный кабинет">
-              <span class="pick-art">__ICON_ME__</span>
-              <span class="pick-glow"></span>
-            </button>
+            <span class="pick-cell pick--pad">
+              <button class="pick pick--pad" type="button" data-games
+                      title="Игры" aria-label="Открыть игры">
+                <span class="pick-art">__ICON_PAD__</span>
+                <span class="pick-glow"></span>
+              </button>
+              <span class="pick-label">GAMES</span>
+            </span>
+            <span class="pick-cell pick--diy">
+              <a class="pick pick--diy" href="/diy"
+                 title="Страна DIY" aria-label="Открыть страну DIY">
+                <span class="pick-art">__ICON_CODE__</span>
+                <span class="pick-glow"></span>
+              </a>
+              <span class="pick-label">DIY</span>
+            </span>
+            <span class="pick-cell pick--rack">
+              <a class="pick pick--rack" href="/servers"
+                 title="Хозяйство" aria-label="Открыть рассказ о серверах">
+                <span class="pick-art">__ICON_RACK__</span>
+                <span class="pick-glow"></span>
+              </a>
+              <span class="pick-label">SERVERS</span>
+            </span>
+            <span class="pick-cell pick--music">
+              <a class="pick pick--music" href="/music"
+                 title="Музыка" aria-label="Открыть музыку">
+                <span class="pick-art">__ICON_SPEAKER__</span>
+                <span class="pick-glow"></span>
+                <span class="pick-lock" title="Под паролем" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><rect x="4.5" y="10.5" width="15" height="10" rx="2.2" fill="currentColor"/><path d="M8 10.5V7.6a4 4 0 0 1 8 0v2.9" stroke="currentColor" stroke-width="2.2"/></svg></span>
+              </a>
+              <span class="pick-label">MUSIC</span>
+            </span>
+            <span class="pick-cell pick--me">
+              <button class="pick pick--me" type="button" id="cabinet-pick"
+                      title="Личный кабинет" aria-label="Открыть личный кабинет">
+                <span class="pick-art">__ICON_ME__</span>
+                <span class="pick-glow"></span>
+                <span class="pick-lock" title="Под паролем" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><rect x="4.5" y="10.5" width="15" height="10" rx="2.2" fill="currentColor"/><path d="M8 10.5V7.6a4 4 0 0 1 8 0v2.9" stroke="currentColor" stroke-width="2.2"/></svg></span>
+              </button>
+              <span class="pick-label">SECRET</span>
+            </span>
           </div>
         </section>
 
@@ -10993,6 +11031,18 @@ def home():
               submit.disabled = false;
             }
           });
+        })();
+
+        // Красный замок на «Музыке» и «Кабинете» снимаем, если сервер помнит
+        // это устройство: тогда пароль не спросят, и замку неоткуда взяться.
+        (async () => {
+          try {
+            const r = await fetch("/api/session/probe", { credentials: "same-origin" });
+            const d = await r.json();
+            if (d && d.trusted) {
+              document.querySelectorAll(".pick-lock").forEach((el) => el.remove());
+            }
+          } catch {}
         })();
 
         // Service worker регистрируем и здесь: приложение стартует с главной,
