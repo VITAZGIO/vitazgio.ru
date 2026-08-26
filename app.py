@@ -324,7 +324,7 @@ def _drop_children(parent):
 DROP_FOLDER_ICONS = (
     "folder", "warn", "clock", "tree", "monitor", "phone",
     "claude", "vitaz", "star", "lock", "music", "photo",
-    "video", "work", "box", "game",
+    "video", "work", "trash", "game",
 )
 
 
@@ -344,6 +344,10 @@ def _drop_folder_stats(item_id, memo=None):
     count = 0
     for child in _drop_children(item_id):
         node = drop_items[child]
+        # Удалённое (в корзине) в счёт живой папки не идёт — оно считается
+        # отдельно, как содержимое корзины.
+        if node.get("deleted"):
+            continue
         count += 1
         if node["kind"] == "folder":
             sub_size, sub_touched, sub_count = _drop_folder_stats(child, memo)
@@ -371,6 +375,82 @@ def _drop_discard(item_id):
             os.remove(path)
         except OSError:
             pass
+
+
+# ---- Корзина -------------------------------------------------------------
+# Удалённое не стирается сразу, а уезжает в корзину: метка `deleted` со
+# временем. Место оно продолжает занимать (входит в «Занято»), само чистится
+# через месяц, а до того его можно вернуть или снести вручную по паролю.
+DROP_TRASH_TTL = 30 * 24 * 3600
+# Пароль корзины хранится хешем — plaintext в исходник не кладём.
+# sha256("1224"); пароль простой, это защёлка «как в Windows», не броня.
+DROP_TRASH_PASS_HASH = "0d866ba9f9fd0f2cbb2134daf52356d2021a3686352d5c19d967305bf9e4bbdc"
+
+
+def _drop_trash(item_id, when=None):
+    """Отправляет элемент в корзину. Для папки метку ставим только на неё —
+    содержимое уезжает вместе, но своих меток не получает. Под drop_lock."""
+    item = drop_items.get(item_id)
+    if item and not item.get("deleted"):
+        item["deleted"] = when or time.time()
+
+
+def _drop_has_deleted_ancestor(item_id):
+    """Лежит ли элемент внутри уже удалённой папки. Под drop_lock."""
+    seen = set()
+    parent = drop_items.get(item_id, {}).get("parent")
+    while parent and parent in drop_items and parent not in seen:
+        seen.add(parent)
+        if drop_items[parent].get("deleted"):
+            return True
+        parent = drop_items[parent].get("parent")
+    return False
+
+
+def _drop_trash_roots():
+    """Корни удалённых поддеревьев — то, что показываем в корзине списком.
+    Вложенное в удалённую папку отдельной строкой не выводим. Под drop_lock."""
+    return [k for k, v in drop_items.items()
+            if v.get("deleted") and not _drop_has_deleted_ancestor(k)]
+
+
+def _drop_trash_bytes(memo=None):
+    """Сколько всего занимает корзина. Под drop_lock."""
+    memo = {} if memo is None else memo
+    total = 0
+    for root in _drop_trash_roots():
+        item = drop_items[root]
+        if item["kind"] == "folder":
+            total += _drop_trash_subtree_bytes(root)
+        else:
+            total += item.get("size", 0)
+    return total
+
+
+def _drop_trash_subtree_bytes(item_id):
+    """Вес удалённой папки со всем, что внутри (живое обычным подсчётом уже
+    пропускает удалённое, поэтому считаем отдельно). Под drop_lock."""
+    total = 0
+    for child in _drop_children(item_id):
+        node = drop_items[child]
+        if node["kind"] == "folder":
+            total += _drop_trash_subtree_bytes(child)
+        else:
+            total += node.get("size", 0)
+    return total
+
+
+def _drop_sweep_trash():
+    """Выносит из корзины то, что пролежало дольше месяца. Под drop_lock."""
+    now = time.time()
+    for root in _drop_trash_roots():
+        if now - (drop_items[root].get("deleted") or 0) > DROP_TRASH_TTL:
+            _drop_discard(root)
+
+
+def _drop_trash_ok(password):
+    got = hashlib.sha256((password or "").encode("utf-8")).hexdigest()
+    return hmac.compare_digest(got, DROP_TRASH_PASS_HASH)
 
 
 def _drop_path_to_root(item_id):
@@ -432,6 +512,7 @@ def _drop_load_index():
         meta.setdefault("parent", None)
         meta.setdefault("share", None)
         meta.setdefault("size", 0)
+        meta.setdefault("deleted", None)
         if meta["kind"] == "folder" or os.path.exists(_drop_path(item_id)):
             drop_items[item_id] = meta
 
@@ -453,6 +534,7 @@ def _drop_load_index():
     for item in drop_items.values():
         if item["parent"] and item["parent"] not in drop_items:
             item["parent"] = None
+    _drop_sweep_trash()          # что пролежало в корзине дольше месяца — вон
     _drop_write_index()
 
 
@@ -2400,12 +2482,13 @@ def drop_upload_finish(upload_id):
 def drop_list_api():
     parent = request.args.get("parent") or None
     with drop_lock:
+        _drop_sweep_trash()
         if parent and parent not in drop_items:
             parent = None
         memo = {}
         items = []
         for k, v in drop_items.items():
-            if v.get("parent") != parent:
+            if v.get("parent") != parent or v.get("deleted"):
                 continue
             row = {
                 "id": k, "kind": v["kind"], "name": v["name"], "size": v.get("size", 0),
@@ -2436,6 +2519,7 @@ def drop_list_api():
             breadcrumbs=_drop_path_to_root(parent),
             used=_drop_used(),
             quota=DROP_QUOTA,
+            trash=_drop_trash_bytes(memo),
         )
 
 
@@ -2828,7 +2912,7 @@ def _drop_run_delete(job_id, ids, _target):
     with drop_lock:
         _drop_job_set(job_id, total=len(ids))
         for item_id in ids:
-            _drop_discard(item_id)
+            _drop_trash(item_id)             # пакетное удаление — тоже в корзину
             with drop_jobs_lock:
                 drop_jobs[job_id]["done"] += 1
         _drop_write_index()
@@ -3055,8 +3139,75 @@ __ICONLINKS__
 def drop_delete(item_id):
     with drop_lock:
         if item_id in drop_items:
-            _drop_discard(item_id)
+            _drop_trash(item_id)             # в корзину, не насовсем
             _drop_write_index()
+    return jsonify(ok=True)
+
+
+@app.post("/api/drop/trash/unlock")
+@login_required
+def drop_trash_unlock():
+    """Открывает корзину по паролю. Дальше действия с ней разрешены до конца
+    сессии — как в проводнике, где второй раз пароль не спрашивают."""
+    payload = request.get_json(silent=True) or {}
+    if not _drop_trash_ok(payload.get("password")):
+        return jsonify(error="Неверный пароль."), 403
+    session["drop_trash"] = True
+    return jsonify(ok=True)
+
+
+@app.get("/api/drop/trash")
+@login_required
+def drop_trash_list():
+    if not session.get("drop_trash"):
+        return jsonify(error="Корзина закрыта."), 403
+    with drop_lock:
+        _drop_sweep_trash()
+        rows = []
+        for root in _drop_trash_roots():
+            v = drop_items[root]
+            row = {"id": root, "kind": v["kind"], "name": v["name"],
+                   "deleted": v.get("deleted"), "size": v.get("size", 0)}
+            if v["kind"] == "folder":
+                row["size"] = _drop_trash_subtree_bytes(root)
+            rows.append(row)
+        rows.sort(key=lambda x: -(x["deleted"] or 0))
+        return jsonify(items=rows, trash=_drop_trash_bytes(),
+                       used=_drop_used(), quota=DROP_QUOTA, ttl_days=30)
+
+
+@app.post("/api/drop/<item_id>/restore")
+@login_required
+def drop_restore(item_id):
+    if not session.get("drop_trash"):
+        return jsonify(error="Корзина закрыта."), 403
+    with drop_lock:
+        item = drop_items.get(item_id)
+        if not item or not item.get("deleted"):
+            return jsonify(error="Не найдено в корзине."), 404
+        # Папки-родителя могло уже не быть или она сама в корзине — тогда
+        # возвращаем в корень, чтобы не потерялось.
+        parent = item.get("parent")
+        if parent and (parent not in drop_items or drop_items[parent].get("deleted")):
+            parent = None
+            item["parent"] = None
+        item["name"] = _drop_unique_name(item["name"], parent)
+        item["deleted"] = None
+        _drop_write_index()
+    return jsonify(ok=True)
+
+
+@app.delete("/api/drop/trash/<item_id>")
+@login_required
+def drop_trash_purge(item_id):
+    if not session.get("drop_trash"):
+        return jsonify(error="Корзина закрыта."), 403
+    with drop_lock:
+        item = drop_items.get(item_id)
+        if not item or not item.get("deleted"):
+            return jsonify(error="Не найдено в корзине."), 404
+        _drop_discard(item_id)               # теперь насовсем
+        _drop_write_index()
     return jsonify(ok=True)
 
 
@@ -5975,11 +6126,28 @@ def drop_page():
         h1 { margin: 0; font-size: clamp(1.5rem, 3.5vw, 2.3rem); font-weight: 700; letter-spacing: -.02em;
              color: #eaf6ff; text-shadow: 0 0 22px rgba(45,226,255,.35); }
         h1 span { color: #2de2ff; text-shadow: 0 0 22px rgba(45,226,255,.5); }
-        .quota { margin-left: auto; min-width: 190px; }
-        .quota-text { color: #8f99ab; font-size: .7rem; }
-        .quota-bar { height: 5px; margin-top: 5px; background: rgba(255,255,255,.08); }
-        .quota-fill { height: 100%; width: 0; background: linear-gradient(90deg, #2de2ff, #63f5ad); transition: width .4s; }
+        .quota { margin-left: auto; min-width: 210px; }
+        /* Две подписи вокруг шкалы: сверху сколько занято всего (папка),
+           снизу сколько в корзине (кликабельно). */
+        .quota-line { display: flex; align-items: center; gap: 7px; color: #8f99ab;
+                      font-size: .72rem; font-family: inherit; text-align: left;
+                      background: none; border: 0; padding: 0; width: 100%; }
+        .quota-line b { color: #cfe2ee; font-weight: 700; }
+        .quota-line .qi { width: 15px; height: 15px; flex: none; display: grid; place-items: center; }
+        .quota-line .qi svg { width: 15px; height: 15px; display: block; }
+        .quota-used { margin-bottom: 5px; }
+        .quota-used .qi { color: #f5c344; }
+        .quota-can { margin-top: 5px; cursor: pointer; transition: color .16s; }
+        .quota-can .qi { color: #ff6b81; }
+        .quota-can:hover { color: #dfe9f3; }
+        .quota-can:hover .qi { color: #ff8a9c; }
+        /* Шкала: слева обычная заливка (живые файлы), дальше белым — корзина. */
+        .quota-bar { position: relative; height: 6px; background: rgba(255,255,255,.08); overflow: hidden; }
+        .quota-fill { position: absolute; left: 0; top: 0; height: 100%; width: 0;
+                      background: linear-gradient(90deg, #2de2ff, #63f5ad); transition: width .4s; }
         .quota-fill.hot { background: linear-gradient(90deg, #ffb35c, #ff6b81); }
+        .quota-trash { position: absolute; top: 0; left: 0; height: 100%; width: 0;
+                       background: rgba(255,255,255,.85); transition: width .4s, left .4s; }
 
         .bar { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 22px; }
         .btn { padding: 9px 14px; color: #dffaff; font: 700 .74rem "Cascadia Code", Consolas, monospace; border: 1px solid rgba(45,226,255,.28); background: rgba(45,226,255,.07); cursor: pointer; transition: all .18s; }
@@ -6152,7 +6320,8 @@ def drop_page():
           .wrap { max-width: 1320px; padding: 44px 48px; }
           h1 { font-size: 2.6rem; }
           .quota { min-width: 240px; }
-          .quota-text { font-size: .78rem; }
+          .quota-line { font-size: .8rem; }
+          .quota-line .qi, .quota-line .qi svg { width: 16px; height: 16px; }
           .bar { gap: 12px; margin-top: 28px; }
           .btn { padding: 12px 20px; font-size: .86rem; }
           .search { height: 44px; padding: 0 16px; font-size: .88rem; }
@@ -6222,6 +6391,26 @@ def drop_page():
         .share-btns button.go { color: #04121c; border-color: #2de2ff; background: #2de2ff; }
         .share-btns button.bad { color: #ff8f8f; border-color: rgba(255,90,90,.4); }
 
+        /* Окно корзины */
+        .trash-panel { width: min(560px, 100%); }
+        .trash-panel h3 { margin: 0 0 12px; font-size: 1.05rem; letter-spacing: .04em; }
+        .trash-note { margin: 0 0 14px; color: #8f9bad; font-size: .78rem; line-height: 1.5; }
+        .trash-note b { color: #cfe2ee; }
+        .trash-list { display: flex; flex-direction: column; gap: 8px;
+                      max-height: 52vh; overflow-y: auto; margin-bottom: 14px; }
+        .trash-row { display: flex; align-items: center; gap: 12px; padding: 10px 12px;
+                     border: 1px solid rgba(255,255,255,.1); background: rgba(4,10,20,.5); }
+        .trash-info { flex: 1; min-width: 0; }
+        .trash-name { color: #e6eef8; font-size: .82rem;
+                      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .trash-meta { margin-top: 3px; color: #6b7c8f; font-size: .68rem; }
+        .trash-acts { flex: none; display: flex; gap: 6px; }
+        .trash-acts .btn { height: 30px; padding: 0 11px; font-size: .72rem; }
+        .btn.bad { color: #ff9aa6; border-color: rgba(255,90,110,.35); }
+        .btn.bad:hover { color: #fff; border-color: #ff5a6e; background: rgba(255,90,110,.14); }
+        .trash-empty { padding: 26px 0; color: #6b7c8f; text-align: center; font-size: .82rem; }
+        .trash-keys { display: flex; justify-content: flex-end; }
+
         /* Карточка папки: сколько весит и каким значком её пометить */
         .fi-stat { margin: 0 0 16px; color: #7f93a8; font-size: .76rem; line-height: 1.7; }
         .fi-stat b { color: #cfe2ee; font-weight: 700; }
@@ -6286,8 +6475,18 @@ def drop_page():
           </a>
           <h1>Личный <span>дроп</span></h1>
           <div class="quota">
-            <div class="quota-text" id="quota-text">—</div>
-            <div class="quota-bar"><div class="quota-fill" id="quota-fill"></div></div>
+            <div class="quota-line quota-used">
+              <span class="qi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6a1 1 0 0 1 1-1h4l2 2h10a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1Z"/></svg></span>
+              <span>Занято: <b id="quota-used">—</b> из <span id="quota-all">—</span></span>
+            </div>
+            <div class="quota-bar">
+              <div class="quota-fill" id="quota-fill"></div>
+              <div class="quota-trash" id="quota-trash-seg"></div>
+            </div>
+            <button class="quota-line quota-can" id="trash-open" type="button" title="Открыть корзину">
+              <span class="qi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V5h6v2m-8 0 1 13h8l1-13"/></svg></span>
+              <span>Корзина: <b id="quota-trash">—</b></span>
+            </button>
           </div>
         </div>
 
@@ -6461,10 +6660,13 @@ def drop_page():
             '<path d="M0 20.5h32M0 25.6h32M0 30.7h32"/></g>' +
             '<circle cx="16" cy="25.6" r="10.21"/></g>' +
             '<rect x="6.4" y="6.4" width="19.2" height="19.2" rx="3.84" transform="rotate(45 16 16)"/>'],
-          box:     ["Архив", "#d9a441",
-            '<path d="M4 10.5 16 4.5l12 6v13l-12 7-12-7Z" fill="currentColor" fill-opacity=".18"/>' +
-            '<path d="M4 10.5 16 4.5l12 6v13l-12 7-12-7Z"/>' +
-            '<path d="M4 10.5 16 17l12-6.5M16 17v13"/>'],
+          // Корзина — тот же значок, что стоит у «Корзина:» под шкалой.
+          trash:   ["Корзина", "#ff6b81",
+            '<path d="M4.5 8h23"/>' +
+            '<path d="M12.5 8V5.6a1.4 1.4 0 0 1 1.4-1.4h4.2a1.4 1.4 0 0 1 1.4 1.4V8"/>' +
+            '<path d="M7 8h18l-1.3 18.4a2 2 0 0 1-2 1.85h-11.4a2 2 0 0 1-2-1.85Z" fill="currentColor" fill-opacity=".14"/>' +
+            '<path d="M7 8h18l-1.3 18.4a2 2 0 0 1-2 1.85h-11.4a2 2 0 0 1-2-1.85Z"/>' +
+            '<path d="M13 13v9.5M16 13v9.5M19 13v9.5"/>'],
           game:    ["Игра", "#ff7ab8",
             '<rect x="3" y="11" width="26" height="14" rx="7" fill="currentColor" fill-opacity=".2"/>' +
             '<rect x="3" y="11" width="26" height="14" rx="7"/>' +
@@ -6594,6 +6796,100 @@ def drop_page():
           box.addEventListener("click", ev => { if (ev.target === box) shut(); });
           document.addEventListener("keydown", onKey);
           return { box: box, shut: shut };
+        };
+
+        /* Шкала занятости: слева живые файлы обычным цветом, дальше белым —
+           корзина. Обе подписи — «Занято» и «Корзина» — берут числа отсюда. */
+        const paintQuota = data => {
+          const quota = data.quota || 0;
+          const used = data.used || 0;
+          const trash = data.trash || 0;
+          const active = Math.max(0, used - trash);
+          const activePct = quota ? Math.min(active / quota * 100, 100) : 0;
+          const trashPct = quota ? Math.min(trash / quota * 100, 100 - activePct) : 0;
+          $("quota-used").textContent = fmtSize(used);
+          $("quota-all").textContent = fmtSize(quota);
+          $("quota-trash").textContent = fmtSize(trash);
+          $("quota-fill").style.width = activePct + "%";
+          $("quota-fill").classList.toggle("hot", quota && used / quota > 0.8);
+          const seg = $("quota-trash-seg");
+          seg.style.left = activePct + "%";
+          seg.style.width = trashPct + "%";
+        };
+
+        /* Дата удаления в корзине — коротко: ДД.ММ.ГГ, чч:мм. */
+        const trashWhen = t => {
+          const d = new Date((t || 0) * 1000);
+          const p = n => String(n).padStart(2, "0");
+          return p(d.getDate()) + "." + p(d.getMonth() + 1) + "." +
+                 String(d.getFullYear()).slice(2) + ", " + p(d.getHours()) + ":" + p(d.getMinutes());
+        };
+
+        /* Корзина. Первый заход просит пароль (1224), дальше сессия помнит.
+           Внутри — что удалено, с весом и датой; можно вернуть или снести
+           насовсем. Само чистится через месяц. */
+        const trashList = () => fetch("/api/drop/trash", { credentials: "same-origin" })
+          .then(r => r.status === 403 ? null : r.json());
+
+        const renderTrash = (panel, data) => {
+          const items = data.items || [];
+          const rows = items.length
+            ? items.map(it =>
+                '<div class="trash-row">' +
+                  '<div class="trash-info">' +
+                    '<div class="trash-name">' + esc(it.name) + '</div>' +
+                    '<div class="trash-meta">' + (it.kind === "folder" ? "папка · " : "") +
+                      fmtSize(it.size) + ' · удалено ' + trashWhen(it.deleted) + '</div>' +
+                  '</div>' +
+                  '<div class="trash-acts">' +
+                    '<button class="btn" type="button" data-restore="' + esc(it.id) + '">Вернуть</button>' +
+                    '<button class="btn bad" type="button" data-purge="' + esc(it.id) + '">Удалить</button>' +
+                  '</div>' +
+                '</div>').join("")
+            : '<p class="trash-empty">Корзина пуста.</p>';
+          panel.innerHTML =
+            '<h3>Корзина</h3>' +
+            '<p class="trash-note">Файлы лежат здесь до месяца, потом удаляются сами. ' +
+              'Всего в корзине: <b>' + fmtSize(data.trash || 0) + '</b>.</p>' +
+            '<div class="trash-list">' + rows + '</div>' +
+            '<div class="trash-keys"><button class="btn" type="button" id="trash-close">Закрыть</button></div>';
+        };
+
+        const openTrash = async () => {
+          let data = await trashList();
+          if (!data) {                                   // закрыта — просим пароль
+            const pass = prompt("Пароль корзины:");
+            if (pass === null) return;
+            const r = await fetch("/api/drop/trash/unlock", {
+              method: "POST", credentials: "same-origin",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ password: pass }) });
+            if (!r.ok) { toast("Неверный пароль", true); return; }
+            data = await trashList();
+          }
+          if (!data) { toast("Корзина недоступна", true); return; }
+          const m = modal("");
+          const panel = m.box.querySelector(".share-panel");
+          panel.classList.add("trash-panel");
+          renderTrash(panel, data);
+          panel.addEventListener("click", async e => {
+            if (e.target.closest("#trash-close")) { m.shut(); return; }
+            const rest = e.target.closest("[data-restore]");
+            const purge = e.target.closest("[data-purge]");
+            try {
+              if (rest) {
+                await api("/api/drop/" + rest.dataset.restore + "/restore", { method: "POST" });
+                toast("Возвращено");
+              } else if (purge) {
+                if (!confirm("Удалить насовсем? Это не отменить.")) return;
+                await api("/api/drop/trash/" + purge.dataset.purge, { method: "DELETE" });
+                toast("Удалено насовсем");
+              } else { return; }
+            } catch (err) { toast(err.message, true); return; }
+            const nd = await trashList();
+            if (nd) renderTrash(panel, nd);
+            load();                                       // обновить шкалу занятости
+          });
         };
 
         /* Карточка папки: сколько она занимает на диске, сколько внутри всего
@@ -6858,10 +7154,7 @@ def drop_page():
             const data = await api("/api/drop/list?parent=" + encodeURIComponent(parent || ""));
             items = data.items;
             renderCrumbs(data.breadcrumbs);
-            const pct = data.quota ? (data.used / data.quota) * 100 : 0;
-            $("quota-text").textContent = fmtSize(data.used) + " из " + fmtSize(data.quota);
-            $("quota-fill").style.width = Math.min(pct, 100) + "%";
-            $("quota-fill").classList.toggle("hot", pct > 80);
+            paintQuota(data);
             render();
           } catch (e) { toast(e.message, true); }
         };
@@ -7171,6 +7464,7 @@ def drop_page():
 
         // ── Ввод ──
         $("pick").addEventListener("click", () => $("file-input").click());
+        $("trash-open").addEventListener("click", openTrash);
         $("file-input").addEventListener("change", e => { enqueue(e.target.files); e.target.value = ""; });
 
         let dragDepth = 0;
@@ -10597,7 +10891,7 @@ def home():
                 <span class="pick-glow"></span>
                 <span class="pick-lock" title="Под паролем" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><rect x="4.5" y="10.5" width="15" height="10" rx="2.2" fill="currentColor"/><path d="M8 10.5V7.6a4 4 0 0 1 8 0v2.9" stroke="currentColor" stroke-width="2.2"/></svg></span>
               </button>
-              <span class="pick-label">SECRET</span>
+              <span class="pick-label">TOP SECRET</span>
             </span>
           </div>
         </section>
