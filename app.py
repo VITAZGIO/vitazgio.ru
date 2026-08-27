@@ -10,6 +10,7 @@ import platform
 import re
 import secrets
 import shutil
+import tempfile
 import socket
 import subprocess
 import threading
@@ -3722,6 +3723,20 @@ def cabinet():
         .panel-head[aria-expanded="true"] .panel-arrow { transform: rotate(180deg); }
         .panel:hover .panel-arrow--go { transform: translateX(5px); }
         .panel-body { padding: 0 18px 16px; }
+        /* Резервная копия */
+        .bk-note { margin: 0 0 12px; color: #8f99ab; font-size: .78rem; line-height: 1.6; }
+        .bk-note.dim { color: #5d6a7d; font-size: .72rem; }
+        .bk-note b { color: #cfe2ee; }
+        .bk-keys { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+        .btn-line { display: inline-flex; align-items: center; justify-content: center;
+                    height: 38px; padding: 0 16px; cursor: pointer; text-decoration: none;
+                    color: #dffaff; font: 700 .76rem "Cascadia Code", Consolas, monospace;
+                    border: 1px solid rgba(45,226,255,.28); border-radius: 10px;
+                    background: rgba(45,226,255,.07); transition: .16s; }
+        .btn-line:hover { color: #fff; border-color: #2de2ff; background: rgba(45,226,255,.16); }
+        .btn-line.warn { color: #ffd0a0; border-color: rgba(255,140,60,.35);
+                         background: rgba(255,140,60,.08); }
+        .btn-line.warn:hover { color: #fff; border-color: #ff8c3c; background: rgba(255,140,60,.18); }
 
         /* Метрики */
         .metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 12px; }
@@ -3946,6 +3961,38 @@ def cabinet():
               <span class="panel-arrow panel-arrow--go" aria-hidden="true">⟶</span>
             </span>
           </a>
+
+          <!-- Резервная копия — в самом низу: сюда заходят редко и по делу -->
+          <section class="panel" style="--accent:#63f5ad; margin-bottom:32px">
+            <button class="panel-head" id="backup-toggle" type="button"
+                    aria-expanded="false" aria-controls="backup-body">
+              <span class="panel-logo">
+                <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
+                  <path d="M8 14c0-3.3 7.2-6 16-6s16 2.7 16 6-7.2 6-16 6-16-2.7-16-6Z" stroke="#63f5ad" stroke-width="2.4"/>
+                  <path d="M8 14v10c0 3.3 7.2 6 16 6s16-2.7 16-6V14" stroke="#63f5ad" stroke-width="2.4"/>
+                  <path d="M8 24v10c0 3.3 7.2 6 16 6s16-2.7 16-6V24" stroke="#2de2ff" stroke-width="2.4"/>
+                </svg>
+              </span>
+              <span class="panel-text">
+                <span class="panel-title">Резервная копия</span>
+                <span class="panel-sub">скачать всё и вернуть обратно</span>
+              </span>
+              <span class="panel-arrow" aria-hidden="true">⌄</span>
+            </button>
+            <div id="backup-body" hidden class="panel-body">
+              <p class="bk-note" id="bk-size">считаю, сколько всего накопилось…</p>
+              <div class="bk-keys">
+                <a class="btn-line" id="bk-light" href="/api/backup/export?kind=light">
+                  Скачать записи</a>
+                <a class="btn-line" id="bk-full" href="/api/backup/export?kind=full">
+                  Скачать всё целиком</a>
+                <button class="btn-line warn" id="bk-restore" type="button">Загрузить копию</button>
+                <input type="file" id="bk-file" accept=".zip,application/zip" hidden>
+              </div>
+              <p class="bk-note" id="bk-msg"></p>
+              <p class="bk-note dim" id="bk-robot"></p>
+            </div>
+          </section>
 
         </div>
 
@@ -4981,6 +5028,66 @@ def cabinet():
               days[now.getDay()] + ", " + now.getDate() + " " + months[now.getMonth()];
           };
           if (h) { tick(); setInterval(tick, 1000); }
+        }
+
+        // ── Резервная копия ──
+        {
+          const head = document.getElementById("backup-toggle");
+          const body = document.getElementById("backup-body");
+          if (head && body) {
+            const size = (n) => {
+              n = n || 0;
+              if (n < 1024) return n + " Б";
+              if (n < 1048576) return (n / 1024).toFixed(0) + " КБ";
+              if (n < 1073741824) return (n / 1048576).toFixed(1) + " МБ";
+              return (n / 1073741824).toFixed(2) + " ГБ";
+            };
+            let asked = false;
+            head.addEventListener("click", async () => {
+              const open = body.hidden;
+              body.hidden = !open;
+              head.setAttribute("aria-expanded", open ? "true" : "false");
+              if (!open || asked) return;
+              asked = true;
+              try {
+                const r = await fetch("/api/backup/state", { credentials: "same-origin" });
+                const d = await r.json();
+                document.getElementById("bk-size").innerHTML =
+                  "Записи, статьи и настройки: <b>" + size(d.light.size) + "</b> (" +
+                  d.light.files + " файлов).<br>Всё вместе с дропом и музыкой: <b>" +
+                  size(d.full.size) + "</b> (" + d.full.files + " файлов).";
+                document.getElementById("bk-robot").textContent = d.robot
+                  ? "Ключ для программы задан: копию можно забирать снаружи по нему, без входа в кабинет."
+                  : "Чтобы копии забирала программа с домашнего сервера, задайте на сервере ключ BACKUP_TOKEN.";
+              } catch (e) {
+                document.getElementById("bk-size").textContent = "Не удалось посчитать размер.";
+              }
+            });
+
+            const file = document.getElementById("bk-file");
+            const msg = document.getElementById("bk-msg");
+            document.getElementById("bk-restore").addEventListener("click", () => {
+              if (!confirm("Развернуть копию поверх нынешних данных?\n\n" +
+                           "Файлы из архива заменят одноимённые. Лишнего не удаляем.")) return;
+              file.click();
+            });
+            file.addEventListener("change", async () => {
+              const f = file.files[0];
+              file.value = "";
+              if (!f) return;
+              msg.textContent = "Разворачиваю копию…";
+              const form = new FormData();
+              form.append("file", f);
+              try {
+                const r = await fetch("/api/backup/import",
+                  { method: "POST", credentials: "same-origin", body: form });
+                const d = await r.json().catch(() => ({}));
+                msg.textContent = r.ok
+                  ? "Готово: вернулось " + d.files + " файлов. Обновите страницу."
+                  : (d.error || "Не вышло развернуть копию.");
+              } catch (e) { msg.textContent = "Сервер не ответил."; }
+            });
+          }
         }
 
         // ── Плеер ──
@@ -11953,6 +12060,198 @@ def diy_page():
     </html>
     """
     return html.replace("__ICONLINKS__", ICON_LINKS)
+
+
+# ---- Резервные копии ------------------------------------------------------
+# Всё, что нажито сайтом, лежит в двух папках: data (записи DIY, блокнот,
+# фонотека, журнал входов) и drop_data (личный дроп). Здесь они складываются
+# в один архив и оттуда же разворачиваются обратно.
+#
+# Два размера копии:
+#   лёгкая — только записи и настройки: статьи страны DIY с фотографиями,
+#            блокнот, списки и журналы. Весит мегабайты, годится «на каждый день»;
+#   полная — вдобавок сами файлы дропа и музыка. Может весить гигабайты.
+#
+# Забирать копию может не только хозяин из кабинета, но и отдельная программа
+# — например, та, что будет крутиться на домашнем гипервизоре и складывать
+# копии на свой диск. Для неё есть ключ BACKUP_TOKEN: с ним архив отдаётся по
+# обычному GET, без входа в кабинет. Ключ не задан — эта дверь закрыта.
+BACKUP_TOKEN = os.environ.get("BACKUP_TOKEN", "").strip()
+BACKUP_HEAVY = ("drop_data",)          # что попадает только в полную копию
+
+
+def _backup_targets(full):
+    """Какие папки кладём в архив. Возвращает [(корень, имя в архиве)]."""
+    roots = [(DATA_DIR, "data")]
+    if full:
+        roots.append((DROP_DIR, "drop_data"))
+    return [(root, alias) for root, alias in roots if os.path.isdir(root)]
+
+
+def _backup_skip(path):
+    """Мусор и временное в копию не берём."""
+    name = os.path.basename(path)
+    return (name.endswith(".tmp") or name.endswith(".part")
+            or os.sep + "tmp" + os.sep in path)
+
+
+def _backup_measure(full):
+    """Сколько весит будущий архив — до того, как его собирать."""
+    total, count = 0, 0
+    for root, _ in _backup_targets(full):
+        for base, _dirs, files in os.walk(root):
+            for name in files:
+                path = os.path.join(base, name)
+                if _backup_skip(path):
+                    continue
+                try:
+                    total += os.path.getsize(path)
+                except OSError:
+                    continue
+                count += 1
+    return total, count
+
+
+def _backup_build(full):
+    """Собирает архив во временный файл и возвращает путь к нему.
+
+    Пишем на диск, а не в память: полная копия бывает в гигабайты, и держать
+    её в оперативке на маленьком сервере — верный способ его уронить."""
+    import zipfile
+
+    fd, tmp = tempfile.mkstemp(prefix="vg-backup-", suffix=".zip")
+    os.close(fd)
+    manifest = {
+        "site": "vitazgio.ru",
+        "made": time.time(),
+        "kind": "full" if full else "light",
+        "note": "Разворачивать через кабинет → «Загрузить копию» "
+                "или распаковать поверх папок data и drop_data.",
+    }
+    with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED, allowZip64=True) as zf:
+        zf.writestr("backup.json", json.dumps(manifest, ensure_ascii=False, indent=2))
+        for root, alias in _backup_targets(full):
+            for base, _dirs, files in os.walk(root):
+                for name in files:
+                    path = os.path.join(base, name)
+                    if _backup_skip(path):
+                        continue
+                    inside = os.path.join(alias, os.path.relpath(path, root))
+                    try:
+                        zf.write(path, inside)
+                    except OSError:
+                        continue          # файл увели прямо во время сборки
+    return tmp
+
+
+@app.get("/api/backup/state")
+@login_required
+def backup_state_api():
+    """Что и сколько весит — кабинет показывает это до нажатия кнопки."""
+    light_size, light_count = _backup_measure(False)
+    full_size, full_count = _backup_measure(True)
+    return jsonify(light={"size": light_size, "files": light_count},
+                   full={"size": full_size, "files": full_count},
+                   robot=bool(BACKUP_TOKEN))
+
+
+@app.get("/api/backup/export")
+def backup_export_api():
+    """Отдаёт архив. Пускаем хозяина из кабинета или программу с ключом."""
+    token = (request.args.get("token") or "").strip()
+    by_token = bool(BACKUP_TOKEN) and token and hmac.compare_digest(token, BACKUP_TOKEN)
+    if not by_token and not session.get("authenticated"):
+        fresh = _device_check(request.cookies.get(DEVICE_COOKIE))
+        if not fresh:
+            return jsonify(error="Нужен вход в кабинет."), 403
+        session["authenticated"] = True
+        g.new_device_cookie = fresh
+
+    full = (request.args.get("kind") or "light") == "full"
+    try:
+        path = _backup_build(full)
+    except OSError as e:
+        return jsonify(error=f"Не удалось собрать копию: {e}"), 500
+
+    stamp = time.strftime("%Y-%m-%d-%H%M")
+    name = f"vitazgio-{'full' if full else 'light'}-{stamp}.zip"
+
+    # Файл временный: отдаём и сразу убираем за собой.
+    handle = open(path, "rb")
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+    response = send_file(handle, mimetype="application/zip",
+                         as_attachment=True, download_name=name)
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.post("/api/backup/import")
+@login_required
+def backup_import_api():
+    """Разворачивает копию обратно. Файлы кладём поверх, ничего не удаляя:
+    так восстановление не может стереть больше, чем принесло."""
+    import zipfile
+
+    upload = request.files.get("file")
+    if not upload:
+        return jsonify(error="Архив не выбран."), 400
+
+    fd, tmp = tempfile.mkstemp(prefix="vg-restore-", suffix=".zip")
+    os.close(fd)
+    try:
+        upload.save(tmp)
+        with zipfile.ZipFile(tmp) as zf:
+            names = zf.namelist()
+            if "backup.json" not in names:
+                return jsonify(error="Это не копия сайта."), 400
+            roots = {"data": DATA_DIR, "drop_data": DROP_DIR}
+            written = 0
+            for inside in names:
+                if inside.endswith("/") or inside == "backup.json":
+                    continue
+                head, _, rest = inside.partition("/")
+                target_root = roots.get(head)
+                if not target_root or not rest:
+                    continue
+                # Защита от «..» в именах: путь обязан остаться внутри папки.
+                dest = os.path.normpath(os.path.join(target_root, rest))
+                if not dest.startswith(os.path.abspath(target_root) + os.sep) and \
+                   not dest.startswith(target_root + os.sep):
+                    continue
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                with zf.open(inside) as src, open(dest, "wb") as out:
+                    shutil.copyfileobj(src, out)
+                written += 1
+    except zipfile.BadZipFile:
+        return jsonify(error="Архив повреждён."), 400
+    except OSError as e:
+        return jsonify(error=f"Не удалось развернуть: {e}"), 500
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+
+    # Перечитываем то, что только что легло на диск, чтобы сайт увидел копию
+    # без перезапуска.
+    with drop_lock:
+        drop_items.clear()
+    _drop_load_index()
+    with diy_lock:
+        diy_items.clear()
+    _diy_load()
+    with notebook_lock:
+        notebook_data["pages"] = []
+        notebook_data["entries"] = {}
+    _notebook_load()
+    with music_lock:
+        music_items.clear()
+        music_folders.clear()
+    _music_load()
+    return jsonify(ok=True, files=written)
 
 
 # ---- Себастьян: разговор с дворецким через сайт ---------------------------
