@@ -9,6 +9,7 @@ import os
 import platform
 import re
 import secrets
+import shlex
 import shutil
 import tempfile
 import socket
@@ -1428,6 +1429,321 @@ def console_ws(ws, ip):
         client.close()
 
 
+
+
+# ---- Вкладка Claude: разговор с Claude Code через сайт ----------------------
+# Claude Code — программа для командной строки, и живёт она на домашней машине.
+# Городить ради неё отдельный сервис не нужно: у кабинета уже есть готовый
+# канал «браузер → WebSocket → SSH → терминал», тот самый, что открывает
+# консоль. Здесь тот же канал, только вместо обычной оболочки запускается
+# claude, и запускается он внутри tmux.
+#
+# Зачем tmux: разговор не должен обрываться, когда закрыл вкладку браузера или
+# телефон заснул. Сессия tmux живёт на домашней машине сама по себе, а сайт к
+# ней просто прицепляется. Отсюда же берутся вкладки — как в чатах кода: одна
+# вкладка = одна сессия tmux, закрыл вкладку — разговор продолжает висеть,
+# вернулся — увидел его целиком.
+#
+# Ключей и токенов Claude сайт не хранит и не видит: вход в саму программу
+# делается один раз на домашней машине (claude login), а сайт только показывает
+# её экран. Пароль SSH живёт в одном соединении и на диск не попадает.
+CLAUDE_HOST = os.environ.get("CLAUDE_HOST", "").strip()
+CLAUDE_DIR = os.environ.get("CLAUDE_DIR", "").strip()
+# Команда, которую вкладка запускает внутри tmux. По умолчанию claude, но
+# ничего специфичного для него тут нет: поставь сюда другую — вкладка будет
+# разговаривать с ней. Так же встанет любой другой консольный помощник.
+CLAUDE_BIN = os.environ.get("CLAUDE_BIN", "claude").strip() or "claude"
+CLAUDE_TABS_MAX = 8                     # больше и не нужно, и память не резиновая
+CLAUDE_PREFIX = "vg-"                   # чтобы не путать со своими сессиями tmux
+CLAUDE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,23}$")
+
+
+def _claude_ready():
+    """Настроена ли вкладка. Хост должен быть из списка своих машин."""
+    return bool(CLAUDE_HOST) and CLAUDE_HOST in ssh_enabled_ips
+
+
+def _claude_host_name():
+    for device in NETBIRD_DEVICES:
+        if device["ip"] == CLAUDE_HOST:
+            return device["name"]
+    return CLAUDE_HOST
+
+
+def _claude_run(client, command, timeout=10):
+    """Разовая команда по SSH. Возвращает (код, вывод)."""
+    try:
+        _stdin, stdout, stderr = client.exec_command(command, timeout=timeout)
+        out = stdout.read().decode(errors="replace")
+        err = stderr.read().decode(errors="replace")
+        return stdout.channel.recv_exit_status(), (out + err).strip()
+    except (paramiko.SSHException, OSError, EOFError) as e:
+        return 1, str(e)
+
+
+def _claude_tabs(client):
+    """Список вкладок — это список сессий tmux с нашим префиксом."""
+    code, out = _claude_run(
+        client,
+        "tmux list-sessions -F '#{session_name}\t#{session_created}\t#{session_attached}' 2>/dev/null || true",
+    )
+    tabs = []
+    if code != 0:
+        return tabs
+    for line in out.splitlines():
+        parts = line.split("\t")
+        name = parts[0] if parts else ""
+        if not name.startswith(CLAUDE_PREFIX):
+            continue
+        try:
+            made = int(parts[1]) if len(parts) > 1 else 0
+        except ValueError:
+            made = 0
+        tabs.append({
+            "id": name[len(CLAUDE_PREFIX):],
+            "made": made,
+            "live": (len(parts) > 2 and parts[2] not in ("", "0")),
+        })
+    tabs.sort(key=lambda t: t["made"])
+    return tabs
+
+
+def _claude_free_name(tabs):
+    """Первое свободное имя вида «1», «2», …"""
+    taken = {t["id"] for t in tabs}
+    for n in range(1, CLAUDE_TABS_MAX + 1):
+        if str(n) not in taken:
+            return str(n)
+    return None
+
+
+@app.get("/api/claude/state")
+@login_required
+def claude_state_api():
+    """Что показывать до подключения: настроена ли вкладка и на какой машине."""
+    return jsonify(ready=_claude_ready(),
+                   host=_claude_host_name() if _claude_ready() else "",
+                   gate=bool(SSH_GATE_PASSWORD_PREFIX),
+                   dir=CLAUDE_DIR)
+
+
+@sock.route("/ws/claude")
+def claude_ws(ws):
+    """Один канал на весь разговор: и список вкладок, и сам терминал.
+
+    Пароль SSH приходит ровно один раз, в первом сообщении, и дальше живёт
+    только в этом соединении — на диск и в журналы он не попадает."""
+    if not session.get("authenticated") or not session.get("console_authenticated"):
+        ws.close()
+        return
+    if not _claude_ready():
+        ws.close()
+        return
+
+    message = ws.receive(timeout=15)
+    try:
+        auth = json.loads(message) if message else {}
+    except ValueError:
+        auth = {}
+    if auth.get("type") != "auth":
+        ws.close()
+        return
+    username = auth.get("username")
+    password = auth.get("password")
+    if not username or not password:
+        ws.close()
+        return
+
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    try:
+        client.connect(CLAUDE_HOST, username=username, password=password,
+                       timeout=6, look_for_keys=False, allow_agent=False)
+    except (paramiko.SSHException, OSError):
+        try:
+            ws.send(json.dumps({"type": "fail",
+                                "text": "Не удалось зайти на машину — проверь логин и пароль."}))
+        except Exception:
+            pass
+        ws.close()
+        return
+
+    client.get_transport().set_keepalive(20)
+
+    # Проверяем, что на машине вообще есть чем работать. Молча падать в пустой
+    # чёрный экран — худший из возможных ответов.
+    code, _out = _claude_run(client, "command -v tmux >/dev/null 2>&1")
+    if code != 0:
+        ws.send(json.dumps({"type": "fail",
+                            "text": "На машине нет tmux. Поставь: sudo apt install tmux"}))
+        client.close()
+        ws.close()
+        return
+    code, _out = _claude_run(client, f"command -v {shlex.quote(CLAUDE_BIN)} >/dev/null 2>&1")
+    if code != 0:
+        ws.send(json.dumps({"type": "fail",
+                            "text": f"На машине нет команды «{CLAUDE_BIN}». "
+                                    "Поставь Claude Code и зайди в него один раз: claude"}))
+        client.close()
+        ws.close()
+        return
+
+    state = {"channel": None, "tab": None, "cols": 100, "rows": 30}
+    stop_event = threading.Event()
+    send_lock = threading.Lock()
+
+    def say(payload):
+        with send_lock:
+            ws.send(json.dumps(payload))
+
+    def tabs_out():
+        say({"type": "tabs", "tabs": _claude_tabs(client), "open": state["tab"]})
+
+    def tabs_out_when(name):
+        """То же, но дождавшись, пока tmux заведёт сессию.
+
+        Команда уходит в оболочку и выполняется не мгновенно: если спросить
+        список сразу, только что созданной вкладки в нём ещё нет. Ждём в
+        сторонке, чтобы не задерживать разговор."""
+        def wait():
+            for _ in range(16):
+                if stop_event.is_set():
+                    return
+                tabs = _claude_tabs(client)
+                if name in {t["id"] for t in tabs}:
+                    say({"type": "tabs", "tabs": tabs, "open": state["tab"]})
+                    return
+                time.sleep(0.25)
+            tabs_out()
+
+        threading.Thread(target=wait, daemon=True).start()
+
+    def open_tab(name):
+        """Прицепиться к вкладке, а если её нет — завести."""
+        if not CLAUDE_NAME_RE.match(name or ""):
+            say({"type": "fail", "text": "Странное имя вкладки."})
+            return
+        tabs = _claude_tabs(client)
+        if name not in {t["id"] for t in tabs} and len(tabs) >= CLAUDE_TABS_MAX:
+            say({"type": "fail", "text": f"Больше {CLAUDE_TABS_MAX} вкладок сразу не держим."})
+            return
+
+        close_tab_channel()
+        session_name = shlex.quote(CLAUDE_PREFIX + name)
+        # -A: есть такая сессия — прицепиться, нет — создать с нашей командой.
+        # -D: отцепить того, кто смотрел её раньше, иначе размер экрана прыгает.
+        start = f"tmux new-session -A -D -s {session_name}"
+        if CLAUDE_DIR:
+            start += f" -c {shlex.quote(CLAUDE_DIR)}"
+        start += f" {shlex.quote(CLAUDE_BIN)}"
+
+        channel = client.invoke_shell(term="xterm-256color",
+                                      width=state["cols"], height=state["rows"])
+        channel.settimeout(0.0)
+        channel.send(start + "\n")
+        state["channel"] = channel
+        state["tab"] = name
+
+        def pump():
+            try:
+                while not stop_event.is_set() and state["channel"] is channel:
+                    if channel.recv_ready():
+                        chunk = channel.recv(8192)
+                        if not chunk:
+                            break
+                        say({"type": "data", "data": chunk.decode(errors="replace")})
+                    else:
+                        time.sleep(0.03)
+                    if channel.closed:
+                        break
+            except Exception:
+                pass
+            finally:
+                if state["channel"] is channel:
+                    state["channel"] = None
+                    state["tab"] = None
+
+        threading.Thread(target=pump, daemon=True).start()
+        say({"type": "open", "tab": name})
+        tabs_out_when(name)
+
+    def close_tab_channel():
+        """Отцепиться от вкладки, не трогая саму сессию — она живёт дальше."""
+        channel = state["channel"]
+        state["channel"] = None
+        state["tab"] = None
+        if channel:
+            try:
+                channel.close()
+            except Exception:
+                pass
+
+    def kill_tab(name):
+        if not CLAUDE_NAME_RE.match(name or ""):
+            return
+        if state["tab"] == name:
+            close_tab_channel()
+        _claude_run(client, f"tmux kill-session -t {shlex.quote(CLAUDE_PREFIX + name)} 2>/dev/null || true")
+        tabs_out()
+
+    def keepalive():
+        while not stop_event.is_set():
+            time.sleep(10)
+            if stop_event.is_set():
+                break
+            try:
+                say({"type": "ping"})
+            except Exception:
+                stop_event.set()
+
+    threading.Thread(target=keepalive, daemon=True).start()
+
+    try:
+        say({"type": "ready", "host": _claude_host_name(), "dir": CLAUDE_DIR})
+        tabs_out()
+        while not stop_event.is_set():
+            message = ws.receive(timeout=120)
+            if message is None:
+                continue
+            try:
+                payload = json.loads(message)
+            except ValueError:
+                continue
+            kind = payload.get("type")
+            if kind == "data":
+                channel = state["channel"]
+                if channel:
+                    channel.send(payload.get("data", ""))
+            elif kind == "resize":
+                try:
+                    state["cols"] = max(20, min(500, int(payload.get("cols", 100))))
+                    state["rows"] = max(5, min(200, int(payload.get("rows", 30))))
+                except (TypeError, ValueError):
+                    continue
+                channel = state["channel"]
+                if channel:
+                    channel.resize_pty(width=state["cols"], height=state["rows"])
+            elif kind == "open":
+                open_tab(str(payload.get("tab", "")))
+            elif kind == "new":
+                tabs = _claude_tabs(client)
+                name = _claude_free_name(tabs)
+                if not name:
+                    say({"type": "fail", "text": f"Больше {CLAUDE_TABS_MAX} вкладок сразу не держим."})
+                else:
+                    open_tab(name)
+            elif kind == "kill":
+                kill_tab(str(payload.get("tab", "")))
+            elif kind == "list":
+                tabs_out()
+            elif kind == "ping":
+                say({"type": "pong"})
+    except Exception:
+        pass
+    finally:
+        stop_event.set()
+        close_tab_channel()
+        client.close()
 rdp_enabled_ips = {device["ip"] for device in NETBIRD_DEVICES if device.get("rdp_enabled")}
 vnc_enabled_ips = {device["ip"] for device in NETBIRD_DEVICES if device.get("vnc_enabled")}
 
@@ -3963,8 +4279,32 @@ def cabinet():
             </span>
           </a>
 
-          <!-- Журнал входов — логотип слева -->
-          <section class="panel" style="--accent:#2de2ff">
+
+          <!-- Claude — логотип слева. Разговор с Claude Code, который живёт на
+               домашней машине: сайт только показывает её экран. -->
+          <a class="panel" href="/claude" style="--accent:#d97757">
+            <span class="panel-head">
+              <span class="panel-logo">
+                <svg viewBox="0 0 48 40" aria-hidden="true">
+                  <rect x="4" y="6" width="40" height="28" rx="5" fill="#1a1210"
+                        stroke="#d97757" stroke-width="2.4"/>
+                  <path d="M4 13h40" stroke="#d97757" stroke-width="1.8" stroke-opacity=".5"/>
+                  <circle cx="9.5" cy="9.5" r="1.4" fill="#d97757" fill-opacity=".8"/>
+                  <circle cx="14" cy="9.5" r="1.4" fill="#d97757" fill-opacity=".45"/>
+                  <path d="m12 20 5 4-5 4" fill="none" stroke="#f0a184" stroke-width="2.6"
+                        stroke-linecap="round" stroke-linejoin="round"/>
+                  <rect x="21" y="25.6" width="11" height="2.8" rx="1.4" fill="#f0a184"/>
+                </svg>
+              </span>
+              <span class="panel-text">
+                <span class="panel-title">Claude</span>
+                <span class="panel-sub">разговор с Claude Code на домашней машине</span>
+              </span>
+              <span class="panel-arrow panel-arrow--go" aria-hidden="true">⟶</span>
+            </span>
+          </a>
+          <!-- Журнал входов — логотип справа -->
+          <section class="panel panel--right" style="--accent:#2de2ff">
             <button class="panel-head" id="loginlog-toggle" type="button" aria-expanded="false" aria-controls="loginlog-body">
               <span class="panel-logo">
                 <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
@@ -3985,8 +4325,8 @@ def cabinet():
             </div>
           </section>
 
-          <!-- Запомненные устройства — логотип справа -->
-          <section class="panel panel--right" style="--accent:#63f5ad">
+          <!-- Запомненные устройства — логотип слева -->
+          <section class="panel" style="--accent:#63f5ad">
             <button class="panel-head" id="devices-toggle" type="button" aria-expanded="false" aria-controls="devices-body">
               <span class="panel-logo">
                 <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
@@ -11263,6 +11603,473 @@ def vg_player_js():
     return response
 
 
+
+
+@app.get("/claude")
+@login_required
+def claude_page():
+    """Разговор с Claude Code через сайт.
+
+    Страница ничего сама не решает: она рисует вкладки и терминал, а всё
+    остальное происходит на домашней машине. Закрыл вкладку браузера — разговор
+    остался висеть в tmux и ждёт возвращения."""
+    html = """<!doctype html>
+    <html lang="ru">
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <meta name="theme-color" content="#0d1321">
+      <meta name="robots" content="noindex">
+      __ICONLINKS__
+      <link rel="manifest" href="/manifest.webmanifest">
+      <title>Claude · vitazgio.ru</title>
+      <link rel="stylesheet" href="/static/vendor/xterm.css">
+      <script>
+        // Догружаем с CDN, если своя копия почему-то не отдалась.
+        function vendorFallback(el, url) {
+          el.onerror = null;
+          var s = document.createElement("script");
+          s.src = url;
+          document.head.appendChild(s);
+        }
+      </script>
+      <script defer src="/static/vendor/xterm.js"
+              onerror="vendorFallback(this, 'https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js')"></script>
+      <script defer src="/static/vendor/xterm-addon-fit.js"
+              onerror="vendorFallback(this, 'https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js')"></script>
+      <style>
+        :root {
+          color-scheme: dark;
+          --bg: #0d1321; --line: rgba(255,255,255,.1); --muted: #989fb2;
+          --pc: #2de2ff; --ac: #d97757;      /* тёплый — фирменный цвет Claude */
+        }
+        * { box-sizing: border-box; }
+        body { margin: 0; min-width: 320px; height: 100dvh; overflow: hidden;
+               display: flex; flex-direction: column;
+               font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+               background:
+                 radial-gradient(circle at 10% 6%, rgba(217,119,87,.16), transparent 30rem),
+                 radial-gradient(circle at 92% 84%, rgba(57,126,255,.16), transparent 32rem),
+                 var(--bg);
+               color: #f7f8fc; }
+        .page { width: min(1380px, calc(100% - 28px)); margin: 0 auto; flex: 1;
+                display: flex; flex-direction: column; min-height: 0;
+                padding: clamp(14px, 3vw, 26px) 0 clamp(10px, 2vw, 18px); }
+
+        .top { position: relative; display: flex; align-items: center; gap: 14px;
+               flex: none; margin-bottom: 14px; }
+        .back { display: inline-flex; align-items: center; justify-content: center;
+                width: 40px; height: 40px; flex: none; color: #7ce0ff; text-decoration: none;
+                border: 1px solid rgba(45,226,255,.3); border-radius: 50%;
+                background: rgba(45,226,255,.07); transition: .18s; }
+        .back svg { width: 19px; height: 19px; }
+        .back:hover { color: #fff; border-color: var(--pc); background: rgba(45,226,255,.18); }
+        .eyebrow { display: inline-flex; align-items: center; gap: 10px; color: #cdd2df;
+                   font-size: .72rem; font-weight: 700; letter-spacing: .16em;
+                   text-transform: uppercase; text-decoration: none; }
+        .eyebrow::before { content: ""; width: 7px; height: 7px; border-radius: 50%;
+                           background: var(--ac); box-shadow: 0 0 16px var(--ac); }
+        .eyebrow:hover { color: #fff; }
+        .where { margin-left: auto; color: #7c8ba0; font-size: .74rem;
+                 font-family: "Cascadia Code", Consolas, monospace; }
+        .where b { color: var(--ac); font-weight: 600; }
+        .quality { margin-left: 10px; font-size: .72rem; color: #7c8ba0; }
+        .quality.ok { color: #63f5ad; } .quality.mid { color: #ffd84a; }
+        .quality.bad { color: #ff7a59; }
+
+        /* ── вход: суточный пароль и логин на машину ─────────────────── */
+        .gate { flex: 1; display: grid; place-items: center; min-height: 0; overflow: auto; }
+        .card { width: min(430px, 100%); padding: 28px 26px 24px;
+                border: 1px solid var(--line); border-radius: 18px;
+                background: linear-gradient(160deg, rgba(24,31,46,.95), rgba(11,16,26,.95));
+                box-shadow: 0 26px 60px rgba(0,0,0,.45); }
+        .card h2 { margin: 0 0 6px; font-size: 1.22rem; letter-spacing: -.02em; }
+        .card .sub { margin: 0 0 18px; color: var(--muted); font-size: .85rem; line-height: 1.55; }
+        .card label { display: block; margin: 12px 0 5px; color: #b9c6d8;
+                      font-size: .72rem; letter-spacing: .1em; text-transform: uppercase; }
+        .card input { width: 100%; height: 42px; padding: 0 13px; color: #eaf3fb;
+                      font: 400 .92rem "Cascadia Code", Consolas, monospace;
+                      background: rgba(0,0,0,.35); border: 1px solid var(--line);
+                      border-radius: 10px; }
+        .card input:focus { outline: none; border-color: var(--ac);
+                            box-shadow: 0 0 0 3px rgba(217,119,87,.15); }
+        .card .err { min-height: 18px; margin: 12px 0 0; color: #ff8fa3; font-size: .82rem; }
+        .go { width: 100%; height: 44px; margin-top: 14px; cursor: pointer;
+              color: #16100c; font: 700 .92rem inherit; border: 0; border-radius: 11px;
+              background: linear-gradient(160deg, #f0a184, var(--ac)); }
+        .go:hover { filter: brightness(1.07); }
+        .go:disabled { opacity: .55; cursor: default; }
+        .note { margin: 16px 0 0; padding: 12px 13px; color: #9fb0c6; font-size: .78rem;
+                line-height: 1.6; border: 1px dashed var(--line); border-radius: 11px;
+                background: rgba(255,255,255,.02); }
+        .note code { color: #ffd0bd; font-family: "Cascadia Code", Consolas, monospace; }
+
+        /* ── вкладки, как в чатах кода ───────────────────────────────── */
+        .work { flex: 1; display: none; flex-direction: column; min-height: 0; }
+        .work.on { display: flex; }
+        .tabs { flex: none; display: flex; align-items: center; gap: 6px;
+                overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
+        .tabs::-webkit-scrollbar { display: none; }
+        .tab { flex: none; display: inline-flex; align-items: center; gap: 8px;
+               height: 36px; padding: 0 8px 0 14px; cursor: pointer; color: #a9b7c9;
+               font: 600 .84rem inherit; white-space: nowrap;
+               border: 1px solid var(--line); border-bottom: 0;
+               border-radius: 11px 11px 0 0; background: rgba(255,255,255,.03);
+               transition: color .16s, background .16s, border-color .16s; }
+        .tab:hover { color: #fff; background: rgba(255,255,255,.06); }
+        .tab.on { color: #fff; border-color: rgba(217,119,87,.5);
+                  background: linear-gradient(180deg, rgba(217,119,87,.22), rgba(217,119,87,.05)); }
+        .tab .dot { width: 7px; height: 7px; border-radius: 50%; background: #4a5568; }
+        .tab.on .dot, .tab.live .dot { background: var(--ac); box-shadow: 0 0 8px var(--ac); }
+        .tab .x { display: grid; place-items: center; width: 20px; height: 20px;
+                  border-radius: 6px; color: #7c8ba0; font-size: .9rem; line-height: 1; }
+        .tab .x:hover { color: #ff8fa3; background: rgba(255,90,110,.14); }
+        .tab-add { flex: none; width: 36px; height: 36px; display: grid; place-items: center;
+                   cursor: pointer; color: #9fb0c6; font-size: 1.15rem;
+                   border: 1px dashed var(--line); border-bottom: 0;
+                   border-radius: 11px 11px 0 0; background: rgba(255,255,255,.02); }
+        .tab-add:hover { color: #fff; border-color: var(--ac); }
+
+        .screen { flex: 1; min-height: 0; position: relative; overflow: hidden;
+                  border: 1px solid var(--line); border-radius: 0 14px 14px 14px;
+                  background: #05070c; padding: 10px 4px 6px 10px; }
+        .screen .xterm { height: 100%; }
+        .blank { position: absolute; inset: 0; display: grid; place-items: center;
+                 padding: 24px; text-align: center; color: #6f7f93; font-size: .88rem;
+                 line-height: 1.7; }
+        .blank b { display: block; margin-bottom: 6px; color: #cfe0f0; font-size: 1rem; }
+
+        /* ── кнопки под терминалом: на телефоне без них никак ─────────── */
+        .keys { flex: none; display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+        .keys button { height: 34px; padding: 0 12px; cursor: pointer; color: #b9c6d8;
+                       font: 600 .78rem "Cascadia Code", Consolas, monospace;
+                       border: 1px solid var(--line); border-radius: 9px;
+                       background: rgba(255,255,255,.04); }
+        .keys button:hover { color: #fff; border-color: var(--ac);
+                             background: rgba(217,119,87,.12); }
+        .keys .gap { margin-left: auto; }
+        .toast { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%);
+                 padding: 10px 16px; color: #eaf3fb; font-size: .84rem; z-index: 40;
+                 background: rgba(18,24,38,.96); border: 1px solid var(--line);
+                 border-radius: 11px; box-shadow: 0 16px 40px rgba(0,0,0,.5); }
+        .toast.bad { border-color: rgba(255,90,110,.5); color: #ffb4c0; }
+        @media (max-width: 620px) {
+          .where { display: none; }
+          .page { width: calc(100% - 16px); }
+        }
+        @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+      </style>
+    </head>
+    <body>
+      <main class="page">
+        <div class="top">
+          <a class="back" href="/cabinet" title="В кабинет" aria-label="В кабинет"><svg viewBox="0 0 24 24" fill="none"><path d="M19 12H5m0 0 6-6m-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
+          <a class="eyebrow" href="/cabinet">vitazgio.ru · claude</a>
+          <span class="where" id="where"></span>
+          <span class="quality" id="quality"></span>
+        </div>
+
+        <section class="gate" id="gate">
+          <div class="card">
+            <h2>Разговор с Claude</h2>
+            <p class="sub" id="sub">Claude Code живёт на домашней машине — сайт только
+              показывает её экран. Разговор идёт в tmux: закроешь вкладку, вернёшься
+              позже и увидишь его целиком.</p>
+            <form id="form">
+              <div id="gate-day">
+                <label for="f-day">Суточный пароль консоли</label>
+                <input id="f-day" type="password" autocomplete="off">
+              </div>
+              <label for="f-user">Логин на машине</label>
+              <input id="f-user" autocomplete="username">
+              <label for="f-pass">Пароль</label>
+              <input id="f-pass" type="password" autocomplete="current-password">
+              <p class="err" id="err"></p>
+              <button class="go" type="submit" id="submit">Подключиться</button>
+            </form>
+            <p class="note" id="note" hidden></p>
+          </div>
+        </section>
+
+        <section class="work" id="work">
+          <div class="tabs" id="tabs"></div>
+          <div class="screen" id="screen">
+            <div class="blank" id="blank"><b>Ни одной вкладки</b>
+              Нажми «+» — заведём разговор.</div>
+          </div>
+          <div class="keys" id="keys">
+            <button data-key="enter">Enter</button>
+            <button data-key="up">↑</button>
+            <button data-key="down">↓</button>
+            <button data-key="tab">Tab</button>
+            <button data-key="esc">Esc</button>
+            <button data-key="ctrlc">Ctrl+C</button>
+            <button data-paste>Вставить</button>
+            <button class="gap" data-off>Отцепиться</button>
+          </div>
+        </section>
+      </main>
+
+      <script>
+      (() => {
+        "use strict";
+        const $ = (id) => document.getElementById(id);
+        const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g,
+          (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+        let ws = null, term = null, fit = null;
+        let tabs = [], open = null, spawned = false;
+        let creds = null;               // логин и пароль живут только здесь
+
+        let toastTimer = 0;
+        const toast = (text, bad) => {
+          document.querySelectorAll(".toast").forEach((t) => t.remove());
+          const el = document.createElement("div");
+          el.className = "toast" + (bad ? " bad" : "");
+          el.textContent = text;
+          document.body.appendChild(el);
+          clearTimeout(toastTimer);
+          toastTimer = setTimeout(() => el.remove(), 3400);
+        };
+
+        /* ── что настроено на сервере ─────────────────────────────────── */
+        let state = { ready: false, host: "", gate: false, dir: "" };
+        const boot = async () => {
+          try {
+            const r = await fetch("/api/claude/state", { credentials: "same-origin" });
+            state = await r.json();
+          } catch (e) { /* покажем как есть */ }
+          if (!state.gate) $("gate-day").hidden = true;
+          if (state.ready) {
+            $("where").innerHTML = "машина <b>" + esc(state.host) + "</b>" +
+              (state.dir ? " · " + esc(state.dir) : "");
+          } else {
+            $("form").hidden = true;
+            $("sub").textContent = "Вкладка ещё не настроена.";
+            const note = $("note");
+            note.hidden = false;
+            note.innerHTML = "Нужно назвать машину, на которой стоит Claude Code: " +
+              "в <code>.env</code> сервера задать <code>CLAUDE_HOST</code> — адрес " +
+              "домашней машины из списка NetBird, у которой открыт SSH. Рядом можно " +
+              "задать <code>CLAUDE_DIR</code> — папку, в которой открывать разговор, " +
+              "и <code>CLAUDE_BIN</code> — саму команду: вкладка запускает то, что " +
+              "там написано, так что вместо Claude сюда встанет любой другой " +
+              "консольный помощник.";
+          }
+        };
+
+        /* ── терминал ─────────────────────────────────────────────────── */
+        const makeTerm = () => {
+          if (term) return true;
+          if (typeof Terminal === "undefined" || typeof FitAddon === "undefined") {
+            $("blank").innerHTML = "<b>Не загрузилась библиотека терминала</b>" +
+              "Проверь сеть — xterm.js не отдался ни с сайта, ни с CDN.";
+            return false;
+          }
+          term = new Terminal({
+            convertEol: true, cursorBlink: true, scrollback: 5000,
+            fontFamily: '"Cascadia Code", Consolas, monospace', fontSize: 13,
+            theme: { background: "#05070c", foreground: "#e6edf5", cursor: "#d97757" },
+          });
+          fit = new FitAddon.FitAddon();
+          term.loadAddon(fit);
+          term.open($("screen"));
+          fit.fit();
+          term.onData((d) => say({ type: "data", data: d }));
+          term.onResize(() => sendSize());
+          addEventListener("resize", () => { try { fit.fit(); } catch (e) {} });
+          // На телефоне клавиатура съедает пол-экрана — пересчитываем размер.
+          if (window.visualViewport) {
+            visualViewport.addEventListener("resize", () => {
+              try { fit.fit(); } catch (e) {}
+            });
+          }
+          return true;
+        };
+
+        const sendSize = () => {
+          if (!term) return;
+          say({ type: "resize", cols: term.cols, rows: term.rows });
+        };
+
+        const say = (payload) => {
+          if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(payload));
+        };
+
+        /* ── вкладки ──────────────────────────────────────────────────── */
+        const drawTabs = () => {
+          $("tabs").innerHTML = tabs.map((t) =>
+            '<div class="tab' + (t.id === open ? " on" : "") + (t.live ? " live" : "") +
+            '" data-tab="' + esc(t.id) + '"><span class="dot"></span>Разговор ' +
+            esc(t.id) + '<span class="x" data-kill="' + esc(t.id) + '" title="Закрыть совсем">×</span></div>'
+          ).join("") + '<div class="tab-add" id="add" title="Новый разговор">+</div>';
+          $("blank").hidden = !!open;
+        };
+
+        $("tabs").addEventListener("click", (e) => {
+          if (e.target.closest("#add")) { say({ type: "new" }); return; }
+          const kill = e.target.closest("[data-kill]");
+          if (kill) {
+            const id = kill.dataset.kill;
+            if (confirm("Закрыть разговор " + id + " совсем? Он не сохранится.")) {
+              say({ type: "kill", tab: id });
+            }
+            return;
+          }
+          const tab = e.target.closest("[data-tab]");
+          if (tab && tab.dataset.tab !== open) {
+            if (term) term.clear();
+            say({ type: "open", tab: tab.dataset.tab });
+          }
+        });
+
+        /* ── кнопки под терминалом ────────────────────────────────────── */
+        const KEYS = { enter: "\\r", up: "\\x1b[A", down: "\\x1b[B",
+                       tab: "\\t", esc: "\\x1b", ctrlc: "\\x03" };
+        $("keys").addEventListener("click", async (e) => {
+          const key = e.target.closest("[data-key]");
+          if (key) { say({ type: "data", data: KEYS[key.dataset.key] || "" });
+                     if (term) term.focus(); return; }
+          if (e.target.closest("[data-paste]")) {
+            let text = null;
+            try { text = await navigator.clipboard.readText(); }
+            catch (err) { text = prompt("Вставь текст сюда (браузер не даёт прочитать буфер сам):", ""); }
+            if (!text) { toast("Буфер пуст", true); return; }
+            say({ type: "data", data: text });
+            if (term) term.focus();
+            return;
+          }
+          if (e.target.closest("[data-off]")) {
+            // Отцепиться — не закрыть: разговор остаётся висеть на машине.
+            if (ws) ws.close();
+            toast("Отцепился. Разговоры остались на машине");
+          }
+        });
+
+        /* ── связь ────────────────────────────────────────────────────── */
+        let pingAt = null, pinger = 0;
+        const quality = (ms) => {
+          const el = $("quality");
+          el.textContent = "● " + ms + " мс";
+          el.className = "quality " + (ms < 120 ? "ok" : ms < 400 ? "mid" : "bad");
+        };
+
+        const connect = () => {
+          const proto = location.protocol === "https:" ? "wss:" : "ws:";
+          ws = new WebSocket(proto + "//" + location.host + "/ws/claude");
+
+          ws.addEventListener("open", () => {
+            ws.send(JSON.stringify({ type: "auth", username: creds.user, password: creds.pass }));
+            clearInterval(pinger);
+            pinger = setInterval(() => {
+              if (ws && ws.readyState === WebSocket.OPEN) {
+                pingAt = performance.now();
+                say({ type: "ping" });
+              }
+            }, 10000);
+          });
+
+          ws.addEventListener("message", (ev) => {
+            let d;
+            try { d = JSON.parse(ev.data); } catch (e) { return; }
+            if (d.type === "data") { if (term) term.write(d.data); return; }
+            if (d.type === "ready") {
+              $("gate").style.display = "none";
+              $("work").classList.add("on");
+              if (makeTerm()) { fit.fit(); sendSize(); term.focus(); }
+              return;
+            }
+            if (d.type === "tabs") {
+              tabs = d.tabs || [];
+              open = d.open || null;
+              drawTabs();
+              // Первый заход и ни одного разговора — заводим сразу, чтобы не
+              // встречать пустым экраном. Ровно один раз: список приходит
+              // ещё и следом за созданием, и второй заход наплодил бы лишних.
+              if (!spawned && !tabs.length && !open) { spawned = true; say({ type: "new" }); }
+              return;
+            }
+            if (d.type === "open") {
+              open = d.tab;
+              drawTabs();
+              sendSize();
+              if (term) term.focus();
+              return;
+            }
+            if (d.type === "fail") {
+              toast(d.text || "Не вышло", true);
+              if (!$("work").classList.contains("on")) {
+                $("err").textContent = d.text || "Не вышло";
+                $("submit").disabled = false;
+              }
+              return;
+            }
+            if (d.type === "pong" && pingAt !== null) {
+              quality(Math.round(performance.now() - pingAt));
+              pingAt = null;
+            }
+          });
+
+          ws.addEventListener("close", () => {
+            clearInterval(pinger);
+            $("quality").textContent = "";
+            $("submit").disabled = false;
+            if ($("work").classList.contains("on")) {
+              if (term) term.write("\\r\\n\\x1b[33mСвязь закрыта. Разговоры остались на машине — обнови страницу.\\x1b[0m\\r\\n");
+              open = null;
+              drawTabs();
+            }
+          });
+        };
+
+        /* ── вход ─────────────────────────────────────────────────────── */
+        $("form").addEventListener("submit", async (e) => {
+          e.preventDefault();
+          $("err").textContent = "";
+          $("submit").disabled = true;
+          const user = $("f-user").value.trim();
+          const pass = $("f-pass").value;
+          if (!user || !pass) {
+            $("err").textContent = "Нужны логин и пароль машины.";
+            $("submit").disabled = false;
+            return;
+          }
+          // Суточный пароль открывает консольную дверь — ту же, что у SSH в
+          // кабинете. Своей двери у вкладки нет намеренно: меньше замков,
+          // меньше мест, где можно ошибиться.
+          if (state.gate) {
+            try {
+              const r = await fetch("/api/console/login", {
+                method: "POST", credentials: "same-origin",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ password: $("f-day").value }) });
+              const d = await r.json().catch(() => ({}));
+              if (!r.ok) {
+                $("err").textContent = d.error || "Суточный пароль не подошёл.";
+                $("submit").disabled = false;
+                return;
+              }
+            } catch (err) {
+              $("err").textContent = "Сервер недоступен.";
+              $("submit").disabled = false;
+              return;
+            }
+          }
+          creds = { user, pass };
+          $("f-pass").value = "";
+          $("f-day").value = "";
+          connect();
+        });
+
+        addEventListener("beforeunload", () => { if (ws) ws.close(); });
+
+        boot();
+      })();
+      </script>
+    </body>
+    </html>
+    """
+    return html.replace("__ICONLINKS__", ICON_LINKS)
 @app.get("/diy")
 def diy_page():
     """Страна DIY: витрина своих творений.
