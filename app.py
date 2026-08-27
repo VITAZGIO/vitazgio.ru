@@ -11889,8 +11889,16 @@ def servers_page():
         .n-s  { fill:#7f8ea3; font:400 10.5px "Cascadia Code",monospace; }
         .wire { stroke:rgba(255,255,255,.14); stroke-width:1.6; fill:none; }
         .wire.lit { stroke:rgba(45,226,255,.34); }
+        .wire.warm { stroke:rgba(255,216,74,.32); }
+        .wire.dim { stroke:rgba(255,255,255,.14); stroke-dasharray:5 6; }
         .pkt { fill:var(--pc); filter:drop-shadow(0 0 5px var(--pc)); }
         .pkt.g { fill:var(--ok); filter:drop-shadow(0 0 5px var(--ok)); }
+        .pkt.w { fill:var(--warm); filter:drop-shadow(0 0 5px var(--warm)); }
+        .pkt.d { fill:#8b97ac; }
+        .n-box.big { fill:rgba(20,32,52,.95); stroke:rgba(255,255,255,.22); }
+        .lane { fill:#7f8ea3; font:700 10.5px "Cascadia Code",monospace; letter-spacing:.06em; }
+        .lane.warmtx { fill:#b39a55; }
+        .note-tx { fill:#5d6a7d; font:400 10px "Cascadia Code",monospace; }
         .pulse { animation:pulse 2.6s ease-in-out infinite; transform-origin:center; }
         @keyframes pulse { 0%,100%{opacity:.35} 50%{opacity:1} }
 
@@ -12011,78 +12019,90 @@ def servers_page():
 
         <h2 class="sec">Как это связано</h2>
         <div class="mapbox rise">
-          <svg viewBox="0 62 960 232" role="img" aria-label="Схема: интернет, VPS, домашняя сеть">
+          <svg viewBox="0 0 980 420" role="img"
+               aria-label="Схема: два пути в интернет — прямой из квартиры и через свой сервер">
             <defs>
-              <linearGradient id="gwire" x1="0" y1="0" x2="1" y2="0">
-                <stop offset="0" stop-color="#2de2ff" stop-opacity=".05"/>
-                <stop offset="1" stop-color="#2de2ff" stop-opacity=".4"/>
-              </linearGradient>
+              <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto">
+                <path d="M0 0 L10 5 L0 10 z" fill="rgba(255,255,255,.28)"/>
+              </marker>
             </defs>
 
-            <!-- провода -->
-            <path id="w1" class="wire lit" d="M120 150 H255"/>
-            <path id="w2" class="wire lit" d="M400 150 H520"/>
-            <path id="w3" class="wire lit" d="M665 118 H700"/>
-            <path id="w4" class="wire lit" d="M665 182 H700"/>
-            <path id="w5" class="wire lit" d="M400 150 C455 150, 455 252, 520 252"/>
+            <!-- ── провода ────────────────────────────────────────────
+                 Верхняя ветка: сервисы уходят наружу только через свой
+                 сервер. Нижняя: обычный домашний трафик идёт напрямую. -->
+            <path id="p1" class="wire lit" d="M470 118 H598"/>                       <!-- туннели → VPS -->
+            <path id="p2" class="wire lit" d="M812 118 C862 118, 880 150, 880 196"/> <!-- VPS → интернет -->
+            <path id="p3" class="wire warm" d="M300 300 H880 M880 300 V244"/>        <!-- роутер → интернет напрямую -->
+            <path id="p4" class="wire lit" d="M170 148 C170 118, 200 118, 250 118"/> <!-- Proxmox → туннели -->
+            <path id="p5" class="wire lit" d="M170 232 C170 118, 200 118, 250 118"/> <!-- Orange Pi → туннели -->
+            <path id="p6" class="wire dim" d="M170 190 H236 M236 190 V290 M236 290 H300"/> <!-- машины ↔ роутер -->
+            <path id="p7" class="wire warm" d="M300 340 H236 M236 340 V318"/>        <!-- устройства → роутер -->
 
-            <!-- бегущие пакеты -->
-            <circle r="3.5" class="pkt"><animateMotion dur="2.2s" repeatCount="indefinite"><mpath href="#w1"/></animateMotion></circle>
-            <circle r="3.5" class="pkt"><animateMotion dur="2.2s" begin="1.1s" repeatCount="indefinite"><mpath href="#w1"/></animateMotion></circle>
-            <circle r="3.5" class="pkt g"><animateMotion dur="1.9s" repeatCount="indefinite"><mpath href="#w2"/></animateMotion></circle>
-            <circle r="3" class="pkt g"><animateMotion dur="2.6s" begin=".8s" repeatCount="indefinite"><mpath href="#w5"/></animateMotion></circle>
+            <!-- бегущие пакеты: на каждом проводе свои -->
+            <circle r="3.4" class="pkt"><animateMotion dur="1.9s" repeatCount="indefinite"><mpath href="#p1"/></animateMotion></circle>
+            <circle r="3.4" class="pkt"><animateMotion dur="1.9s" begin=".95s" repeatCount="indefinite"><mpath href="#p1"/></animateMotion></circle>
+            <circle r="3.4" class="pkt"><animateMotion dur="2.1s" repeatCount="indefinite"><mpath href="#p2"/></animateMotion></circle>
+            <circle r="3.4" class="pkt w"><animateMotion dur="2.6s" repeatCount="indefinite"><mpath href="#p3"/></animateMotion></circle>
+            <circle r="3.4" class="pkt w"><animateMotion dur="2.6s" begin="1.3s" repeatCount="indefinite"><mpath href="#p3"/></animateMotion></circle>
+            <circle r="3" class="pkt g"><animateMotion dur="2.3s" repeatCount="indefinite"><mpath href="#p4"/></animateMotion></circle>
+            <circle r="3" class="pkt g"><animateMotion dur="2.8s" begin=".7s" repeatCount="indefinite"><mpath href="#p5"/></animateMotion></circle>
+            <circle r="2.6" class="pkt d"><animateMotion dur="3.4s" repeatCount="indefinite"><mpath href="#p6"/></animateMotion></circle>
+            <circle r="3" class="pkt w"><animateMotion dur="2.2s" repeatCount="indefinite"><mpath href="#p7"/></animateMotion></circle>
 
-            <!-- интернет -->
+            <!-- ── верхняя ветка: сервисы ─────────────────────────── -->
+            <text class="lane" x="250" y="74">через свой сервер · снаружи видно только его</text>
+
             <g>
-              <rect class="n-box" x="16" y="118" width="104" height="64" rx="14"/>
-              <text class="n-t" x="68" y="146" text-anchor="middle">Интернет</text>
-              <text class="n-s" x="68" y="164" text-anchor="middle">весь мир</text>
+              <rect class="n-box ok" x="26" y="88" width="144" height="60" rx="14"/>
+              <circle cx="47" cy="112" r="4" fill="#63f5ad" class="pulse"/>
+              <text class="n-t" x="63" y="116">Proxmox</text>
+              <text class="n-s" x="41" y="134">виртуалки и видеокарта</text>
             </g>
 
-            <!-- VPS -->
             <g>
-              <rect class="n-box pc" x="255" y="104" width="145" height="92" rx="16"/>
-              <circle cx="278" cy="128" r="4" fill="#63f5ad" class="pulse"/>
-              <text class="n-t" x="294" y="132">VPS</text>
-              <text class="n-s" x="270" y="154">Амстердам</text>
-              <text class="n-s" x="270" y="172">Nginx Proxy Manager</text>
-              <text class="n-s" x="270" y="188">10 доменов · SSL</text>
+              <rect class="n-box" x="26" y="202" width="144" height="60" rx="14"/>
+              <circle cx="47" cy="226" r="4" fill="#ffd84a" class="pulse"/>
+              <text class="n-t" x="63" y="230">Orange Pi</text>
+              <text class="n-s" x="41" y="248">умный дом · MQTT</text>
             </g>
 
-            <!-- mesh-облако -->
             <g>
-              <rect class="n-box vio" x="520" y="104" width="145" height="92" rx="16"/>
-              <circle cx="543" cy="128" r="4" fill="#b57cff" class="pulse"/>
-              <text class="n-t" x="559" y="132">NetBird</text>
-              <text class="n-s" x="535" y="154">mesh поверх</text>
-              <text class="n-s" x="535" y="172">WireGuard</text>
-              <text class="n-s" x="535" y="188">все машины рядом</text>
+              <rect class="n-box vio" x="250" y="88" width="220" height="60" rx="14"/>
+              <circle cx="271" cy="112" r="4" fill="#b57cff" class="pulse"/>
+              <text class="n-t" x="287" y="116">NetBird · SSH-туннели</text>
+              <text class="n-s" x="265" y="134">закрытый канал между машинами</text>
             </g>
 
-            <!-- Proxmox -->
             <g>
-              <rect class="n-box ok" x="700" y="76" width="244" height="84" rx="16"/>
-              <circle cx="723" cy="102" r="4" fill="#63f5ad" class="pulse"/>
-              <text class="n-t" x="739" y="106">Proxmox</text>
-              <text class="n-s" x="715" y="128">i5-10505 · 16 ГБ · CMP 50HX</text>
-              <text class="n-s" x="715" y="147">Ubuntu VM + Windows VM</text>
+              <rect class="n-box pc" x="598" y="88" width="214" height="60" rx="14"/>
+              <circle cx="619" cy="112" r="4" fill="#2de2ff" class="pulse"/>
+              <text class="n-t" x="635" y="116">Сервер · Амстердам</text>
+              <text class="n-s" x="613" y="134">домены, сертификаты, выход в сеть</text>
             </g>
 
-            <!-- Orange Pi -->
+            <!-- ── интернет ───────────────────────────────────────── -->
             <g>
-              <rect class="n-box" x="700" y="172" width="244" height="76" rx="16"/>
-              <circle cx="723" cy="198" r="4" fill="#ffd84a" class="pulse"/>
-              <text class="n-t" x="739" y="202">Orange Pi Zero 3</text>
-              <text class="n-s" x="715" y="224">Home Assistant · Zigbee2MQTT</text>
-              <text class="n-s" x="715" y="242">Mosquitto · мониторинг</text>
+              <rect class="n-box big" x="806" y="196" width="148" height="48" rx="14"/>
+              <text class="n-t" x="880" y="226" text-anchor="middle">Интернет</text>
             </g>
 
-            <!-- дом -->
+            <!-- ── нижняя ветка: квартира ─────────────────────────── -->
+            <text class="lane warmtx" x="300" y="278">обычный домашний трафик · напрямую, без сервера</text>
+
             <g>
-              <rect class="n-box" x="520" y="222" width="145" height="60" rx="14"/>
-              <text class="n-t" x="592" y="248" text-anchor="middle">Квартира</text>
-              <text class="n-s" x="592" y="266" text-anchor="middle">лампы, розетки, лента</text>
+              <rect class="n-box" x="156" y="290" width="144" height="56" rx="14"/>
+              <text class="n-t" x="228" y="314" text-anchor="middle">Роутер</text>
+              <text class="n-s" x="228" y="332" text-anchor="middle">квартира</text>
             </g>
+
+            <g>
+              <rect class="n-box" x="330" y="318" width="330" height="56" rx="14"/>
+              <text class="n-t" x="348" y="342">Лампы, розетки, лента, телевизор</text>
+              <text class="n-s" x="348" y="360">свои сети Zigbee и Wi-Fi — наружу ходят сами</text>
+            </g>
+
+            <text class="note-tx" x="26" y="398">Пунктиром — та же домашняя сеть: машины стоят дома,
+              но наружу выходят только своим каналом.</text>
           </svg>
         </div>
 
@@ -12092,7 +12112,7 @@ def servers_page():
           <article class="rig rise" style="--ac:#63f5ad">
             <div class="rig-head">
               <span class="rig-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/></svg></span>
-              <span class="rig-name"><b>Proxmox</b><span>главный сервер · 192.168.1.200</span></span>
+              <span class="rig-name"><b>Proxmox</b><span>главный сервер · дома</span></span>
               <span class="dot" title="в строю"></span>
             </div>
             <div class="specs">
@@ -12102,12 +12122,12 @@ def servers_page():
               <div class="spec"><span class="k">Роль</span><span class="v">виртуалки, диски и проброс видеокарты</span></div>
             </div>
             <div class="vm">
-              <b>Ubuntu VM · 192.168.1.201</b>
+              <b>Ubuntu VM</b>
               <span>Docker: Nextcloud, Jellyfin, Syncthing. Сюда проброшена видеокарта —
                 на ней живёт весь голосовой ИИ.</span>
             </div>
             <div class="vm">
-              <b>Windows 10 VM · 192.168.1.193</b>
+              <b>Windows 10 VM</b>
               <span>Будится по сети (Wake-on-LAN) и управляется по SSH прямо из умного дома.</span>
             </div>
             <div class="svc">
@@ -12140,7 +12160,7 @@ def servers_page():
           <article class="rig rise" style="--ac:#ffd84a">
             <div class="rig-head">
               <span class="rig-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="3"/><rect x="9" y="9" width="6" height="6" rx="1"/><path d="M9 2v2M15 2v2M9 20v2M15 20v2M2 9h2M2 15h2M20 9h2M20 15h2"/></svg></span>
-              <span class="rig-name"><b>Orange Pi Zero 3</b><span>мозг квартиры · 192.168.1.195</span></span>
+              <span class="rig-name"><b>Orange Pi Zero 3</b><span>мозг квартиры · дома</span></span>
               <span class="dot" title="в строю"></span>
             </div>
             <div class="specs">
@@ -12217,8 +12237,8 @@ def servers_page():
             <span>Переезд с Wi-Fi на ESP32-C6: меньше проводов в логике, одна сеть на всё.</span></span></div>
         </div>
 
-        <footer>Схема без публичных адресов: наружу смотрит только один шлюз, остальное живёт
-          в закрытой сети. Домашние адреса 192.168.x одинаковы у половины страны и ничего не выдают.</footer>
+        <footer>Адресов на странице нет намеренно — ни публичных, ни домашних. Наружу смотрит
+          один сервер, всё остальное живёт в закрытой сети и снаружи не видно.</footer>
       </main>
 
       <script>
