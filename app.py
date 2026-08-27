@@ -5755,6 +5755,156 @@ _GAME_ICONS = {
         "H": ("#3a2a22", None), "C": ("#2f3846", None),
         "1": ("#2de2ff", "px-f1"), "2": ("#63f5ad", "px-f2"), "3": ("#ffd84a", "px-f3"),
     }),
+    # ── Себастьян: робот-дворецкий. Шесть вариантов на выбор, в деле
+    # используется тот, что назван в SEBASTIAN_ICON. Все нарисованы в общем
+    # пиксельном стиле полки: тёмный корпус, бирюзовые глаза, у каждого своя
+    # деталь — цилиндр, бабочка, поднос, монокль.
+    # 1. Классика: цилиндр, бабочка, руки по швам
+    "butler1": _pixel_svg([
+        "......HHHHHH......",
+        "......HHHHHH......",
+        "....HHHHHHHHHH....",
+        "......MMMMMM......",
+        ".....MMMMMMMM.....",
+        ".....MeeMMeeM.....",
+        ".....MMMMMMMM.....",
+        "......MMwwMM......",
+        ".......MMMM.......",
+        "....FFFFbbFFFF....",
+        "...FFFFFbbFFFFF...",
+        "...FFwwFFFFwwFF...",
+        "...FFFFFFFFFFFF...",
+        "...FF.FFFFFF.FF...",
+        "......FFFFFF......",
+        "......FF..FF......",
+        "......FF..FF......",
+        ".....hhh..hhh.....",
+    ], {
+        "H": ("#151a22", None), "M": ("#48566b", None), "F": ("#2f3846", None),
+        "e": ("#2de2ff", "px-blink"), "w": ("#dfe8f3", None),
+        "b": ("#ff3b53", None), "h": ("#232a35", None),
+    }),
+    # 2. Голова-экран: вместо лица дисплей с бегущей строкой
+    "butler2": _pixel_svg([
+        "....MMMMMMMMMM....",
+        "....MSSSSSSSSM....",
+        "....MS1SS11SSM....",
+        "....MSSSSSSSSM....",
+        "....MS2SSSS2SM....",
+        "....MSSSSSSSSM....",
+        "....MS333333SM....",
+        "....MSSSSSSSSM....",
+        "....MMMMMMMMMM....",
+        "........MM........",
+        "....FFFFbbFFFF....",
+        "...FFFFFbbFFFFF...",
+        "...FFwwFFFFwwFF...",
+        "...FFFFFFFFFFFF...",
+        "...FF.FFFFFF.FF...",
+        "......FFFFFF......",
+        "......FF..FF......",
+        ".....hhh..hhh.....",
+    ], {
+        "M": ("#48566b", None), "S": ("#0b2231", "px-screen"), "F": ("#2f3846", None),
+        "1": ("#2de2ff", "px-f1"), "2": ("#63f5ad", "px-f2"), "3": ("#ffd84a", "px-f3"),
+        "w": ("#dfe8f3", None), "b": ("#ff3b53", None), "h": ("#232a35", None),
+    }),
+    # 3. С подносом: в одной руке поднос с чашкой
+    "butler3": _pixel_svg([
+        ".....HHHHHH.......",
+        "...HHHHHHHHHH.....",
+        ".....MMMMMM.......",
+        "....MMMMMMMM......",
+        "....MeeMMeeM......",
+        "....MMMMMMMM......",
+        ".....MMwwMM.......",
+        "......MMMM........",
+        "...FFFFbbFFFF.....",
+        "..FFFFFbbFFFFF....",
+        "..FFwwFFFFwwFF.cc.",
+        "..FFFFFFFFFFFFtccc",
+        "..FF.FFFFFF.FFtttt",
+        ".....FFFFFF.......",
+        ".....FF..FF.......",
+        "....hhh..hhh......",
+    ], {
+        "H": ("#151a22", None), "M": ("#48566b", None), "F": ("#2f3846", None),
+        "e": ("#2de2ff", "px-blink"), "w": ("#dfe8f3", None), "b": ("#ff3b53", None),
+        "h": ("#232a35", None), "t": ("#8b98ab", None), "c": ("#dfe8f3", "px-blink2"),
+    }),
+    # 4. Круглая голова-шар с одним большим глазом и моноклем
+    "butler4": _pixel_svg([
+        "......HHHHHH......",
+        "....HHHHHHHHHH....",
+        ".....MMMMMMMM.....",
+        "....MMMMMMMMMM....",
+        "....MMMeeeeMMM....",
+        "....MMeEEEEeMM....",
+        "....MMMeeeeMMM....",
+        ".....MMMMMMMM.....",
+        "......MMMMMM......",
+        "........MM........",
+        "....FFFFbbFFFF....",
+        "...FFFFFbbFFFFF...",
+        "...FFFFFFFFFFFF...",
+        "...FF.FFFFFF.FF...",
+        "......FFFFFF......",
+        "......FF..FF......",
+        ".....hhh..hhh.....",
+    ], {
+        "H": ("#151a22", None), "M": ("#48566b", None), "F": ("#2f3846", None),
+        "e": ("#0b2231", None), "E": ("#2de2ff", "px-screen"),
+        "b": ("#ffd84a", None), "h": ("#232a35", None),
+    }),
+    # 5. Парящий: вместо ног — подушка света
+    "butler5": _pixel_svg([
+        "......HHHHHH......",
+        "....HHHHHHHHHH....",
+        "......MMMMMM......",
+        ".....MMMMMMMM.....",
+        ".....MeeMMeeM.....",
+        ".....MMMMMMMM.....",
+        "......MMwwMM......",
+        ".......MMMM.......",
+        "....FFFFbbFFFF....",
+        "...FFFFFbbFFFFF...",
+        "...FFwwFFFFwwFF...",
+        "...FFFFFFFFFFFF...",
+        "....FFFFFFFFFF....",
+        ".....FFFFFFFF.....",
+        "......FFFFFF......",
+        ".....gggggggg.....",
+        "....gg......gg....",
+        "..................",
+    ], {
+        "H": ("#151a22", None), "M": ("#48566b", None), "F": ("#2f3846", None),
+        "e": ("#2de2ff", "px-blink"), "w": ("#dfe8f3", None), "b": ("#ff3b53", None),
+        "g": ("#2de2ff", "px-blink2"),
+    }),
+    # 6. Строгий: высокий воротник, руки за спиной, глаза-щёлочки
+    "butler6": _pixel_svg([
+        ".....HHHHHHHH.....",
+        "...HHHHHHHHHHHH...",
+        ".....MMMMMMMM.....",
+        "....MMMMMMMMMM....",
+        "....MeeMMMMeeM....",
+        "....MMMMMMMMMM....",
+        ".....MMMMMMMM.....",
+        "......MMMMMM......",
+        "....wwwMMMMwww....",
+        "...FFwwbbbbwwFF...",
+        "...FFFFbbbbFFFF...",
+        "...FFFFFFFFFFFF...",
+        "...FFFFFFFFFFFF...",
+        "....FFFFFFFFFF....",
+        "......FF..FF......",
+        "......FF..FF......",
+        ".....hhh..hhh.....",
+    ], {
+        "H": ("#151a22", None), "M": ("#48566b", None), "F": ("#232a35", None),
+        "e": ("#2de2ff", "px-blink"), "w": ("#dfe8f3", None),
+        "b": ("#8b98ab", None), "h": ("#151a22", None),
+    }),
     # Динамик — значок музыкальной вкладки. Волн две: ближняя горит всегда,
     # дальняя мигает, поэтому значок дышит «одна волна — две» и без наведения.
     "speaker": _pixel_svg([
@@ -11805,6 +11955,338 @@ def diy_page():
     return html.replace("__ICONLINKS__", ICON_LINKS)
 
 
+# ---- Себастьян: разговор с дворецким через сайт ---------------------------
+# Отвечает та же модель, что уже висит в памяти видеокарты дома, — новую не
+# поднимаем, иначе домашнему Себастьяну не хватит места. Поэтому здесь только
+# разговор: никаких инструментов и никакого управления домом, кто бы ни писал.
+# Свет и розетки остаются за домашним контуром, куда с улицы ходу нет.
+# Какой из шести роботов стоит на полке и в шапке чата. Меняется одной
+# строкой — или переменной SEBASTIAN_ICON, без правки кода.
+SEBASTIAN_ICON = os.environ.get("SEBASTIAN_ICON", "butler1")
+if SEBASTIAN_ICON not in _GAME_ICONS:
+    SEBASTIAN_ICON = "butler1"
+_GAME_ICONS["butler"] = _GAME_ICONS[SEBASTIAN_ICON]   # под именем __ICON_BUTLER__
+SEBASTIAN_HOST = os.environ.get("SEBASTIAN_OLLAMA", "").strip().rstrip("/")
+SEBASTIAN_MODEL = os.environ.get("SEBASTIAN_MODEL", "sebastian").strip()
+SEBASTIAN_PUBLIC = os.environ.get("SEBASTIAN_PUBLIC", "1") != "0"
+SEBASTIAN_MSG_MAX = 400            # длиннее вопросы не принимаем
+SEBASTIAN_REPLY_TOKENS = 200       # и ответы держим короткими
+SEBASTIAN_TIMEOUT = 45
+SEBASTIAN_GUEST_HOUR = 12          # сколько вопросов в час с одного адреса
+SEBASTIAN_OWNER_HOUR = 60
+
+# Одновременно пускаем только один вопрос: две модели на одной видеокарте
+# душат друг друга втрое, а домашний голосовой контур важнее сайта.
+sebastian_gate = threading.Semaphore(1)
+sebastian_calls: dict = {}
+sebastian_calls_lock = threading.Lock()
+
+SEBASTIAN_PROMPT = """Ты Себастьян — дворецкий и голос домашнего сервера vitazgio.ru.
+Отвечай по-русски, коротко и с достоинством, лёгкая ирония уместна.
+
+О чём знаешь и охотно рассказываешь:
+— Три машины: гипервизор Proxmox дома (виртуалки, видеокарта под нейросети),
+  маленькая Orange Pi (умный дом круглосуточно), арендованный сервер в
+  Амстердаме (домены, сертификаты, единственный вход снаружи).
+— Сервисы: облако, медиатека, синхронизация файлов, мониторинг, прокси.
+— Умный дом: лампы, розетки, лента, магнитола — всё на Zigbee, всё локально.
+— Хозяин: Виталий, студент, собирает устройства на ESP32 и пишет прошивки.
+
+Чего не делаешь:
+— Не управляешь домом и не трогаешь устройства из этого разговора: свет,
+  розетки и техника слушаются только домашнего контура. Если просят включить
+  или выключить — вежливо откажи и объясни, что через сайт это не делается.
+— Не называешь адреса, пароли, ключи и внутренние имена машин.
+— Не выдумываешь: чего не знаешь — так и скажи."""
+
+
+def _sebastian_allow(owner):
+    """Не даём одному гостю занимать видеокарту весь день."""
+    limit = SEBASTIAN_OWNER_HOUR if owner else SEBASTIAN_GUEST_HOUR
+    who = "owner" if owner else _client_ip()
+    now = time.time()
+    with sebastian_calls_lock:
+        hits = [t for t in sebastian_calls.get(who, []) if now - t < 3600]
+        if len(hits) >= limit:
+            sebastian_calls[who] = hits
+            return False
+        hits.append(now)
+        sebastian_calls[who] = hits
+        # заодно подчищаем чужие следы, чтобы словарь не рос вечно
+        for key in [k for k, v in sebastian_calls.items()
+                    if not v or now - v[-1] > 7200]:
+            sebastian_calls.pop(key, None)
+    return True
+
+
+@app.get("/api/sebastian/state")
+def sebastian_state_api():
+    """Готов ли дворецкий отвечать — страница спрашивает при открытии."""
+    ready = bool(SEBASTIAN_HOST) and SEBASTIAN_PUBLIC
+    return jsonify(ready=ready, model=SEBASTIAN_MODEL if ready else "",
+                   owner=bool(session.get("authenticated")))
+
+
+@app.post("/api/sebastian/ask")
+def sebastian_ask_api():
+    if not SEBASTIAN_PUBLIC:
+        return jsonify(error="Дворецкий сейчас не принимает."), 503
+    if not SEBASTIAN_HOST:
+        return jsonify(error="Дворецкий не на связи: сервер с моделью не указан."), 503
+
+    payload = request.get_json(silent=True) or {}
+    text = (payload.get("text") or "").strip()[:SEBASTIAN_MSG_MAX]
+    if not text:
+        return jsonify(error="Пустой вопрос."), 400
+
+    owner = bool(session.get("authenticated"))
+    if not _sebastian_allow(owner):
+        return jsonify(error="На сегодня довольно вопросов — приходите позже."), 429
+
+    # История нужна, чтобы разговор был связным, но держим её короткой:
+    # длинный контекст съедает видеопамять, а она тут дефицит.
+    history = []
+    for row in (payload.get("history") or [])[-6:]:
+        role = "assistant" if row.get("role") == "bot" else "user"
+        body = (row.get("text") or "").strip()[:SEBASTIAN_MSG_MAX]
+        if body:
+            history.append({"role": role, "content": body})
+
+    body = json.dumps({
+        "model": SEBASTIAN_MODEL,
+        "messages": ([{"role": "system", "content": SEBASTIAN_PROMPT}]
+                     + history + [{"role": "user", "content": text}]),
+        "stream": False,
+        "think": False,
+        "options": {"num_predict": SEBASTIAN_REPLY_TOKENS, "temperature": 0.7},
+    }).encode("utf-8")
+
+    if not sebastian_gate.acquire(timeout=20):
+        return jsonify(error="Дворецкий занят домашними делами. Минуту."), 503
+    try:
+        from urllib import request as urlrequest, error as urlerror
+        req = urlrequest.Request(SEBASTIAN_HOST + "/api/chat", data=body,
+                                 headers={"Content-Type": "application/json"})
+        try:
+            with urlrequest.urlopen(req, timeout=SEBASTIAN_TIMEOUT) as resp:
+                data = json.loads(resp.read().decode("utf-8", "replace"))
+        except urlerror.URLError:
+            return jsonify(error="Дворецкий не отвечает — видимо, сервер спит."), 502
+        except (ValueError, OSError):
+            return jsonify(error="Дворецкий ответил невнятно."), 502
+    finally:
+        sebastian_gate.release()
+
+    said = ((data.get("message") or {}).get("content") or "").strip()
+    # у думающих моделей бывает служебный блок размышлений — он не для гостей
+    said = re.sub(r"<think>.*?</think>", "", said, flags=re.S).strip()
+    if not said:
+        return jsonify(error="Дворецкий промолчал."), 502
+    return jsonify(text=said[:4000])
+
+
+@app.get("/sebastian")
+def sebastian_page():
+    """Разговор с дворецким. Открыт всем: управлять домом отсюда нельзя,
+    поэтому пускать можно кого угодно."""
+    html = """<!doctype html>
+    <html lang="ru">
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <meta name="theme-color" content="#0d1321">
+      <meta name="description" content="Себастьян — голос домашнего сервера vitazgio.ru">
+      __ICONLINKS__
+      <link rel="manifest" href="/manifest.webmanifest">
+      <title>Себастьян · vitazgio.ru</title>
+      <style>
+        :root { color-scheme:dark; --line:rgba(255,255,255,.1); --muted:#8b97ac;
+                --pc:#2de2ff; --ok:#63f5ad; --warm:#ffd84a; }
+        * { box-sizing:border-box; }
+        html, body { height:100%; }
+        body { margin:0; color:#eaf3fb; display:flex; flex-direction:column;
+               font-family:"Cascadia Code", Consolas, monospace;
+               background:radial-gradient(circle at top left, #192a44, #0d1321 55%); }
+        .page { flex:1; width:min(880px, calc(100% - 30px)); margin:0 auto;
+                display:flex; flex-direction:column; padding:clamp(16px,3vw,32px) 0 18px; min-height:0; }
+
+        .top { display:flex; align-items:center; gap:13px; margin-bottom:16px; }
+        .back { width:42px; height:42px; flex:none; display:grid; place-items:center;
+                color:var(--pc); text-decoration:none; border:1px solid rgba(45,226,255,.3);
+                border-radius:50%; background:rgba(45,226,255,.07); transition:.18s; }
+        .back:hover { color:#fff; border-color:var(--pc); background:rgba(45,226,255,.18); }
+        .back svg { width:20px; height:20px; }
+        .who { flex:1; min-width:0; }
+        .who b { display:block; font-size:1.15rem; letter-spacing:-.01em; }
+        .who span { display:block; margin-top:3px; color:var(--muted); font-size:.72rem; }
+        .face { width:52px; height:52px; flex:none; }
+        .face svg { width:100%; height:100%; display:block; }
+        .state { display:inline-flex; align-items:center; gap:7px; }
+        .state i { width:7px; height:7px; border-radius:50%; background:var(--muted); }
+        .state.on i { background:var(--ok); box-shadow:0 0 10px var(--ok); animation:beat 2.4s ease-in-out infinite; }
+        .state.off i { background:var(--warm); }
+        @keyframes beat { 0%,100%{opacity:1} 50%{opacity:.45} }
+
+        .chat { flex:1; min-height:0; overflow-y:auto; padding:16px; border:1px solid var(--line);
+                border-radius:16px; background:rgba(9,14,24,.55); display:flex;
+                flex-direction:column; gap:12px; }
+        .msg { display:flex; gap:11px; max-width:86%; }
+        .msg.me { align-self:flex-end; flex-direction:row-reverse; }
+        .msg .av { width:32px; height:32px; flex:none; border-radius:10px; display:grid;
+                   place-items:center; font-size:.62rem; font-weight:800; color:#04121c;
+                   background:linear-gradient(160deg,#7df0ff,#26cfe8); }
+        .msg.me .av { color:#eaf3fb; background:rgba(255,255,255,.08);
+                      border:1px solid var(--line); }
+        .msg .txt { padding:11px 14px; border-radius:14px; font-size:.88rem; line-height:1.6;
+                    white-space:pre-wrap; overflow-wrap:anywhere;
+                    background:rgba(255,255,255,.05); border:1px solid var(--line); }
+        .msg.me .txt { background:rgba(45,226,255,.12); border-color:rgba(45,226,255,.28); }
+        .msg.err .txt { color:#ffb3b3; background:rgba(255,90,90,.1); border-color:rgba(255,90,90,.3); }
+        .dots span { display:inline-block; width:6px; height:6px; margin-right:4px; border-radius:50%;
+                     background:var(--pc); animation:blip 1.1s ease-in-out infinite; }
+        .dots span:nth-child(2){ animation-delay:.18s } .dots span:nth-child(3){ animation-delay:.36s }
+        @keyframes blip { 0%,100%{opacity:.25; transform:translateY(0)} 50%{opacity:1; transform:translateY(-3px)} }
+
+        .hints { display:flex; flex-wrap:wrap; gap:7px; margin:13px 0 0; }
+        .hints button { padding:7px 12px; cursor:pointer; color:#cfe0f0; font:400 .74rem inherit;
+                        border:1px solid var(--line); border-radius:9px; background:rgba(255,255,255,.04);
+                        transition:.16s; }
+        .hints button:hover { color:#fff; border-color:rgba(45,226,255,.5); background:rgba(45,226,255,.1); }
+
+        .ask { display:flex; gap:9px; margin-top:12px; }
+        .ask input { flex:1; height:46px; padding:0 15px; color:#f4fbff; font:400 .88rem inherit;
+                     border:1px solid var(--line); border-radius:12px; outline:none;
+                     background:rgba(4,10,20,.65); }
+        .ask input:focus { border-color:var(--pc); }
+        .ask button { width:46px; height:46px; flex:none; display:grid; place-items:center; cursor:pointer;
+                      color:#04121c; border:0; border-radius:12px;
+                      background:linear-gradient(160deg,#7df0ff,#26cfe8); }
+        .ask button:hover { filter:brightness(1.08); }
+        .ask button:disabled { opacity:.45; cursor:wait; }
+        .ask svg { width:19px; height:19px; }
+        .foot { margin-top:10px; color:#5d6a7d; font-size:.7rem; line-height:1.5; }
+        @media (prefers-reduced-motion: reduce) { * { animation:none !important; } }
+      </style>
+    </head>
+    <body>
+      <main class="page">
+        <div class="top">
+          <a class="back" href="/" title="На главную" aria-label="На главную"><svg viewBox="0 0 24 24" fill="none"><path d="M19 12H5m0 0 6-6m-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
+          <span class="face">__ICON_BUTLER__</span>
+          <span class="who"><b>Себастьян</b>
+            <span class="state" id="state"><i></i><span id="state-tx">проверяю, на месте ли…</span></span></span>
+        </div>
+
+        <div class="chat" id="chat"></div>
+
+        <div class="hints" id="hints">
+          <button type="button">Что у тебя за сервера?</button>
+          <button type="button">Расскажи про умный дом</button>
+          <button type="button">Чем занят хозяин?</button>
+          <button type="button">Почему тебя зовут Себастьян?</button>
+        </div>
+
+        <form class="ask" id="ask">
+          <input id="text" maxlength="400" autocomplete="off"
+                 placeholder="Спросите дворецкого…" aria-label="Вопрос">
+          <button type="submit" id="send" title="Отправить" aria-label="Отправить">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                 stroke-linecap="round" stroke-linejoin="round"><path d="M4 12h15m0 0-6-6m6 6-6 6"/></svg>
+          </button>
+        </form>
+        <p class="foot">Через сайт Себастьян только разговаривает: свет, розетки и техника
+          слушаются домашнего контура, и снаружи туда ходу нет. Отвечает та же модель,
+          что и дома, поэтому очередь — по одному вопросу за раз.</p>
+      </main>
+
+      <script>
+      (() => {
+        "use strict";
+        const $ = (id) => document.getElementById(id);
+        const chat = $("chat");
+        const history = [];
+        let busy = false, ready = false;
+
+        const add = (role, text, cls) => {
+          const el = document.createElement("div");
+          el.className = "msg " + (role === "me" ? "me" : "bot") + (cls ? " " + cls : "");
+          const av = document.createElement("span");
+          av.className = "av";
+          av.textContent = role === "me" ? "Я" : "С";
+          const tx = document.createElement("div");
+          tx.className = "txt";
+          if (text === null) {
+            tx.innerHTML = '<span class="dots"><span></span><span></span><span></span></span>';
+          } else {
+            tx.textContent = text;
+          }
+          el.append(av, tx);
+          chat.appendChild(el);
+          chat.scrollTop = chat.scrollHeight;
+          return el;
+        };
+
+        const ask = async (text) => {
+          if (busy || !text.trim()) return;
+          busy = true; $("send").disabled = true;
+          add("me", text);
+          history.push({ role: "me", text: text });
+          const wait = add("bot", null);
+          try {
+            const r = await fetch("/api/sebastian/ask", {
+              method: "POST", credentials: "same-origin",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ text: text, history: history.slice(0, -1) }),
+            });
+            const d = await r.json().catch(() => ({}));
+            wait.remove();
+            if (!r.ok) { add("bot", d.error || "Что-то пошло не так.", "err"); }
+            else { add("bot", d.text); history.push({ role: "bot", text: d.text }); }
+          } catch (e) {
+            wait.remove();
+            add("bot", "Не дозвонился до дворецкого.", "err");
+          } finally {
+            busy = false; $("send").disabled = false; $("text").focus();
+          }
+        };
+
+        $("ask").addEventListener("submit", (e) => {
+          e.preventDefault();
+          const t = $("text").value;
+          $("text").value = "";
+          ask(t);
+        });
+        $("hints").addEventListener("click", (e) => {
+          const b = e.target.closest("button");
+          if (b) ask(b.textContent.trim());
+        });
+
+        fetch("/api/sebastian/state", { credentials: "same-origin" })
+          .then((r) => r.json())
+          .then((d) => {
+            ready = !!d.ready;
+            $("state").className = "state " + (ready ? "on" : "off");
+            $("state-tx").textContent = ready
+              ? "на месте, слушает" : "отлучился — сервер с моделью не отвечает";
+            add("bot", ready
+              ? "К вашим услугам. Спрашивайте про сервера, умный дом или хозяйские затеи."
+              : "Прошу прощения: домашний сервер сейчас недоступен, и отвечать мне нечем. " +
+                "Загляните позже.");
+          })
+          .catch(() => {
+            $("state").className = "state off";
+            $("state-tx").textContent = "не отвечает";
+          });
+      })();
+      </script>
+      <script src="/vg-player.js" defer></script>
+    </body>
+    </html>
+    """
+    return (html.replace("__ICONLINKS__", ICON_LINKS)
+                .replace("__ICON_BUTLER__", _GAME_ICONS.get(SEBASTIAN_ICON, "")))
+
+
 @app.get("/servers")
 def servers_page():
     """Хозяйство: три машины, их роли и что на них крутится.
@@ -13787,6 +14269,7 @@ def home():
         .pick--cabinet { --pc: #2de2ff; }
         .pick--rack    { --pc: #2de2ff; }
         .pick--music   { --pc: #2de2ff; }
+        .pick--butler  { --pc: #b57cff; }
         .pick--hero    { --pc: #5f9bff; }
         .pick--pad     { --pc: #63f5ad; }
         .pick--invader { --pc: #63f5ad; }
@@ -13817,6 +14300,7 @@ def home():
         .pick--diy .pick-art svg   { animation: pxTilt 3.2s ease-in-out infinite; }
         .pick--rack .pick-art svg  { animation: pxTilt 3.45s ease-in-out infinite; }
         .pick--music .pick-art svg { animation: pxTilt 3.6s ease-in-out infinite; }
+        .pick--butler .pick-art svg { animation: pxTilt 3.25s ease-in-out infinite; }
         .pick--me .pick-art svg    { animation: pxTilt 3.85s ease-in-out infinite; }
 
         /* Бегущая подсветка: строки кода на экране и отблеск в очках. */
@@ -14041,6 +14525,14 @@ def home():
                 <span class="pick-glow"></span>
               </a>
               <span class="pick-label">SERVERS</span>
+            </span>
+            <span class="pick-cell pick--butler">
+              <a class="pick pick--butler" href="/sebastian"
+                 title="Себастьян" aria-label="Поговорить с дворецким">
+                <span class="pick-art">__ICON_BUTLER__</span>
+                <span class="pick-glow"></span>
+              </a>
+              <span class="pick-label">BUTLER</span>
             </span>
             <span class="pick-cell pick--music">
               <a class="pick pick--music" href="/music" id="music-pick"
