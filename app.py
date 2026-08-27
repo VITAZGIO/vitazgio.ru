@@ -2431,9 +2431,11 @@ def drop_upload_init():
         return jsonify(error="Файл больше 2 ГБ."), 413
 
     upload_id = str(uuid.uuid4())
+    music_target = parent == DROP_MUSIK_ID or (parent or "").startswith("mf_")
     with drop_lock:
         _drop_sweep_uploads()
-        if parent and drop_items.get(parent, {}).get("kind") != "folder":
+        # MUSIK и папки внутри неё — приёмник фонотеки, а не склад дропа
+        if not music_target and parent and drop_items.get(parent, {}).get("kind") != "folder":
             parent = None
         reserved = sum(u["size"] for u in drop_uploads.values())
         if _drop_used() + reserved + size > DROP_QUOTA:
@@ -2508,6 +2510,11 @@ def drop_upload_finish(upload_id):
             pass
         return jsonify(error="Размер не сошёлся, загрузка прервана."), 400
 
+    parent_in = upload.get("parent") or ""
+    if parent_in == DROP_MUSIK_ID or parent_in.startswith("mf_"):
+        return _drop_music_take(tmp_path, upload["name"], actual,
+                                "" if parent_in == DROP_MUSIK_ID else parent_in[3:])
+
     item_id = str(uuid.uuid4())
     with drop_lock:
         if _drop_used() + actual > DROP_QUOTA:
@@ -2532,10 +2539,96 @@ def drop_upload_finish(upload_id):
     return jsonify(id=item_id)
 
 
+def _drop_music_take(tmp_path, name, size, folder):
+    """Принимает файл, брошенный в папку MUSIK, прямо в фонотеку — тогда он
+    сразу оказывается и в плеере, и на странице музыки."""
+    ext = os.path.splitext(name)[1].lower()
+    if ext not in MUSIC_EXTS:
+        _music_unlink(tmp_path)
+        return jsonify(error="В MUSIK кладём только музыку."), 415
+    with music_lock:
+        if _music_used() + size > MUSIC_QUOTA:
+            _music_unlink(tmp_path)
+            return jsonify(error="В фонотеке кончилось место."), 507
+        if folder and folder not in music_folders:
+            folder = ""
+        # подбираем свободное имя, как это делает загрузка на странице музыки
+        safe = _music_safe_name(name)
+        taken = {t["file"] for t in music_items.values()}
+        stem, suffix = os.path.splitext(safe)
+        candidate, counter = safe, 2
+        while candidate in taken or os.path.exists(os.path.join(MUSIC_DIR, candidate)):
+            candidate = f"{stem} ({counter}){suffix}"
+            counter += 1
+        try:
+            os.replace(tmp_path, os.path.join(MUSIC_DIR, candidate))
+        except OSError as e:
+            _music_unlink(tmp_path)
+            return jsonify(error=f"Не удалось сохранить: {e}"), 500
+        artist, title = _music_split(os.path.splitext(candidate)[0])
+        track_id = str(uuid.uuid4())
+        music_items[track_id] = {"file": candidate, "artist": artist, "title": title,
+                                 "size": size, "added": time.time(), "folder": folder}
+        _music_write_index()
+    return jsonify(id="mt_" + track_id, music=True)
+
+
+def _drop_music_view(parent):
+    """Содержимое папки MUSIK — это сама фонотека, показанная глазами дропа.
+
+    Раньше дроп и фонотека были двумя разными складами: трек, загруженный на
+    странице музыки, в дропе не появлялся, и наоборот. Теперь MUSIK не хранит
+    ничего своего, а показывает папки и треки фонотеки — то же самое, что
+    играет плеер. Значки виртуальные: id папки начинается с «mf_», трека — с
+    «mt_», по ним и разбираем запросы дальше."""
+    inside = "" if parent == DROP_MUSIK_ID else parent[3:]
+    items, chain = [], []
+    with music_lock:
+        _music_scan()
+        for k, v in sorted(music_folders.items(), key=lambda x: x[1]["name"].lower()):
+            if v.get("parent", "") != inside:
+                continue
+            kids = sum(1 for t in music_items.values() if t.get("folder", "") == k)
+            size = sum(t.get("size", 0) for t in music_items.values()
+                       if t.get("folder", "") == k)
+            items.append({"id": "mf_" + k, "kind": "folder", "name": v["name"],
+                          "size": size, "count": kids, "icon": "music",
+                          "created": v.get("added", 0), "touched": v.get("added", 0),
+                          "share": False, "share_expires": None, "share_mode": None,
+                          "share_url": None, "thumb": False, "preview": None,
+                          "truncated": False, "music": True})
+        for k, v in sorted(music_items.items(),
+                           key=lambda x: (x[1]["artist"].lower(), x[1]["title"].lower())):
+            if v.get("folder", "") != inside:
+                continue
+            name = " — ".join([p for p in (v.get("artist"), v.get("title")) if p]) or v["file"]
+            items.append({"id": "mt_" + k, "kind": "file", "name": name,
+                          "size": v.get("size", 0), "created": v.get("added", 0),
+                          "touched": v.get("added", 0), "preview": None, "truncated": False,
+                          "thumb": False, "share": False, "share_expires": None,
+                          "share_mode": None, "share_url": None, "music": True})
+        # путь наверх: MUSIK, а дальше вложенные папки фонотеки
+        node = inside
+        seen = set()
+        while node and node in music_folders and node not in seen:
+            seen.add(node)
+            chain.append({"id": "mf_" + node, "name": music_folders[node]["name"]})
+            node = music_folders[node].get("parent", "")
+        chain.reverse()
+    with drop_lock:
+        used, quota, trash = _drop_used(), DROP_QUOTA, _drop_trash_bytes()
+    return jsonify(items=items,
+                   breadcrumbs=[{"id": DROP_MUSIK_ID, "name": "MUSIK"}] + chain,
+                   used=used, quota=quota, trash=trash, music_view=True)
+
+
 @app.get("/api/drop/list")
 @login_required
 def drop_list_api():
     parent = request.args.get("parent") or None
+    # Папка MUSIK и всё внутри неё — это фонотека, а не склад дропа
+    if parent == DROP_MUSIK_ID or (parent or "").startswith("mf_"):
+        return _drop_music_view(parent)
     with drop_lock:
         _drop_sweep_trash()
         if parent and parent not in drop_items:
@@ -2569,6 +2662,10 @@ def drop_list_api():
                 row["icon"] = v.get("icon") or "folder"
                 if v.get("special"):
                     row["special"] = True
+                    # MUSIK показывает фонотеку, значит и веса берём её
+                    with music_lock:
+                        row["size"] = _music_used()
+                        row["count"] = len(music_items)
             items.append(row)
         # Сначала новые, но особая папка (MUSIK) всегда падает в самый низ.
         # Сортировка устойчивая: сперва по свежести, затем особые — вниз.
@@ -2583,9 +2680,30 @@ def drop_list_api():
         )
 
 
+def _drop_music_send(item_id, inline=False):
+    """Трек фонотеки, отданный через дроп: id вида «mt_<id>». Возвращает
+    ответ или None, если это обычный элемент дропа."""
+    if not item_id.startswith("mt_"):
+        return None
+    with music_lock:
+        track = music_items.get(item_id[3:])
+    if not track:
+        return "Не найдено", 404
+    path = os.path.join(MUSIC_DIR, track["file"])
+    if not os.path.exists(path):
+        return "Не найдено", 404
+    ext = os.path.splitext(track["file"])[1].lower()
+    name = " — ".join([p for p in (track.get("artist"), track.get("title")) if p]) or track["file"]
+    return send_file(path, mimetype=MUSIC_MIMES.get(ext, "audio/mpeg"),
+                     as_attachment=not inline, download_name=name + ext, conditional=True)
+
+
 @app.get("/api/drop/download/<item_id>")
 @login_required
 def drop_download(item_id):
+    tune = _drop_music_send(item_id)
+    if tune is not None:
+        return tune
     with drop_lock:
         item = drop_items.get(item_id)
     if not item or item["kind"] == "folder":
@@ -2779,6 +2897,9 @@ def drop_view(item_id):
     тегу нужен разобранный тип, а угадывать его браузеру мы запретили
     заголовком nosniff. Здесь тип берётся из того же белого списка, что и у
     публичной ссылки, так что ничего исполняемого сюда не попадёт."""
+    tune = _drop_music_send(item_id, inline=True)
+    if tune is not None:
+        return tune
     with drop_lock:
         item = drop_items.get(item_id)
     if not item or item["kind"] == "folder":
@@ -3206,10 +3327,47 @@ __ICONLINKS__
 @app.delete("/api/drop/<item_id>")
 @login_required
 def drop_delete(item_id):
+    # Трек или папку фонотеки удаляем прямо в ней: в дропе они только видны.
+    if item_id.startswith("mt_") or item_id.startswith("mf_"):
+        return _drop_music_delete(item_id)
     with drop_lock:
         if item_id in drop_items:
             _drop_trash(item_id)             # в корзину, не насовсем
             _drop_write_index()
+    return jsonify(ok=True)
+
+
+def _drop_music_delete(item_id):
+    """Удаление из фонотеки по запросу из дропа. Корзины у фонотеки нет —
+    предупреждение об этом висит на самой кнопке."""
+    with music_lock:
+        if item_id.startswith("mt_"):
+            track = music_items.pop(item_id[3:], None)
+            if track:
+                still = any(t["file"] == track["file"] for t in music_items.values())
+                if not still:
+                    _music_unlink(os.path.join(MUSIC_DIR, track["file"]))
+                _music_write_index()
+            return jsonify(ok=True)
+        fid = item_id[3:]
+        if fid not in music_folders:
+            return jsonify(error="Папка не найдена."), 404
+        # вместе с папкой уносим её подпапки и треки
+        doomed, queue = {fid}, [fid]
+        while queue:
+            cur = queue.pop()
+            for k, v in music_folders.items():
+                if v.get("parent", "") == cur and k not in doomed:
+                    doomed.add(k)
+                    queue.append(k)
+        for k in [k for k, v in music_items.items() if v.get("folder", "") in doomed]:
+            track = music_items.pop(k)
+            still = any(t["file"] == track["file"] for t in music_items.values())
+            if not still:
+                _music_unlink(os.path.join(MUSIC_DIR, track["file"]))
+        for k in doomed:
+            music_folders.pop(k, None)
+        _music_write_index()
     return jsonify(ok=True)
 
 
@@ -7353,7 +7511,11 @@ def drop_page():
               ${iconHtml(it)}
               <span class="nm">${esc(it.name)}</span>
               <span class="acts">
-                ${it.special ? `
+                ${it.music ? `
+                  ${isFolder ? "" : `<button class="act" data-act="view" title="Слушать">▶</button>`}
+                  <button class="act" data-act="dl" title="Скачать">⤓</button>
+                  <button class="act del" data-act="del" title="Удалить из фонотеки">🗑</button>
+                ` : it.special ? `
                   <button class="act" data-act="zip" title="Скачать папку архивом">⤓</button>
                   <button class="act nodel" data-act="nodel" title="Эту папку удалить нельзя">🗑</button>
                 ` : `
@@ -8060,7 +8222,12 @@ def drop_page():
           }
 
           if (act === "del") {
-            const what = item.kind === "folder"
+            const what = item.music
+              ? (item.kind === "folder"
+                  ? "Удалить папку «" + item.name + "» из фонотеки со всеми треками?\n" +
+                    "У фонотеки нет корзины — это насовсем."
+                  : "Удалить трек «" + item.name + "» из фонотеки?\nУ фонотеки нет корзины — это насовсем.")
+              : item.kind === "folder"
               ? "Удалить папку «" + item.name + "» со всем содержимым?"
               : "Удалить «" + item.name + "»?";
             if (!confirm(what)) return;
@@ -8200,6 +8367,362 @@ def _diy_load():
 
 
 _diy_load()
+
+
+# ---- Первое наполнение страны DIY -----------------------------------------
+# Несколько записей заводятся сами при первом запуске: иначе раздел встречает
+# пустотой, а расписывать каждую руками с телефона неудобно. Заготовки лежат
+# рядом с кодом (static/seed), фотографии копируются во вложения записи.
+# Каждая заготовка сеется ровно один раз: удалил — больше не вернётся.
+DIY_SEED_FLAG = os.path.join(DATA_DIR, "diy_seeded.json")
+DIY_SEED_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "seed")
+
+DIY_SEEDS = [
+    {
+        "key": "ssh_tunnel",
+        "title": "ssh_tunnel",
+        "kind": "программа",
+        "assets": "ssh_tunnel",
+        "body": """---
+кратко: Учебный проект: как из штатного механизма SSH собрать рабочий локальный прокси. Один файл, без установки и без прав администратора — Windows, Linux и Android.
+теги: Go, Kotlin, сети, SSH, SOCKS5
+цвет: #2de2ff
+обложка: главный-экран.png
+ссылка: https://github.com/VITAZGIO/ssh_tunel
+---
+
+<p>У SSH есть штатная возможность — проброс TCP-соединений. Та самая, что стоит
+за командой <code>ssh -D</code>. Мне стало интересно, что будет, если написать
+её самому и довести до состояния программы, которой можно пользоваться каждый
+день. Так появился <b>ssh_tunnel</b>: он поднимает соединение с моим же
+сервером и разворачивает поверх него локальный прокси.</p>
+
+<div class="note">Проект учебный. Он сделан, чтобы разобраться, как устроены
+SOCKS, HTTP CONNECT, каналы SSH и как программа узнаёт, какое приложение
+открыло соединение. Никакого сервиса тут нет: нужен сервер, к которому у тебя
+и так есть доступ по SSH.</div>
+
+<h2>Как выглядит</h2>
+
+<div class="shots">
+  <figure><img src="{{главный-экран.png}}" alt="Главный экран"><figcaption>Одна кнопка и живые цифры</figcaption></figure>
+  <figure><img src="{{выбор-программ.png}}" alt="Разделение трафика"><figcaption>Какие программы вести через сервер</figcaption></figure>
+  <figure><img src="{{настройки.png}}" alt="Настройки"><figcaption>Адрес, ключ и готовая команда</figcaption></figure>
+</div>
+
+<h2>Что происходит внутри</h2>
+
+<p>Приложение думает, что говорит с обычным прокси на своей же машине.
+Программа разбирает запрос, узнаёт адрес назначения и открывает до него канал
+внутри SSH-соединения. Дальше всё решает сервер — включая DNS-запрос:</p>
+
+<pre><code>  приложение
+      │  SOCKS4/4a/5 (1080)   HTTP CONNECT (1081)
+      ▼
+  ssh_tunnel  ──── зашифрованный SSH (22) ────►  сервер  ──►  сеть</code></pre>
+
+<p>Имя хоста разрешает сервер, а не твой компьютер. Это важная деталь: иначе
+соединение выходило бы с адреса сервера, а запрос имени — с твоего.</p>
+
+<h2>Что он умеет</h2>
+
+<div class="cards">
+  <div><b>Три протокола сразу</b><p>SOCKS5, SOCKS4/4a и HTTP CONNECT. Разные программы умеют разное — нужны все три.</p></div>
+  <div><b>Разделение по программам</b><p>Через туннель идёт всё, только выбранные приложения или все кроме выбранных. Правила меняются на ходу.</p></div>
+  <div><b>Локальная сеть напрямую</b><p>Роутер, NAS и Home Assistant остаются доступными: их адреса идут мимо туннеля. Mesh-сети тоже учтены.</p></div>
+  <div><b>Переживает обрывы</b><p>Пул SSH-соединений с проверкой живости. Заснувший ноутбук не ломает туннель.</p></div>
+  <div><b>Возвращает настройки</b><p>При любом закрытии, включая аварийное. Интернет после выхода не пропадает.</p></div>
+  <div><b>Видно, кто ходит в сеть</b><p>Живой список программ и адресов, с пометкой, если DNS-запрос ушёл мимо туннеля.</p></div>
+</div>
+
+<h2>Три системы, один принцип</h2>
+
+<table>
+  <tr><th>Система</th><th>Как устроено</th><th>Что нужно настроить</th></tr>
+  <tr><td><b>Windows</b></td><td>Окно с одной кнопкой, значок у часов</td><td>Адрес сервера и ключ</td></tr>
+  <tr><td><b>Linux</b></td><td>Консоль плюс веб-интерфейс, служба systemd</td><td>Флаги или тот же конфиг</td></tr>
+  <tr><td><b>Android</b></td><td>Системное подключение со своим сетевым стеком</td><td>Ничего: приложения просто ходят в сеть</td></tr>
+</table>
+
+<p>На компьютере программа поднимает прокси и прописывает переменные окружения
+— иначе Node.js, Python и Go их бы не увидели, они системный прокси не читают.
+На телефоне так нельзя, поэтому там приложение забирает у системы сырые
+IP-пакеты и разбирает их само.</p>
+
+<div class="warn">На Android нет UDP: через SSH он не проходит. Звонки и игры,
+которым нужен UDP, надо выносить в исключения — они пойдут напрямую. Веб и
+мессенджеры работают: приложение отбивает UDP сразу, и они за доли секунды
+переключаются на TCP.</div>
+
+<h2>Как начать</h2>
+
+<ol class="steps">
+  <li>Скачать один файл под свою систему — установщика нет.</li>
+  <li>Открыть настройки и указать адрес сервера и пользователя.</li>
+  <li>Если ключа ещё нет — нажать знак вопроса у поля с ключом: там готовая команда, которая создаст ключ и положит его на сервер.</li>
+  <li>Нажать круглую кнопку. Всё.</li>
+</ol>
+
+<pre><code>curl -LO https://github.com/VITAZGIO/ssh_tunel/releases/latest/download/ssh_tunnel_linux
+chmod +x ssh_tunnel_linux
+./ssh_tunnel_linux -host ТВОЙ_СЕРВЕР -user tunnel -save
+./ssh_tunnel_linux -web</code></pre>
+
+<div class="ok">Ключ сервера проверяется при каждом подключении: подмена по
+дороге не пройдёт незаметно. Для телефона стоит завести отдельный ключ — тогда
+потеря одного устройства не тянет за собой второе.</div>
+
+<h2>Чем пришлось заняться по дороге</h2>
+
+<div class="chips">
+  <span>разбор SOCKS4/4a/5</span><span>HTTP CONNECT</span><span>каналы direct-tcpip</span>
+  <span>пул соединений</span><span>keepalive и переподключение</span><span>поиск процесса по сокету</span>
+  <span>системный прокси Windows</span><span>переменные окружения</span><span>свой сетевой стек под Android</span>
+  <span>тест скорости в несколько потоков</span>
+</div>
+
+<h2>Размер проекта</h2>
+
+<table>
+  <tr><th>Что</th><th>Сколько</th></tr>
+  <tr><td>Код на Go</td><td>49 файлов, около 7 900 строк</td></tr>
+  <tr><td>Android</td><td>Kotlin: сервис, плитка в шторке, выбор приложений</td></tr>
+  <tr><td>Документация</td><td>архитектура, настройка сервера, безопасность, разбор ошибок</td></tr>
+  <tr><td>Сборки</td><td>Windows, Linux amd64 и arm64, APK — собираются автоматически</td></tr>
+</table>
+""",
+    },
+    {
+        "key": "korona",
+        "title": "Корона",
+        "kind": "поделка",
+        "body": """---
+кратко: ARGB-лента на пять метров под потолком. Zigbee-роутер на ESP32-H2, десять цветовых пресетов и пульт на кнопках через один провод.
+теги: ESP32-H2, Zigbee, ARGB, MQTT
+цвет: #b57cff
+---
+
+<p>Лента по периметру комнаты, которая слушается умного дома и не занимает
+Wi-Fi: плата работает Zigbee-роутером, то есть заодно чинит сеть остальным
+устройствам.</p>
+
+<h2>Из чего собрано</h2>
+
+<table>
+  <tr><th>Узел</th><th>Что стоит</th></tr>
+  <tr><td>Мозги</td><td>ESP32-H2 SuperMini, режим Zigbee Router</td></tr>
+  <tr><td>Питание</td><td>12 В на ленту, понижайка на 5 В для платы</td></tr>
+  <tr><td>Данные</td><td>Согласователь уровней 3.3 → 5 В и резистор на линии</td></tr>
+  <tr><td>Пульт</td><td>Шесть кнопок на одном проводе — по сопротивлению</td></tr>
+</table>
+
+<div class="note">Кнопки собраны резисторной лесенкой: каждая даёт своё
+напряжение, плата по нему и понимает, какую нажали. Один провод вместо шести.</div>
+
+<h2>Что умеет</h2>
+
+<div class="cards">
+  <div><b>Десять пресетов</b><p>Отдельные каналы под каждый цвет — переключаются из умного дома одной кнопкой.</p></div>
+  <div><b>Яркость шагами</b><p>Два канала «ярче» и «темнее» с автосбросом, чтобы удерживать нажатие.</p></div>
+  <div><b>Чинит сеть</b><p>Питание от розетки, значит ретранслирует чужой трафик и укрепляет меш.</p></div>
+</div>
+""",
+    },
+    {
+        "key": "magnitola",
+        "title": "Магнитола",
+        "kind": "поделка",
+        "body": """---
+кратко: Автомагнитола стала домашним усилителем. Управляется из умного дома через ИК-светодиод, вклеенный внутрь корпуса напротив штатного приёмника.
+теги: ESP32-C3, MQTT, ИК, звук
+цвет: #ffd84a
+ссылка: https://github.com/VITAZGIO/magnitola
+---
+
+<p>Обычная автомагнитола, колонки и компьютерный блок питания на 12 вольт —
+получился усилитель, который включается голосом и кнопкой в телефоне.</p>
+
+<h2>Как ей управлять</h2>
+
+<p>Пульт у магнитолы инфракрасный, поэтому светодиод поселился прямо внутри
+корпуса — напротив штатного приёмника. Родной пульт при этом продолжает
+работать, а соседние ИК-устройства команд не ловят.</p>
+
+<div class="ok">Плата знает, включена ли магнитола: провод антенны даёт
++12 В при включении, и это напряжение через делитель читается платой.
+Никаких догадок по последней команде.</div>
+
+<h2>Что получилось</h2>
+
+<div class="chips">
+  <span>15 кнопок в умном доме</span><span>датчик «включена»</span>
+  <span>появляется в доме сама</span><span>веб-настройка</span><span>без правки конфигов</span>
+</div>
+
+<h2>Что не сработало</h2>
+
+<ol class="steps">
+  <li>Управление по проводам руля через мультиплексор: магнитола забывала настройки после отключения питания.</li>
+  <li>ИК через готовый хаб: команды ловили соседние устройства, а повторы давали двойные шаги громкости.</li>
+</ol>
+
+<p>Дальше — переезд на плату с Zigbee, чтобы всё жило в одной сети с остальным
+домом.</p>
+""",
+    },
+    {
+        "key": "rele",
+        "title": "Реле под столом",
+        "kind": "поделка",
+        "body": """---
+кратко: Коробка под столешницей: два реле, шесть кнопок на одном проводе, термометр, управление вентилятором и питанием USB.
+теги: ESP32-H2, Zigbee, реле, DS18B20
+цвет: #63f5ad
+---
+
+<p>Всё, что раньше требовало тянуться под стол, теперь нажимается кнопкой
+или командой из умного дома.</p>
+
+<h2>Что внутри</h2>
+
+<table>
+  <tr><th>Выход</th><th>Зачем</th></tr>
+  <tr><td>Два реле</td><td>Свет и розетка рабочего места</td></tr>
+  <tr><td>Вентилятор</td><td>Плавные обороты, а не «вкл-выкл»</td></tr>
+  <tr><td>Питание USB</td><td>Отдельный ключ: можно обесточить хабы разом</td></tr>
+  <tr><td>Термометр</td><td>Температура под столом уходит в дом</td></tr>
+</table>
+
+<div class="note">Шестая кнопка — служебная: короткое нажатие открывает сеть
+для новых устройств, длинное сбрасывает плату к заводскому состоянию.</div>
+""",
+    },
+    {
+        "key": "sebastian",
+        "title": "Себастьян",
+        "kind": "программа",
+        "body": """---
+кратко: Голосовой дворецкий целиком на домашней видеокарте: слышит, думает, управляет светом и отвечает своим голосом. Наружу не уходит ничего.
+теги: LLM, Whisper, XTTS, MCP
+цвет: #ff7a59
+---
+
+<p>Домашний голосовой помощник, собранный из открытых частей и связанный
+своим кодом. Всё крутится на одной видеокарте в виртуалке — ни один запрос
+не покидает квартиру.</p>
+
+<h2>Путь одной фразы</h2>
+
+<ol class="steps">
+  <li>Микрофон отдаёт запись распознавалке речи.</li>
+  <li>Текст уходит в языковую модель.</li>
+  <li>Модель сама решает, дёрнуть ли инструмент: погода, время, состояние дома.</li>
+  <li>Команда уходит в умный дом — только по белому списку устройств.</li>
+  <li>Ответ озвучивается знакомым голосом.</li>
+</ol>
+
+<p>Полный круг «голос → голос» укладывается в 3.7–9 секунд.</p>
+
+<div class="warn">Две большие модели на одной карте одновременно работать не
+могут — скорость падает втрое. Поэтому этапы идут строго по очереди, а не
+параллельно.</div>
+
+<h2>Чему научился по дороге</h2>
+
+<div class="chips">
+  <span>белый список устройств прямо в схеме</span><span>слепок голоса считается один раз</span>
+  <span>размер контекста важнее всего для памяти</span><span>инструменты — первым пунктом промпта</span>
+</div>
+""",
+    },
+    {
+        "key": "panel",
+        "title": "Панель мониторинга",
+        "kind": "поделка",
+        "body": """---
+кратко: Настольная панель с экраном и двенадцатью кнопками: показывает сервер, дёргает реле и рулит подсветкой компьютера по радио.
+теги: ESP32, TFT, RF433, MQTT
+цвет: #35e0f0
+---
+
+<p>Маленький экран и ряд кнопок на столе: видно температуру и обороты, а
+любую из двенадцати кнопок можно повесить на что угодно в умном доме.</p>
+
+<h2>Что показывает</h2>
+
+<div class="cards">
+  <div><b>Сервер</b><p>Температура дисков, обороты вентиляторов, связь.</p></div>
+  <div><b>Кнопки</b><p>Двенадцать событий — каждое ловится домом отдельно.</p></div>
+  <div><b>Радио</b><p>Подсветка компьютера управляется по 433 МГц, без своей прошивки.</p></div>
+</div>
+
+<div class="note">Про сборку: среда разработки крепко держит старые флаги
+компиляции. Если поменял настройки экрана, а цвета остались прежние — надо
+чистить сборку целиком, иначе будешь искать ошибку в проводах.</div>
+""",
+    },
+]
+
+
+def _diy_seed():
+    """Заводит стартовые записи страны DIY — по одному разу каждую."""
+    try:
+        with open(DIY_SEED_FLAG, encoding="utf-8") as fh:
+            done = json.load(fh) or {}
+    except (OSError, ValueError):
+        done = {}
+
+    changed = False
+    for spec in DIY_SEEDS:
+        if done.get(spec["key"]):
+            continue
+        item_id = str(uuid.uuid4())
+        now = time.time()
+        with diy_lock:
+            diy_items[item_id] = {
+                "title": spec["title"],
+                "summary": "",
+                "kind": spec["kind"],
+                "links": [],
+                "body": spec["body"],
+                "assets": [],
+                "cover": False,
+                "hidden": False,
+                "pinned": False,
+                "created": now,
+                "updated": now,
+            }
+            # фотографии заготовки переносим во вложения записи
+            src_dir = os.path.join(DIY_SEED_DIR, spec.get("assets") or "")
+            if spec.get("assets") and os.path.isdir(src_dir):
+                os.makedirs(_diy_asset_dir(item_id), exist_ok=True)
+                for name in sorted(os.listdir(src_dir)):
+                    safe = _diy_safe_name(name)
+                    if not safe:
+                        continue
+                    try:
+                        shutil.copyfile(os.path.join(src_dir, name),
+                                        os.path.join(_diy_asset_dir(item_id), safe))
+                    except OSError:
+                        continue
+                    kind = ("image" if os.path.splitext(safe)[1].lower() in DIY_IMAGE_EXT
+                            else "file")
+                    size = os.path.getsize(os.path.join(_diy_asset_dir(item_id), safe))
+                    diy_items[item_id]["assets"].append(
+                        {"name": safe, "kind": kind, "size": size})
+            _diy_write_index()
+        done[spec["key"]] = True
+        changed = True
+
+    if changed:
+        try:
+            with open(DIY_SEED_FLAG, "w", encoding="utf-8") as fh:
+                json.dump(done, fh, ensure_ascii=False)
+        except OSError:
+            pass
+
+
+_diy_seed()
 
 
 def _diy_clean_links(raw):
@@ -9775,8 +10298,15 @@ def vg_player_js():
 
   const save = () => {
     try {
+      const t = queue[idx] || null;
       localStorage.setItem(KEY, JSON.stringify({
-        id: queue[idx] ? queue[idx].id : null,
+        id: t ? t.id : null,
+        // адрес и подписи храним прямо тут: на новой странице трек ставится
+        // сразу, не дожидаясь ответа со списком — из-за него и были заминки
+        url: t ? t.url : "",
+        title: t ? t.title : "",
+        artist: t ? t.artist : "",
+        folder: t ? t.folder : "",
         time: audio.currentTime || 0,
         playing: !audio.paused,
         vol: audio.volume,
@@ -9849,7 +10379,18 @@ def vg_player_js():
       save(); fire();
       return shuffle;
     },
-    open() { if (box) setFolded(false); },
+    /* Виджет сам не вылезает: его включают кнопкой в кабинете или на музыке,
+       и с тех пор он ездит по всем страницам, пока его не выбросят в корзину. */
+    open() {
+      try { localStorage.setItem("vgPlayerOn", "1"); } catch (e) { /* и ладно */ }
+      if (!box) build();
+      setFolded(false);
+      fetchList(true);
+    },
+    hide() {
+      try { localStorage.setItem("vgPlayerOn", "0"); } catch (e) { /* и ладно */ }
+      if (box) { box.remove(); box = null; }
+    },
     reload: () => fetchList(true),
   };
   window.VGP = api;
@@ -9901,22 +10442,61 @@ def vg_player_js():
     if (s && typeof s.vol === "number") audio.volume = s.vol;
     if (s && s.shuffle) shuffle = true;
     if (!s || !s.id) return;
-    await fetchList();
-    const at = queue.findIndex((t) => t.id === s.id);
-    if (at < 0) return;
-    idx = at;
-    audio.src = queue[at].url;
-    audio.addEventListener("loadedmetadata", function once() {
-      audio.removeEventListener("loadedmetadata", once);
-      if (s.time) audio.currentTime = s.time;
-      if (s.playing) audio.play().catch(() => { if (box) box.classList.add("vgp-wake"); });
-    }, { once: true });
-    media(); fire();
+
+    // Сначала — звук: ставим трек из сохранённого адреса, без похода на сервер.
+    if (s.url) {
+      queue = [{ id: s.id, title: s.title || "", artist: s.artist || "",
+                 folder: s.folder || "", url: s.url }];
+      idx = 0;
+      audio.src = s.url;
+      audio.addEventListener("loadedmetadata", function once() {
+        audio.removeEventListener("loadedmetadata", once);
+        if (s.time) audio.currentTime = s.time;
+        if (s.playing) audio.play().catch(() => { if (box) box.classList.add("vgp-wake"); });
+      }, { once: true });
+      media(); fire();
+    }
+
+    // А полный список подтянем следом — он нужен только для «дальше» и списка.
+    const list = await fetchList();
+    const at = list.findIndex((t) => t.id === s.id);
+    if (at >= 0) {
+      idx = at;
+      if (!s.url) {
+        audio.src = list[at].url;
+        audio.addEventListener("loadedmetadata", function once() {
+          audio.removeEventListener("loadedmetadata", once);
+          if (s.time) audio.currentTime = s.time;
+          if (s.playing) audio.play().catch(() => { if (box) box.classList.add("vgp-wake"); });
+        }, { once: true });
+      }
+      media(); fire();
+    }
   };
 
   /* ── виджет ────────────────────────────────────────────────────── */
-  let box = null, folded = true;
+  let box = null, folded = true, bin = null;
   const paintFns = [];
+
+  /* Корзина, в которую можно выбросить сам плеер. Появляется только когда
+     кружок подержали на месте — чтобы не мешала обычному перетаскиванию. */
+  const showBin = () => {
+    if (bin) return;
+    bin = document.createElement("div");
+    bin.className = "vgp-bin";
+    bin.innerHTML =
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" ' +
+      'stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M4 7h16M9 7V5h6v2m-8 0 1 13h8l1-13"/></svg><span>убрать плеер</span>';
+    document.body.appendChild(bin);
+    requestAnimationFrame(() => bin && bin.classList.add("in"));
+  };
+  const hideBin = () => { if (bin) { bin.remove(); bin = null; } };
+  const overBin = (x, y) => {
+    if (!bin) return false;
+    const r = bin.getBoundingClientRect();
+    return x >= r.left - 26 && x <= r.right + 26 && y >= r.top - 26 && y <= r.bottom + 26;
+  };
   const paint = () => paintFns.forEach((f) => { try { f(); } catch (e) {} });
   const setFolded = (v) => {
     folded = v;
@@ -10024,6 +10604,20 @@ def vg_player_js():
   .vgp-ring .bg { stroke:rgba(255,255,255,.12); }
   .vgp-ring .fg { stroke:#2de2ff; stroke-linecap:round; filter:drop-shadow(0 0 5px rgba(45,226,255,.8));
                   transition:stroke-dashoffset .25s linear; }
+  /* корзина под плеером: выехала — значит можно выбросить */
+  .vgp-bin { position:fixed; left:50%; bottom:26px; z-index:2147483001;
+             display:flex; align-items:center; gap:10px; padding:13px 20px;
+             transform:translate(-50%, 26px); opacity:0; pointer-events:none;
+             color:#ff9aa6; font:700 .74rem "Cascadia Code",Consolas,monospace;
+             letter-spacing:.04em; border:1px dashed rgba(255,90,110,.5); border-radius:14px;
+             background:rgba(20,10,14,.92); backdrop-filter:blur(8px);
+             transition:transform .22s cubic-bezier(.22,1,.36,1), opacity .22s, background .16s,
+                        border-color .16s, color .16s; }
+  .vgp-bin.in { transform:translate(-50%, 0); opacity:1; }
+  .vgp-bin.hot { color:#fff; border-style:solid; border-color:#ff5a6e;
+                 background:rgba(190,40,60,.92); transform:translate(-50%, 0) scale(1.06); }
+  .vgp-bin svg { width:17px; height:17px; }
+
   /* автоплей не пустили — зовём нажать */
   .vgp.vgp-wake { animation:vgpWake 1.4s ease-in-out infinite; }
   @keyframes vgpWake { 0%,100%{ box-shadow:0 24px 70px rgba(0,0,0,.55), 0 0 0 0 rgba(45,226,255,.5) }
@@ -10098,24 +10692,35 @@ def vg_player_js():
     q(".vgp-head").addEventListener("pointerdown", (e) => {
       if (e.target.closest("button")) return;
       const r = box.getBoundingClientRect();
-      drag = { dx: e.clientX - r.left, dy: e.clientY - r.top, moved: false };
+      drag = { dx: e.clientX - r.left, dy: e.clientY - r.top, moved: false, hold: 0 };
       box.classList.add("vgp-drag");
       try { q(".vgp-head").setPointerCapture(e.pointerId); } catch (err) {}
+      // Подержал на месте — снизу выезжает корзина: значит плеер можно
+      // выбросить. Если сразу потащил, корзина не появляется и не мешает.
+      drag.hold = setTimeout(() => { if (drag && !drag.moved) showBin(); }, 420);
     });
     q(".vgp-head").addEventListener("pointermove", (e) => {
       if (!drag) return;
       const x = Math.min(innerWidth - box.offsetWidth - 6, Math.max(6, e.clientX - drag.dx));
       const y = Math.min(innerHeight - box.offsetHeight - 6, Math.max(6, e.clientY - drag.dy));
       if (Math.abs(x - (parseFloat(box.style.left) || 0)) > 2 ||
-          Math.abs(y - (parseFloat(box.style.top) || 0)) > 2) drag.moved = true;
+          Math.abs(y - (parseFloat(box.style.top) || 0)) > 2) {
+        if (!drag.moved && !bin) clearTimeout(drag.hold);   // потащили — корзину не зовём
+        drag.moved = true;
+      }
       box.style.left = x + "px"; box.style.top = y + "px";
       box.style.right = "auto"; box.style.bottom = "auto";
+      if (bin) bin.classList.toggle("hot", overBin(e.clientX, e.clientY));
     });
     const drop = (e) => {
       if (!drag) return;
+      clearTimeout(drag.hold);
       box.classList.remove("vgp-drag");
       const moved = drag.moved;
       drag = null;
+      // бросили в корзину — плеер уходит с глаз до следующего включения
+      if (bin && overBin(e.clientX, e.clientY)) { hideBin(); api.hide(); return; }
+      hideBin();
       try { localStorage.setItem(POS, JSON.stringify({
         x: parseFloat(box.style.left) || 0, y: parseFloat(box.style.top) || 0 })); } catch (err) {}
       // короткий тык по свёрнутому кружку — развернуть
@@ -10130,7 +10735,7 @@ def vg_player_js():
     q("[data-prev]").addEventListener("click", () => api.prev());
     q("[data-shuf]").addEventListener("click", () => api.shuffle());
     q("[data-list]").addEventListener("click", async () => {
-      await fetchList();
+      await fetchList(true);            // всегда свежий: могли докинуть треков
       rows.classList.toggle("open");
       q("[data-list]").classList.toggle("on", rows.classList.contains("open"));
       drawRows();
@@ -10190,7 +10795,11 @@ def vg_player_js():
   };
 
   const start = () => {
-    if (!headless) build();
+    // Показываемся только если плеер включали кнопкой. Звук при этом живёт
+    // всегда: трек, начатый на музыке, продолжается и без виджета.
+    let on = false;
+    try { on = localStorage.getItem("vgPlayerOn") === "1"; } catch (e) { on = false; }
+    if (!headless && on) build();
     resume();
   };
   if (document.readyState === "loading")
@@ -10283,8 +10892,128 @@ def diy_page():
         .btn svg { width: 16px; height: 16px; flex: none; }
         .bar .spacer { margin-left: auto; }
 
-        .grid { display: grid; gap: 18px; margin: 26px 0 0;
-                grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
+        /* ── Десять способов листать творения ───────────────────────────
+           Разметка карточки одна и та же, меняется только раскладка: класс
+           на самой ленте решает, сетка это, барабан, колода или соты. Номер
+           запоминается, чтобы страница открывалась в выбранном виде. */
+        .modes { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 26px 0 4px; }
+        .modes .lbl { color: var(--muted); font-size: .68rem; letter-spacing: .14em;
+                      text-transform: uppercase; margin-right: 4px; }
+        .modes button { width: 34px; height: 34px; display: grid; place-items: center; cursor: pointer;
+                        color: #9fb0c6; font: 700 .8rem "Cascadia Code", Consolas, monospace;
+                        border: 1px solid var(--line); border-radius: 10px;
+                        background: rgba(255,255,255,.04); transition: .16s; }
+        .modes button:hover { color: #fff; border-color: rgba(45,226,255,.5); background: rgba(45,226,255,.1); }
+        .modes button.on { color: #04121c; border-color: var(--pc);
+                           background: linear-gradient(160deg,#7df0ff,#26cfe8); }
+        .modes .name { margin-left: 6px; color: #cfe0f0; font-size: .78rem; }
+        .modes .name b { color: var(--pc); }
+        .navs { display: flex; gap: 8px; margin-left: auto; }
+        .navs button { width: 34px; height: 34px; }
+
+        .grid { margin: 18px 0 0; }
+        /* 1 · сетка */
+        .grid.m-grid { display: grid; gap: 18px;
+                       grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
+        /* 2 · барабан: горизонтальная лента с прилипанием */
+        .grid.m-drum { display: flex; gap: 16px; overflow-x: auto; scroll-snap-type: x mandatory;
+                       padding: 4px 2px 16px; scrollbar-width: thin; }
+        .grid.m-drum .work { flex: none; width: min(340px, 78vw); scroll-snap-align: center; }
+        /* 3 · колода: стопка карт, листается кнопками */
+        .grid.m-deck { position: relative; height: 560px; display: block; perspective: 1400px; }
+        .grid.m-deck .work, .grid.m-fan .work { background: linear-gradient(160deg, #141d2e, #0a1019); }
+        .grid.m-deck .work { position: absolute; left: 50%; top: 0; width: min(360px, 86vw);
+                             transform-origin: 50% 100%;
+                             transition: transform .45s cubic-bezier(.22,1,.36,1), opacity .35s;
+                             will-change: transform; }
+        .grid.m-deck .work[data-off="0"] { z-index: 5; }
+        .grid.m-deck .work[data-off="1"] { z-index: 4; }
+        .grid.m-deck .work[data-off="2"] { z-index: 3; }
+        .grid.m-deck .work[data-off="3"] { z-index: 2; }
+        /* 4 · лента: одна карточка на экран, прокрутка с прилипанием */
+        .grid.m-reel { display: block; height: 76vh; overflow-y: auto; scroll-snap-type: y mandatory;
+                       border-radius: 18px; }
+        .grid.m-reel .work { height: 76vh; scroll-snap-align: start; margin-bottom: 14px;
+                             flex-direction: row; }
+        .grid.m-reel .shot { flex: 1 1 55%; aspect-ratio: auto; border-bottom: 0;
+                             border-right: 1px solid var(--line); }
+        .grid.m-reel .body { flex: 1 1 45%; justify-content: center; padding: 30px; }
+        .grid.m-reel .work h2 { font-size: 1.7rem; }
+        @media (max-width: 720px) { .grid.m-reel .work { flex-direction: column; }
+                                    .grid.m-reel .shot { flex: none; height: 42%; border-right: 0;
+                                                         border-bottom: 1px solid var(--line); } }
+        /* 5 · мозаика: плотная кладка колонками */
+        .grid.m-mosaic { column-count: 3; column-gap: 16px; }
+        .grid.m-mosaic .work { break-inside: avoid; margin-bottom: 16px; display: inline-flex; width: 100%; }
+        @media (max-width: 980px) { .grid.m-mosaic { column-count: 2; } }
+        @media (max-width: 640px) { .grid.m-mosaic { column-count: 1; } }
+        /* 6 · веер: боковые карточки уходят в перспективу */
+        .grid.m-fan { display: flex; gap: 26px; overflow-x: auto; scroll-snap-type: x mandatory;
+                      padding: 30px 32vw 30px; perspective: 1200px; scrollbar-width: none; }
+        .grid.m-fan::-webkit-scrollbar { display: none; }
+        .grid.m-fan .work { flex: none; width: min(320px, 72vw); scroll-snap-align: center;
+                            transition: transform .25s ease, opacity .25s ease; will-change: transform; }
+        /* 7 · терминал: строчки как вывод команды */
+        .grid.m-term { display: block; border: 1px solid var(--line); border-radius: 14px;
+                       background: rgba(4,9,18,.75); padding: 14px 16px; font-size: .82rem; }
+        .t-row { padding: 9px 4px; border-bottom: 1px dashed rgba(255,255,255,.08); cursor: pointer; }
+        .t-row:last-child { border-bottom: 0; }
+        .t-row:hover { background: rgba(45,226,255,.06); }
+        .t-row .ln { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+        .t-row .ar { color: var(--ac, var(--pc)); }
+        .t-row .nm { color: #eaf6ff; font-weight: 700; }
+        .t-row .kd { color: #6b7c8f; }
+        .t-row .tg { color: #7f93a8; }
+        .t-row .more { max-height: 0; overflow: hidden; transition: max-height .3s ease; }
+        .t-row.open .more { max-height: 460px; }
+        .t-row .more div { padding: 10px 0 6px 22px; color: var(--muted); line-height: 1.6; }
+        .t-row .more img { max-width: 260px; border-radius: 8px; border: 1px solid var(--line);
+                           margin: 8px 0 0 22px; display: block; }
+        .t-row .more .go { margin: 10px 0 4px 22px; }
+        /* 8 · соты */
+        .grid.m-hex { display: flex; flex-wrap: wrap; gap: 14px 10px; justify-content: center;
+                      padding: 10px 0 30px; }
+        .grid.m-hex .hex { position: relative; width: 210px; height: 240px; cursor: pointer;
+                           clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+                           background: linear-gradient(160deg, rgba(25,32,48,.95), rgba(10,15,26,.95));
+                           display: grid; place-items: center; text-align: center; padding: 26px 18px;
+                           transition: transform .22s, filter .22s; }
+        .grid.m-hex .hex:nth-child(even) { margin-top: 34px; }
+        .grid.m-hex .hex:hover { transform: translateY(-5px) scale(1.03); }
+        .grid.m-hex .hex .fill { position: absolute; inset: 0; background: center/cover no-repeat;
+                                 opacity: .32; filter: saturate(1.1); }
+        .grid.m-hex .hex .glow { position: absolute; inset: 0;
+                                 background: radial-gradient(70% 60% at 50% 0%, var(--ac), transparent 70%);
+                                 opacity: .22; }
+        .grid.m-hex .hex .in { position: relative; z-index: 2; }
+        .grid.m-hex .hex b { display: block; font-size: .96rem; color: #f2f8ff; }
+        .grid.m-hex .hex span { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical;
+                                overflow: hidden; margin-top: 6px; color: #93a3b8;
+                                font-size: .68rem; line-height: 1.5; }
+        /* 9 · хроника */
+        .grid.m-time { display: block; position: relative; padding-left: 26px; }
+        .grid.m-time::before { content: ""; position: absolute; left: 7px; top: 6px; bottom: 6px; width: 2px;
+                               background: linear-gradient(180deg, var(--pc), rgba(45,226,255,.05)); }
+        .grid.m-time .work { margin-bottom: 16px; }
+        .grid.m-time .work::after { content: ""; position: absolute; left: -25px; top: 26px;
+                                    width: 11px; height: 11px; border-radius: 50%;
+                                    background: var(--ac); box-shadow: 0 0 12px var(--ac); }
+        .grid.m-time .shot { display: none; }
+        /* 10 · бенто: первая карточка крупная */
+        .grid.m-bento { display: grid; gap: 14px; grid-auto-rows: 210px;
+                        grid-template-columns: repeat(4, 1fr); }
+        .grid.m-bento .work { grid-column: span 2; grid-row: span 1; }
+        .grid.m-bento .work:nth-child(1) { grid-column: span 2; grid-row: span 2; }
+        .grid.m-bento .work:nth-child(4) { grid-column: span 4; }
+        .grid.m-bento .work .shot { flex: 1; aspect-ratio: auto; }
+        .grid.m-bento .work .body { flex: none; }
+        .grid.m-bento .work p, .grid.m-bento .work .tagrow,
+        .grid.m-bento .work .open-row { display: none; }
+        .grid.m-bento .work:nth-child(1) p,
+        .grid.m-bento .work:nth-child(1) .tagrow { display: flex; }
+        .grid.m-bento .work:nth-child(1) p { display: block; }
+        @media (max-width: 900px) { .grid.m-bento { grid-template-columns: repeat(2, 1fr); }
+                                    .grid.m-bento .work:nth-child(4) { grid-column: span 2; } }
 
         /* Цвет карточки задаётся в шапке кода строкой «цвет:», отсюда --ac. */
         .work { --ac: var(--pc); position: relative; display: flex; flex-direction: column;
@@ -10311,9 +11040,17 @@ def diy_page():
         .tagrow i { font-style: normal; padding: 3px 9px; border-radius: 7px; font-size: .68rem;
                     color: #cfe0f0; background: rgba(255,255,255,.05);
                     border: 1px solid var(--line); }
-        .shot.none { display: grid; place-items: center; color: #3d4759;
-                     font: 700 .74rem "Cascadia Code", Consolas, monospace;
-                     letter-spacing: .2em; }
+        /* Своя обложка, когда фото нет: цвет записи, штриховка и монограмма. */
+        .shot.none { display: grid; place-items: center; overflow: hidden;
+                     background:
+                       repeating-linear-gradient(135deg, rgba(255,255,255,.03) 0 10px, transparent 10px 20px),
+                       radial-gradient(120% 100% at 20% 0%, color-mix(in srgb, var(--ac) 38%, transparent), transparent 68%),
+                       linear-gradient(160deg, rgba(22,30,46,.95), rgba(9,14,24,.95)); }
+        .shot.none .mono { font: 800 2.4rem "Cascadia Code", Consolas, monospace;
+                           letter-spacing: -.04em; text-transform: uppercase;
+                           color: color-mix(in srgb, var(--ac) 75%, #ffffff);
+                           text-shadow: 0 0 26px color-mix(in srgb, var(--ac) 45%, transparent);
+                           opacity: .9; }
         .body { flex: 1; display: flex; flex-direction: column; gap: 10px; padding: 16px 18px 18px; }
         .kind { align-self: flex-start; padding: 3px 10px; color: #9fe8ff;
                 background: rgba(45,226,255,.12); border-radius: 999px;
@@ -10454,7 +11191,8 @@ def diy_page():
         <h1>СТРАНА DIY</h1>
 
         <div class="bar" id="bar"></div>
-        <section class="grid" id="grid"></section>
+        <div class="modes" id="modes"></div>
+        <section class="grid m-grid" id="grid"></section>
         <p class="empty" id="empty" hidden>Пока пусто</p>
       </main>
 
@@ -10597,6 +11335,70 @@ def diy_page():
           '<a href="' + esc(l.url) + '" target="_blank" rel="noopener">' +
           esc(l.label) + "</a>").join("");
 
+        /* ── Десять способов листать ──────────────────────────────────
+           Разметка карточки общая, меняется раскладка и — у колоды, веера и
+           барабана — ещё и поведение. Выбранный номер живёт в localStorage. */
+        const MODES = [
+          ["Сетка", "m-grid"], ["Барабан", "m-drum"], ["Колода", "m-deck"],
+          ["Лента", "m-reel"], ["Мозаика", "m-mosaic"], ["Веер", "m-fan"],
+          ["Терминал", "m-term"], ["Соты", "m-hex"], ["Хроника", "m-time"],
+          ["Бенто", "m-bento"],
+        ];
+        let mode = 1, deckAt = 0;
+        try { mode = Math.min(10, Math.max(1, +localStorage.getItem("vgDiyMode") || 1)); }
+        catch (e) { mode = 1; }
+
+        const shotSrc = (w) => w.shot
+          ? "/diy/asset/" + w.id + "/" + encodeURIComponent(w.shot)
+          : (w.cover ? "/diy/cover/" + w.id : "");
+
+        const drawModes = () => {
+          const nav = (mode === 2 || mode === 3 || mode === 6)
+            ? '<span class="navs"><button data-step="-1" title="Назад">‹</button>' +
+              '<button data-step="1" title="Вперёд">›</button></span>'
+            : "";
+          $("modes").innerHTML = '<span class="lbl">вид</span>' +
+            MODES.map((m, i) =>
+              '<button data-mode="' + (i + 1) + '"' + (mode === i + 1 ? ' class="on"' : "") +
+              ">" + (i + 1) + "</button>").join("") +
+            '<span class="name"><b>' + MODES[mode - 1][0] + "</b></span>" + nav;
+        };
+
+        /* Колода: верхняя карта прямо, следующие уходят вглубь. */
+        const layDeck = () => {
+          const cards = [...$("grid").querySelectorAll(".work")];
+          cards.forEach((el, i) => {
+            const off = (i - deckAt + cards.length) % cards.length;
+            el.dataset.off = Math.min(off, 4);
+            const back = Math.min(off, 4);
+            el.style.transform = "translateX(-50%) translateY(" + (back * 16) + "px) " +
+              "scale(" + (1 - back * .05) + ") rotateX(" + (back * 2) + "deg)";
+            el.style.opacity = off > 3 ? "0" : String(1 - back * .16);
+            el.style.pointerEvents = off === 0 ? "auto" : "none";
+          });
+        };
+
+        /* Веер: чем дальше карточка от середины, тем сильнее повёрнута. */
+        const layFan = () => {
+          const grid = $("grid");
+          const mid = grid.scrollLeft + grid.clientWidth / 2;
+          grid.querySelectorAll(".work").forEach((el) => {
+            const c = el.offsetLeft + el.offsetWidth / 2;
+            const k = Math.max(-1.6, Math.min(1.6, (c - mid) / (el.offsetWidth * 1.15)));
+            el.style.transform = "rotateY(" + (-k * 34) + "deg) scale(" + (1 - Math.abs(k) * .16) + ")" +
+              " translateZ(" + (-Math.abs(k) * 90) + "px)";
+            el.style.opacity = String(1 - Math.abs(k) * .35);
+          });
+        };
+
+        const step = (dir) => {
+          const grid = $("grid");
+          if (mode === 3) { const n = grid.querySelectorAll(".work").length;
+                            if (n) { deckAt = (deckAt + dir + n) % n; layDeck(); } return; }
+          const card = grid.querySelector(".work");
+          if (card) grid.scrollBy({ left: dir * (card.offsetWidth + 22), behavior: "smooth" });
+        };
+
         const drawGrid = () => {
           const grid = $("grid");
           const list = asGuest ? works.filter((w) => !w.hidden) : works;
@@ -10604,6 +11406,45 @@ def diy_page():
           $("empty").textContent = admin()
             ? "Пока пусто. Нажми «Добавить» — и появится первая запись."
             : "Пока пусто";
+          grid.className = "grid " + MODES[mode - 1][1];
+          drawModes();
+
+          /* Терминал: строчки как вывод команды, тык раскрывает описание. */
+          if (mode === 7) {
+            grid.innerHTML = list.map((w) => {
+              const src = shotSrc(w);
+              return '<div class="t-row" data-row="' + w.id + '"' +
+                (w.accent ? ' style="--ac:' + esc(w.accent) + '"' : "") + '>' +
+                '<div class="ln"><span class="ar">▸</span><span class="nm">' + esc(w.title) + "</span>" +
+                '<span class="kd">[' + esc(w.kind) + "]</span>" +
+                '<span class="tg">' + esc((w.tags || []).join(" · ")) + "</span></div>" +
+                '<div class="more"><div>' + esc(w.summary || "") + "</div>" +
+                (src ? '<img src="' + src + '" alt="" loading="lazy">' : "") +
+                '<div class="go"><button class="btn" data-open="' + w.id + '">Открыть статью →</button></div>' +
+                "</div></div>";
+            }).join("");
+            grid.querySelectorAll(".t-row").forEach((el) =>
+              el.addEventListener("click", (e) => {
+                if (e.target.closest("[data-open]")) return;
+                el.classList.toggle("open");
+                el.querySelector(".ar").textContent = el.classList.contains("open") ? "▾" : "▸";
+              }));
+            return;
+          }
+
+          /* Соты: шестиугольники с названием и парой слов. */
+          if (mode === 8) {
+            grid.innerHTML = list.map((w) => {
+              const src = shotSrc(w);
+              return '<div class="hex" data-open="' + w.id + '"' +
+                (w.accent ? ' style="--ac:' + esc(w.accent) + '"' : "") + '>' +
+                (src ? '<div class="fill" style="background-image:url(' + src + ')"></div>' : "") +
+                '<div class="glow"></div><div class="in"><b>' + esc(w.title) + "</b>" +
+                "<span>" + esc(w.summary || "") + "</span></div></div>";
+            }).join("");
+            return;
+          }
+
           grid.innerHTML = list.map((w) => {
             // Обложка: сперва картинка, названная в шапке кода, потом старая
             // загруженная обложка, и только если нет ни той ни другой — заглушка.
@@ -10618,7 +11459,12 @@ def diy_page():
                   '<div class="shot-bg" style="background-image:url(' + src + ')"></div>' +
                   '<img src="' + src + '" alt="" loading="lazy">' +
                 '</div>'
-              : '<div class="shot none" data-open="' + w.id + '">без фото</div>';
+              // Нет картинки — рисуем свою: градиент из цвета записи, косая
+              // штриховка и монограмма. Пустая плашка «без фото» смотрелась
+              // дырой, особенно в сотах и бенто.
+              : '<div class="shot none" data-open="' + w.id + '">' +
+                  '<span class="mono">' + esc((w.title || "?").trim().slice(0, 2)) + "</span>" +
+                "</div>";
             const flags = [];
             if (w.hidden) flags.push('<span class="flag hid">черновик</span>');
             if (w.pinned) flags.push('<span class="flag pin">закреплено</span>');
@@ -10643,7 +11489,32 @@ def diy_page():
               '<div class="open-row"><button class="btn" data-open="' + w.id + '">Открыть статью →</button></div>' +
               tools + "</div></article>";
           }).join("");
+
+          // Колоде и вееру нужна раскладка после отрисовки
+          grid.onscroll = null;
+          if (mode === 3) { deckAt = Math.min(deckAt, Math.max(0, list.length - 1)); layDeck(); }
+          if (mode === 6) { layFan(); grid.onscroll = layFan; requestAnimationFrame(layFan); }
         };
+
+        /* Переключение вида и стрелки листания */
+        $("modes").addEventListener("click", (e) => {
+          const m = e.target.closest("[data-mode]");
+          if (m) {
+            mode = +m.dataset.mode;
+            deckAt = 0;
+            try { localStorage.setItem("vgDiyMode", String(mode)); } catch (err) { /* и ладно */ }
+            drawGrid();
+            return;
+          }
+          const s = e.target.closest("[data-step]");
+          if (s) step(+s.dataset.step);
+        });
+        addEventListener("keydown", (e) => {
+          if (e.target.matches("input, textarea, select")) return;
+          if (e.key === "ArrowRight") step(1);
+          if (e.key === "ArrowLeft") step(-1);
+        });
+        addEventListener("resize", () => { if (mode === 6) layFan(); });
 
         const draw = () => { drawBar(); drawGrid(); };
 
