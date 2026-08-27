@@ -7885,9 +7885,11 @@ def drop_page():
                 ${it.music ? `
                   ${isFolder ? "" : `<button class="act" data-act="view" title="Слушать">▶</button>`}
                   <button class="act" data-act="dl" title="Скачать">⤓</button>
+                  <button class="act" data-act="ren" title="${isFolder ? "Переименовать папку" : "Переименовать трек"}">✎</button>
                   <button class="act del" data-act="del" title="Удалить из фонотеки">🗑</button>
                 ` : it.special ? `
                   <button class="act" data-act="zip" title="Скачать папку архивом">⤓</button>
+                  <button class="act nodel" data-act="noren" title="Эту папку переименовать нельзя">✎</button>
                   <button class="act nodel" data-act="nodel" title="Эту папку удалить нельзя">🗑</button>
                 ` : `
                 ${isText ? `<button class="act" data-act="copy" title="Копировать">⧉</button>` : ""}
@@ -8592,6 +8594,11 @@ def drop_page():
             return;
           }
 
+          if (act === "noren") {
+            toast("Папку MUSIK переименовать нельзя — по имени её находит плеер", true);
+            return;
+          }
+
           if (act === "del") {
             const what = item.music
               ? (item.kind === "folder"
@@ -8635,8 +8642,21 @@ def drop_page():
               saving = true;
               const name = input.value.trim() ? input.value.trim() + ext : "";
               if (name && name !== item.name) {
-                try { await api("/api/drop/" + id, { method: "PATCH", headers: { "Content-Type": "application/json" },
-                                                     body: JSON.stringify({ name }) }); }
+                // Треки и папки фонотеки живут не в дропе, у них свои адреса.
+                // Имя трека показано как «исполнитель — название»: если тире
+                // на месте, так его и разбираем обратно.
+                let url = "/api/drop/" + id, patch = { name };
+                if (item.music && id.startsWith("mf_")) {
+                  url = "/api/music/folder/" + id.slice(3);
+                } else if (item.music && id.startsWith("mt_")) {
+                  const cut = name.indexOf(" — ");
+                  url = "/api/music/" + id.slice(3);
+                  patch = cut > 0
+                    ? { artist: name.slice(0, cut), title: name.slice(cut + 3) }
+                    : { title: name };
+                }
+                try { await api(url, { method: "PATCH", headers: { "Content-Type": "application/json" },
+                                       body: JSON.stringify(patch) }); }
                 catch (err) { toast(err.message, true); }
               }
               load();
