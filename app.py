@@ -12913,13 +12913,13 @@ def servers_page():
             <!-- ── провода ────────────────────────────────────────────
                  Верхняя ветка: сервисы уходят наружу только через свой
                  сервер. Нижняя: обычный домашний трафик идёт напрямую. -->
-            <path id="p1" class="wire lit" d="M470 118 H598"/>                       <!-- туннели → VPS -->
-            <path id="p2" class="wire lit" d="M812 118 C862 118, 880 150, 880 196"/> <!-- VPS → интернет -->
+            <path id="p1" class="wire lit" d="M470 118 H590"/>                       <!-- туннели → VPS -->
+            <path id="p2" class="wire lit" d="M822 118 C868 118, 880 150, 880 196"/> <!-- VPS → интернет -->
             <path id="p3" class="wire warm" d="M300 300 H880 M880 300 V244"/>        <!-- роутер → интернет напрямую -->
-            <path id="p4" class="wire lit" d="M170 148 C170 118, 200 118, 250 118"/> <!-- Proxmox → туннели -->
-            <path id="p5" class="wire lit" d="M170 232 C170 118, 200 118, 250 118"/> <!-- Orange Pi → туннели -->
-            <path id="p6" class="wire dim" d="M170 190 H236 M236 190 V290 M236 290 H300"/> <!-- машины ↔ роутер -->
-            <path id="p7" class="wire warm" d="M300 340 H236 M236 340 V318"/>        <!-- устройства → роутер -->
+            <path id="p4" class="wire lit" d="M194 148 C194 118, 218 118, 250 118"/> <!-- Proxmox → туннели -->
+            <path id="p5" class="wire lit" d="M194 232 C194 118, 218 118, 250 118"/> <!-- Orange Pi → туннели -->
+            <path id="p6" class="wire dim" d="M194 190 H236 M236 190 V290"/> <!-- машины ↔ роутер -->
+            <path id="p7" class="wire warm" d="M330 346 C314 346, 300 340, 300 330"/>        <!-- устройства → роутер -->
 
             <!-- бегущие пакеты: на каждом проводе свои -->
             <circle r="3.4" class="pkt"><animateMotion dur="1.9s" repeatCount="indefinite"><mpath href="#p1"/></animateMotion></circle>
@@ -12936,17 +12936,17 @@ def servers_page():
             <text class="lane" x="250" y="74">через свой сервер · снаружи видно только его</text>
 
             <g>
-              <rect class="n-box ok" x="26" y="88" width="144" height="60" rx="14"/>
+              <rect class="n-box ok" x="26" y="88" width="168" height="60" rx="14"/>
               <circle cx="47" cy="112" r="4" fill="#63f5ad" class="pulse"/>
               <text class="n-t" x="63" y="116">Proxmox</text>
-              <text class="n-s" x="41" y="134">виртуалки и видеокарта</text>
+              <text class="n-s" x="39" y="134">виртуалки и видеокарта</text>
             </g>
 
             <g>
-              <rect class="n-box" x="26" y="202" width="144" height="60" rx="14"/>
+              <rect class="n-box" x="26" y="202" width="168" height="60" rx="14"/>
               <circle cx="47" cy="226" r="4" fill="#ffd84a" class="pulse"/>
               <text class="n-t" x="63" y="230">Orange Pi</text>
-              <text class="n-s" x="41" y="248">умный дом · MQTT</text>
+              <text class="n-s" x="39" y="248">умный дом · MQTT</text>
             </g>
 
             <g>
@@ -12957,10 +12957,10 @@ def servers_page():
             </g>
 
             <g>
-              <rect class="n-box pc" x="598" y="88" width="214" height="60" rx="14"/>
-              <circle cx="619" cy="112" r="4" fill="#2de2ff" class="pulse"/>
-              <text class="n-t" x="635" y="116">Сервер · Амстердам</text>
-              <text class="n-s" x="613" y="134">домены, сертификаты, выход в сеть</text>
+              <rect class="n-box pc" x="590" y="88" width="232" height="60" rx="14"/>
+              <circle cx="611" cy="112" r="4" fill="#2de2ff" class="pulse"/>
+              <text class="n-t" x="627" y="116">Сервер · Амстердам</text>
+              <text class="n-s" x="605" y="134">домены, сертификаты, выход в сеть</text>
             </g>
 
             <!-- ── интернет ───────────────────────────────────────── -->
@@ -13128,6 +13128,32 @@ def servers_page():
       (() => {
         "use strict";
         const slow = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+        /* подписи в схеме — по своим рамкам
+           Схема нарисована в жёстких координатах, а шрифт у всех разный:
+           где-то буквы шире, и строка вылезала за коробку. Поэтому меряем
+           каждую подпись и, если не влезла, ужимаем ровно по месту. */
+        const fitFlow = () => {
+          document.querySelectorAll(".mapbox svg g").forEach((g) => {
+            const box = g.querySelector("rect");
+            if (!box) return;
+            const edge = +box.getAttribute("x") + +box.getAttribute("width");
+            g.querySelectorAll("text").forEach((t) => {
+              t.removeAttribute("textLength");
+              if (t.getAttribute("text-anchor") === "middle") return;
+              const room = edge - +t.getAttribute("x") - 12;
+              let wide = 0;
+              try { wide = t.getComputedTextLength(); } catch (e) { return; }
+              if (room > 20 && wide > room) {
+                t.setAttribute("textLength", room);
+                t.setAttribute("lengthAdjust", "spacingAndGlyphs");
+              }
+            });
+          });
+        };
+        fitFlow();
+        if (document.fonts && document.fonts.ready) document.fonts.ready.then(fitFlow);
+        addEventListener("resize", fitFlow);
 
         /* появление блоков при прокрутке */
         const rise = document.querySelectorAll(".rise");
