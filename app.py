@@ -700,10 +700,16 @@ def _music_twin(size, digest):
 
 def _music_used():
     """Занято на диске. Копии в других папках ничего не стоят, поэтому
-    считаем по разным файлам, а не по записям. Вызывать под music_lock."""
+    считаем по разным файлам, а не по записям. Вызывать под music_lock.
+
+    К кривым записям относимся спокойно: одна порченая строчка в индексе не
+    должна ронять ни фонотеку, ни дроп, который показывает её же."""
     seen = {}
     for track in music_items.values():
-        seen[track["file"]] = track.get("size", 0)
+        if not isinstance(track, dict) or not track.get("file"):
+            continue
+        size = track.get("size")
+        seen[track["file"]] = size if isinstance(size, (int, float)) else 0
     return sum(seen.values())
 
 
@@ -748,6 +754,15 @@ def _music_scan():
     except OSError:
         return
 
+    # Сначала — прочь всё, что не похоже на запись о треке: без этого одна
+    # порченая строчка в индексе валила и фонотеку, и список дропа.
+    for track_id in [k for k, v in music_items.items()
+                     if not isinstance(v, dict) or not v.get("file")]:
+        music_items.pop(track_id, None)
+    for folder_id in [k for k, v in music_folders.items()
+                      if not isinstance(v, dict) or not v.get("name")]:
+        music_folders.pop(folder_id, None)
+
     for track_id in [k for k, v in music_items.items() if v["file"] not in on_disk]:
         music_items.pop(track_id, None)
 
@@ -784,9 +799,13 @@ def _music_load():
         saved = {"items": saved, "folders": {}}
     music_items.update(saved.get("items") or {})
     music_folders.update(saved.get("folders") or {})
-    for track in music_items.values():
+    for track in list(music_items.values()):
+        if not isinstance(track, dict):
+            continue
         track.setdefault("folder", "")
         track.setdefault("hash", "")
+        if not isinstance(track.get("size"), (int, float)):
+            track["size"] = 0
     _music_scan()
     _music_write_index()
 
@@ -1163,6 +1182,49 @@ def password_matches(password):
         "sha256", password.encode("utf-8"), PASSWORD_SALT, PASSWORD_ITERATIONS
     )
     return hmac.compare_digest(candidate, PASSWORD_HASH)
+
+
+@app.errorhandler(Exception)
+def any_error(err):
+    """Любая непойманная ошибка. Страницам отдаём как было, а запросам к API —
+    внятный JSON: иначе интерфейс просто висит на «Загрузка…», и понять, что
+    случилось, нельзя ни хозяину, ни тому, кто чинит."""
+    from werkzeug.exceptions import HTTPException
+
+    if isinstance(err, HTTPException):
+        return err
+    app.logger.exception("Необработанная ошибка: %s", request.path)
+    if request.path.startswith("/api/"):
+        return jsonify(error="Сервер споткнулся: %s" % err.__class__.__name__,
+                       where=request.path), 500
+    raise err
+
+
+@app.get("/api/diag")
+@login_required
+def diag_api():
+    """Короткая самопроверка: что читается, а что нет. Нужна, когда снаружи
+    видно только «не работает»."""
+    out = {}
+
+    def probe(name, fn):
+        try:
+            out[name] = fn()
+        except Exception as e:                        # noqa: BLE001
+            out[name] = "ОШИБКА: %s: %s" % (e.__class__.__name__, e)
+
+    probe("дроп: элементов", lambda: len(drop_items))
+    probe("дроп: занято", lambda: _drop_used())
+    probe("дроп: корзина", lambda: _drop_trash_bytes())
+    probe("папка MUSIK", lambda: bool(drop_items.get(DROP_MUSIK_ID)))
+    probe("фонотека: треков", lambda: len(music_items))
+    probe("фонотека: папок", lambda: len(music_folders))
+    probe("фонотека: занято", lambda: _music_used())
+    probe("страна DIY: записей", lambda: len(diy_items))
+    probe("блокнот: страниц", lambda: len(notebook_data.get("pages", [])))
+    probe("код для ссылок", lambda: bool(__import__("segno")))
+    probe("дворецкий", lambda: bool(SEBASTIAN_HOST))
+    return jsonify(out)
 
 
 @app.after_request
@@ -2599,7 +2661,8 @@ def _drop_music_view(parent):
                           "share_url": None, "thumb": False, "preview": None,
                           "truncated": False, "music": True})
         for k, v in sorted(music_items.items(),
-                           key=lambda x: (x[1]["artist"].lower(), x[1]["title"].lower())):
+                           key=lambda x: (str(x[1].get("artist", "")).lower(),
+                                          str(x[1].get("title", "")).lower())):
             if v.get("folder", "") != inside:
                 continue
             name = " — ".join([p for p in (v.get("artist"), v.get("title")) if p]) or v["file"]
@@ -2629,7 +2692,13 @@ def drop_list_api():
     parent = request.args.get("parent") or None
     # Папка MUSIK и всё внутри неё — это фонотека, а не склад дропа
     if parent == DROP_MUSIK_ID or (parent or "").startswith("mf_"):
-        return _drop_music_view(parent)
+        try:
+            return _drop_music_view(parent)
+        except Exception:                                   # noqa: BLE001
+            app.logger.exception("MUSIK: не собрал список фонотеки")
+            return jsonify(items=[], breadcrumbs=[{"id": DROP_MUSIK_ID, "name": "MUSIK"}],
+                           used=0, quota=DROP_QUOTA, trash=0, music_view=True,
+                           warn="Фонотека сейчас не читается.")
     with drop_lock:
         _drop_sweep_trash()
         if parent and parent not in drop_items:
@@ -2663,10 +2732,15 @@ def drop_list_api():
                 row["icon"] = v.get("icon") or "folder"
                 if v.get("special"):
                     row["special"] = True
-                    # MUSIK показывает фонотеку, значит и веса берём её
-                    with music_lock:
-                        row["size"] = _music_used()
-                        row["count"] = len(music_items)
+                    # MUSIK показывает фонотеку, значит и веса берём её. Если
+                    # фонотека почему-то не читается — это не повод ронять
+                    # весь список файлов: просто оставим прежние цифры.
+                    try:
+                        with music_lock:
+                            row["size"] = _music_used()
+                            row["count"] = len(music_items)
+                    except Exception:                       # noqa: BLE001
+                        app.logger.exception("MUSIK: не посчитал фонотеку")
             items.append(row)
         # Сначала новые, но особая папка (MUSIK) всегда падает в самый низ.
         # Сортировка устойчивая: сперва по свежести, затем особые — вниз.
@@ -5067,7 +5141,7 @@ def cabinet():
             const file = document.getElementById("bk-file");
             const msg = document.getElementById("bk-msg");
             document.getElementById("bk-restore").addEventListener("click", () => {
-              if (!confirm("Развернуть копию поверх нынешних данных?\n\n" +
+              if (!confirm("Развернуть копию поверх нынешних данных?\\n\\n" +
                            "Файлы из архива заменят одноимённые. Лишнего не удаляем.")) return;
               file.click();
             });
@@ -8521,9 +8595,9 @@ def drop_page():
           if (act === "del") {
             const what = item.music
               ? (item.kind === "folder"
-                  ? "Удалить папку «" + item.name + "» из фонотеки со всеми треками?\n" +
+                  ? "Удалить папку «" + item.name + "» из фонотеки со всеми треками?\\n" +
                     "У фонотеки нет корзины — это насовсем."
-                  : "Удалить трек «" + item.name + "» из фонотеки?\nУ фонотеки нет корзины — это насовсем.")
+                  : "Удалить трек «" + item.name + "» из фонотеки?\\nУ фонотеки нет корзины — это насовсем.")
               : item.kind === "folder"
               ? "Удалить папку «" + item.name + "» со всем содержимым?"
               : "Удалить «" + item.name + "»?";
@@ -8962,7 +9036,11 @@ Wi-Fi: плата работает Zigbee-роутером, то есть зао
 
 
 def _diy_seed():
-    """Заводит стартовые записи страны DIY — по одному разу каждую."""
+    """Заводит стартовые записи страны DIY — по одному разу каждую.
+
+    Всё внутри обёрнуто: заготовки — приятная мелочь, и если они почему-то
+    не легли (нет места, странные имена файлов), сайт всё равно обязан
+    подняться."""
     try:
         with open(DIY_SEED_FLAG, encoding="utf-8") as fh:
             done = json.load(fh) or {}
@@ -9019,7 +9097,10 @@ def _diy_seed():
             pass
 
 
-_diy_seed()
+try:
+    _diy_seed()
+except Exception:                                    # noqa: BLE001
+    app.logger.exception("Не удалось завести заготовки DIY — работаем без них")
 
 
 def _diy_clean_links(raw):
@@ -10550,7 +10631,8 @@ def player_tracks():
         _music_scan()
         folder_name = {k: v["name"] for k, v in music_folders.items()}
         for k, v in sorted(music_items.items(),
-                           key=lambda x: (x[1]["artist"].lower(), x[1]["title"].lower())):
+                           key=lambda x: (str(x[1].get("artist", "")).lower(),
+                                          str(x[1].get("title", "")).lower())):
             tracks.append({
                 "id": "m_" + k, "title": v["title"], "artist": v["artist"],
                 "folder": folder_name.get(v.get("folder", ""), ""),
