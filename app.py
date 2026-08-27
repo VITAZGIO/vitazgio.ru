@@ -10086,7 +10086,7 @@ def notebook_page():
     <head>
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width, initial-scale=1">
-      <meta name="theme-color" content="#f3f5f8">
+      <meta name="theme-color" content="#0d1321">
       <meta name="robots" content="noindex, nofollow">
       __ICONLINKS__
       <link rel="manifest" href="/manifest.webmanifest">
@@ -12960,8 +12960,8 @@ def servers_page():
 
             <g>
               <rect class="n-box" x="330" y="318" width="330" height="56" rx="14"/>
-              <text class="n-t" x="348" y="342">Лампы, розетки, лента, телевизор</text>
-              <text class="n-s" x="348" y="360">свои сети Zigbee и Wi-Fi — наружу ходят сами</text>
+              <text class="n-t" x="348" y="342">Умный дом и техника</text>
+              <text class="n-s" x="348" y="360">наружу ходят сами, мимо сервера</text>
             </g>
 
             <text class="note-tx" x="26" y="398">Пунктиром — та же домашняя сеть: машины стоят дома,
@@ -14913,7 +14913,7 @@ def home():
                 <span class="pick-art">__ICON_BUTLER__</span>
                 <span class="pick-glow"></span>
               </a>
-              <span class="pick-label">BUTLER</span>
+              <span class="pick-label">SEBASTIAN</span>
             </span>
             <span class="pick-cell pick--music">
               <a class="pick pick--music" href="/music" id="music-pick"
