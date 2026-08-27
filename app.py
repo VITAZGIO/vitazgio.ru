@@ -8689,8 +8689,47 @@ DIY_DIR = os.path.join(DATA_DIR, "diy")
 DIY_INDEX_PATH = os.path.join(DATA_DIR, "diy.json")
 DIY_MAX_IMAGE = 12 * 1024 * 1024
 DIY_COVER_SIDE = 1280
-DIY_KINDS = ("программа", "поделка", "чертёж", "разбор", "другое")
 DIY_LINK_LIMIT = 6
+
+# Тематики. Раньше у записи был «вид» — программа, поделка, чертёж; полки из
+# этого не выходило, всё лежало одной кучей. Теперь запись живёт в своей
+# тематике, и у каждой свой цвет, свой значок и свой вид листания по
+# умолчанию: программы удобно смотреть кладкой, платы — сотами, сервера —
+# барабаном. Хозяин всё равно может переключить вид руками, выбор запомнится
+# для каждой тематики отдельно.
+DIY_THEMES = (
+    {"id": "программы",  "name": "Программы",  "color": "#2de2ff", "view": 3,
+     "hint": "код, приложения и всё, что запускается"},
+    {"id": "устройства", "name": "Устройства", "color": "#ffd84a", "view": 5,
+     "hint": "ESP, платы, паяльник и провода"},
+    {"id": "сервера",    "name": "Сервера",    "color": "#63f5ad", "view": 2,
+     "hint": "машины, сети и то, что крутится круглосуточно"},
+    {"id": "разное",     "name": "Разное",     "color": "#b57cff", "view": 1,
+     "hint": "всё остальное"},
+)
+DIY_KINDS = tuple(t["id"] for t in DIY_THEMES)
+
+# Старые названия видов — на новые полки. Записи, сделанные до тематик,
+# сами переезжают при первом чтении.
+DIY_KIND_MOVES = {
+    "программа": "программы",
+    "поделка": "устройства",
+    "чертёж": "устройства",
+    "разбор": "разное",
+    "другое": "разное",
+}
+
+# Стартовые записи заводились ещё до полок, и по старому виду «поделка»
+# панель мониторинга уехала бы к устройствам вместе с паяльником. Их
+# раскладываем по названию — по одному разу, при первом чтении.
+DIY_STARTERS = {
+    "ssh_tunnel": "программы",
+    "Себастьян": "программы",
+    "Панель мониторинга": "сервера",
+    "Корона": "устройства",
+    "Магнитола": "устройства",
+    "Реле под столом": "устройства",
+}
 
 diy_items: dict = {}
 diy_lock = threading.Lock()
@@ -8748,13 +8787,25 @@ def _diy_load():
             diy_items.update(json.load(fh) or {})
     except (OSError, ValueError):
         pass
+    moved = False
     for work in diy_items.values():
         work.setdefault("links", [])
         work.setdefault("hidden", False)
         work.setdefault("pinned", False)
-        work.setdefault("kind", "другое")
         work.setdefault("body", "")
         work.setdefault("assets", [])
+        # Переезд со старых видов на тематики. Незнакомое кладём в «разное»,
+        # чтобы запись не пропала из списка ни при каком раскладе.
+        kind = work.get("kind") or ""
+        if kind not in DIY_KINDS:
+            work["kind"] = (DIY_STARTERS.get(work.get("title") or "")
+                            or DIY_KIND_MOVES.get(kind, "разное"))
+            moved = True
+    if moved:
+        try:
+            _diy_write_index()
+        except OSError:
+            pass          # не смогли записать — переедем в следующий раз
 
 
 _diy_load()
@@ -8772,7 +8823,7 @@ DIY_SEEDS = [
     {
         "key": "ssh_tunnel",
         "title": "ssh_tunnel",
-        "kind": "программа",
+        "kind": "программы",
         "assets": "ssh_tunnel",
         "body": """---
 кратко: Учебный проект: как из штатного механизма SSH собрать рабочий локальный прокси. Один файл, без установки и без прав администратора — Windows, Linux и Android.
@@ -8886,7 +8937,7 @@ chmod +x ssh_tunnel_linux
     {
         "key": "korona",
         "title": "Корона",
-        "kind": "поделка",
+        "kind": "устройства",
         "body": """---
 кратко: ARGB-лента на пять метров под потолком. Zigbee-роутер на ESP32-H2, десять цветовых пресетов и пульт на кнопках через один провод.
 теги: ESP32-H2, Zigbee, ARGB, MQTT
@@ -8922,7 +8973,7 @@ Wi-Fi: плата работает Zigbee-роутером, то есть зао
     {
         "key": "magnitola",
         "title": "Магнитола",
-        "kind": "поделка",
+        "kind": "устройства",
         "body": """---
 кратко: Автомагнитола стала домашним усилителем. Управляется из умного дома через ИК-светодиод, вклеенный внутрь корпуса напротив штатного приёмника.
 теги: ESP32-C3, MQTT, ИК, звук
@@ -8964,7 +9015,7 @@ Wi-Fi: плата работает Zigbee-роутером, то есть зао
     {
         "key": "rele",
         "title": "Реле под столом",
-        "kind": "поделка",
+        "kind": "устройства",
         "body": """---
 кратко: Коробка под столешницей: два реле, шесть кнопок на одном проводе, термометр, управление вентилятором и питанием USB.
 теги: ESP32-H2, Zigbee, реле, DS18B20
@@ -8991,7 +9042,7 @@ Wi-Fi: плата работает Zigbee-роутером, то есть зао
     {
         "key": "sebastian",
         "title": "Себастьян",
-        "kind": "программа",
+        "kind": "программы",
         "body": """---
 кратко: Голосовой дворецкий целиком на домашней видеокарте: слышит, думает, управляет светом и отвечает своим голосом. Наружу не уходит ничего.
 теги: LLM, Whisper, XTTS, MCP
@@ -9029,7 +9080,7 @@ Wi-Fi: плата работает Zigbee-роутером, то есть зао
     {
         "key": "panel",
         "title": "Панель мониторинга",
-        "kind": "поделка",
+        "kind": "сервера",
         "body": """---
 кратко: Настольная панель с экраном и двенадцатью кнопками: показывает сервер, дёргает реле и рулит подсветкой компьютера по радио.
 теги: ESP32, TFT, RF433, MQTT
@@ -9262,7 +9313,8 @@ def diy_list_api():
     can_edit = _diy_can_edit()
     with diy_lock:
         works = [_diy_public(k, v, can_edit) for k, v in _diy_sorted(can_edit)]
-    return jsonify(works=works, can_edit=can_edit, kinds=list(DIY_KINDS))
+    return jsonify(works=works, can_edit=can_edit, kinds=list(DIY_KINDS),
+                   themes=[dict(t) for t in DIY_THEMES])
 
 
 @app.post("/api/diy")
@@ -9272,7 +9324,7 @@ def diy_create_api():
     title = (payload.get("title") or "").strip()[:80]
     if not title:
         return jsonify(error="Без названия не сохранить."), 400
-    kind = payload.get("kind") if payload.get("kind") in DIY_KINDS else "другое"
+    kind = payload.get("kind") if payload.get("kind") in DIY_KINDS else "разное"
     item_id = str(uuid.uuid4())
     now = time.time()
     with diy_lock:
@@ -11232,6 +11284,9 @@ def diy_page():
           color-scheme: dark;
           --bg: #0d1321; --line: rgba(255,255,255,.1); --muted: #989fb2;
           --pc: #2de2ff; --warm: #ffd84a;
+          /* Цвет выбранной тематики. Меняется скриптом при переключении полки
+             и красит кнопки, полосы прокрутки и подсветку карточек. */
+          --th: #2de2ff;
         }
         * { box-sizing: border-box; }
         body { margin: 0; min-width: 320px; padding-bottom: 60px;
@@ -11291,129 +11346,161 @@ def diy_page():
         .btn svg { width: 16px; height: 16px; flex: none; }
         .bar .spacer { margin-left: auto; }
 
-        /* ── Десять способов листать творения ───────────────────────────
-           Разметка карточки одна и та же, меняется только раскладка: класс
-           на самой ленте решает, сетка это, барабан, колода или соты. Номер
-           запоминается, чтобы страница открывалась в выбранном виде. */
-        .modes { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 26px 0 4px; }
-        .modes .lbl { color: var(--muted); font-size: .68rem; letter-spacing: .14em;
-                      text-transform: uppercase; margin-right: 4px; }
+        /* ── Полки и пять способов листать ──────────────────────────────
+           Сверху выбираются тематики — программы, устройства, сервера,
+           разное, — и у каждой свой цвет: он подхватывается через --th и
+           красит кнопки, полосы прокрутки и подсветку карточек. Разметка
+           карточки одна и та же, меняется только раскладка: класс на самой
+           ленте решает, сетка это, барабан, кладка, веер или соты.
+           Выбранный вид запоминается для каждой полки отдельно. */
+        .shelfrow { display: flex; align-items: center; gap: 8px; margin: 26px 0 0; min-width: 0; }
+        .shelf { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+        .shelf .lbl, .modes .lbl { color: var(--muted); font-size: .68rem; letter-spacing: .14em;
+                                   text-transform: uppercase; margin-right: 4px; }
+        .shelf button { --tc: var(--pc); display: inline-flex; align-items: center; gap: 8px;
+                        height: 36px; padding: 0 14px; cursor: pointer; color: #b9c6d8;
+                        font: 600 .84rem inherit; border-radius: 11px;
+                        border: 1px solid var(--line); background: rgba(255,255,255,.04);
+                        transition: color .16s, border-color .16s, background .16s; }
+        .shelf button i { font-style: normal; width: 8px; height: 8px; border-radius: 50%;
+                          background: var(--tc); box-shadow: 0 0 10px var(--tc); }
+        .shelf button u { text-decoration: none; color: #6f7f93;
+                          font: 700 .68rem "Cascadia Code", Consolas, monospace; }
+        .shelf button:hover { color: #fff;
+                              border-color: color-mix(in srgb, var(--tc) 55%, transparent);
+                              background: color-mix(in srgb, var(--tc) 10%, transparent); }
+        .shelf button.on { color: #fff; border-color: var(--tc);
+                           background: color-mix(in srgb, var(--tc) 16%, transparent);
+                           box-shadow: 0 0 24px color-mix(in srgb, var(--tc) 18%, transparent); }
+        .shelf button.on u { color: color-mix(in srgb, var(--tc) 80%, #ffffff); }
+        .shelf-hint { margin: 8px 0 0; color: #7c8ba0; font-size: .76rem; }
+        /* На телефоне полки не переносим в три ряда, а даём листать вбок:
+           так шапка страницы не разъезжается на пол-экрана. */
+        @media (max-width: 620px) {
+          .shelf { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none;
+                   padding-bottom: 4px; }
+          .shelf::-webkit-scrollbar { display: none; }
+          .shelf button { flex: none; }
+        }
+
+        .modes { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 14px 0 4px; }
         .modes button { width: 34px; height: 34px; display: grid; place-items: center; cursor: pointer;
                         color: #9fb0c6; font: 700 .8rem "Cascadia Code", Consolas, monospace;
                         border: 1px solid var(--line); border-radius: 10px;
                         background: rgba(255,255,255,.04); transition: .16s; }
-        .modes button:hover { color: #fff; border-color: rgba(45,226,255,.5); background: rgba(45,226,255,.1); }
-        .modes button.on { color: #04121c; border-color: var(--pc);
-                           background: linear-gradient(160deg,#7df0ff,#26cfe8); }
+        .modes button:hover { color: #fff;
+                              border-color: color-mix(in srgb, var(--th) 55%, transparent);
+                              background: color-mix(in srgb, var(--th) 12%, transparent); }
+        .modes button.on { color: #04121c; border-color: var(--th);
+                           background: linear-gradient(160deg,
+                             color-mix(in srgb, var(--th) 70%, #ffffff), var(--th)); }
         .modes .name { margin-left: 6px; color: #cfe0f0; font-size: .78rem; }
-        .modes .name b { color: var(--pc); }
+        .modes .name b { color: var(--th); }
         .navs { display: flex; gap: 8px; margin-left: auto; }
         .navs button { width: 34px; height: 34px; }
 
-        .grid { margin: 18px 0 0; }
+        /* Своя прокрутка на каждой полке: ползунок красится цветом тематики. */
+        .grid { margin: 18px 0 0; scrollbar-width: thin;
+                scrollbar-color: color-mix(in srgb, var(--th) 60%, transparent) transparent; }
+        .grid::-webkit-scrollbar { height: 9px; width: 9px; }
+        .grid::-webkit-scrollbar-track { background: rgba(255,255,255,.04); border-radius: 999px; }
+        .grid::-webkit-scrollbar-thumb { border-radius: 999px;
+                background: linear-gradient(90deg, var(--th),
+                            color-mix(in srgb, var(--th) 35%, transparent)); }
+
+        /* Карточки выплывают по очереди, когда до них доходит прокрутка. */
+        .work.up, .hex.up { opacity: 0; transform: translateY(18px); }
+        .work.up.seen, .hex.up.seen { opacity: 1; transform: none;
+                                      transition: opacity .5s ease, transform .5s cubic-bezier(.22,1,.36,1); }
+
         /* 1 · сетка */
         .grid.m-grid { display: grid; gap: 18px;
                        grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
-        /* 2 · барабан: горизонтальная лента с прилипанием */
+        /* Закреплённая запись занимает две клетки — витрина начинается с неё. */
+        @media (min-width: 900px) {
+          .grid.m-grid .work.wide { grid-column: span 2; }
+          .grid.m-grid .work.wide .shot { aspect-ratio: 21 / 9; }
+        }
+
+        /* 2 · барабан: горизонтальная лента с прилипанием и полосой хода */
         .grid.m-drum { display: flex; gap: 16px; overflow-x: auto; scroll-snap-type: x mandatory;
-                       padding: 4px 2px 16px; scrollbar-width: thin; }
-        .grid.m-drum .work { flex: none; width: min(340px, 78vw); scroll-snap-align: center; }
-        /* 3 · колода: стопка карт, листается кнопками */
-        .grid.m-deck { position: relative; height: 560px; display: block; perspective: 1400px; }
-        .grid.m-deck .work, .grid.m-fan .work { background: linear-gradient(160deg, #141d2e, #0a1019); }
-        .grid.m-deck .work { position: absolute; left: 50%; top: 0; width: min(360px, 86vw);
-                             transform-origin: 50% 100%;
-                             transition: transform .45s cubic-bezier(.22,1,.36,1), opacity .35s;
-                             will-change: transform; }
-        .grid.m-deck .work[data-off="0"] { z-index: 5; }
-        .grid.m-deck .work[data-off="1"] { z-index: 4; }
-        .grid.m-deck .work[data-off="2"] { z-index: 3; }
-        .grid.m-deck .work[data-off="3"] { z-index: 2; }
-        /* 4 · лента: одна карточка на экран, прокрутка с прилипанием */
-        .grid.m-reel { display: block; height: 76vh; overflow-y: auto; scroll-snap-type: y mandatory;
-                       border-radius: 18px; }
-        .grid.m-reel .work { height: 76vh; scroll-snap-align: start; margin-bottom: 14px;
-                             flex-direction: row; }
-        .grid.m-reel .shot { flex: 1 1 55%; aspect-ratio: auto; border-bottom: 0;
-                             border-right: 1px solid var(--line); }
-        .grid.m-reel .body { flex: 1 1 45%; justify-content: center; padding: 30px; }
-        .grid.m-reel .work h2 { font-size: 1.7rem; }
-        @media (max-width: 720px) { .grid.m-reel .work { flex-direction: column; }
-                                    .grid.m-reel .shot { flex: none; height: 42%; border-right: 0;
-                                                         border-bottom: 1px solid var(--line); } }
-        /* 5 · мозаика: плотная кладка колонками */
+                       padding: 6px 2px 18px; cursor: grab; }
+        .grid.m-drum.hauling { cursor: grabbing; scroll-snap-type: none; }
+        .grid.m-drum.hauling .work { pointer-events: none; }
+        .grid.m-drum .work { flex: none; width: min(340px, 78vw); scroll-snap-align: center;
+                             transition: transform .3s ease, opacity .3s ease, border-color .2s; }
+        .grid.m-drum .work.mid { transform: translateY(-6px) scale(1.03);
+                                 border-color: color-mix(in srgb, var(--ac) 55%, transparent); }
+        .grid.m-drum .work.far { opacity: .68; }
+        .rail { position: relative; height: 4px; margin: 2px 2px 0; border-radius: 999px;
+                background: rgba(255,255,255,.07); overflow: hidden; }
+        .rail i { position: absolute; top: 0; bottom: 0; left: 0; border-radius: 999px;
+                  background: linear-gradient(90deg, var(--th),
+                              color-mix(in srgb, var(--th) 40%, transparent));
+                  box-shadow: 0 0 14px color-mix(in srgb, var(--th) 45%, transparent); }
+        .rail[hidden] { display: none; }
+
+        /* 3 · кладка: колонки разной высоты, картинки во весь рост */
         .grid.m-mosaic { column-count: 3; column-gap: 16px; }
         .grid.m-mosaic .work { break-inside: avoid; margin-bottom: 16px; display: inline-flex; width: 100%; }
+        /* Здесь обложка живёт своей высотой — из-за этого кладка и получается */
+        .grid.m-mosaic .shot { aspect-ratio: auto; }
+        .grid.m-mosaic .shot img { height: auto; max-height: 520px; object-fit: cover; }
+        .grid.m-mosaic .shot-bg { display: none; }
+        .grid.m-mosaic .shot.none { aspect-ratio: 16 / 11; }
+        .grid.m-mosaic .work:nth-child(3n+2) .shot.none { aspect-ratio: 4 / 5; }
+        .grid.m-mosaic .work:nth-child(3n+3) .shot.none { aspect-ratio: 16 / 8; }
         @media (max-width: 980px) { .grid.m-mosaic { column-count: 2; } }
         @media (max-width: 640px) { .grid.m-mosaic { column-count: 1; } }
-        /* 6 · веер: боковые карточки уходят в перспективу */
+
+        /* 4 · веер: боковые карточки уходят в перспективу */
         .grid.m-fan { display: flex; gap: 26px; overflow-x: auto; scroll-snap-type: x mandatory;
-                      padding: 30px 32vw 30px; perspective: 1200px; scrollbar-width: none; }
+                      padding: 34px calc(50% - min(320px, 72vw) / 2) 40px;
+                      perspective: 1200px; scrollbar-width: none; cursor: grab; }
         .grid.m-fan::-webkit-scrollbar { display: none; }
+        .grid.m-fan.hauling { cursor: grabbing; scroll-snap-type: none; }
+        .grid.m-fan.hauling .work { pointer-events: none; }
         .grid.m-fan .work { flex: none; width: min(320px, 72vw); scroll-snap-align: center;
+                            background: linear-gradient(160deg, #141d2e, #0a1019);
                             transition: transform .25s ease, opacity .25s ease; will-change: transform; }
-        /* 7 · терминал: строчки как вывод команды */
-        .grid.m-term { display: block; border: 1px solid var(--line); border-radius: 14px;
-                       background: rgba(4,9,18,.75); padding: 14px 16px; font-size: .82rem; }
-        .t-row { padding: 9px 4px; border-bottom: 1px dashed rgba(255,255,255,.08); cursor: pointer; }
-        .t-row:last-child { border-bottom: 0; }
-        .t-row:hover { background: rgba(45,226,255,.06); }
-        .t-row .ln { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-        .t-row .ar { color: var(--ac, var(--pc)); }
-        .t-row .nm { color: #eaf6ff; font-weight: 700; }
-        .t-row .kd { color: #6b7c8f; }
-        .t-row .tg { color: #7f93a8; }
-        .t-row .more { max-height: 0; overflow: hidden; transition: max-height .3s ease; }
-        .t-row.open .more { max-height: 460px; }
-        .t-row .more div { padding: 10px 0 6px 22px; color: var(--muted); line-height: 1.6; }
-        .t-row .more img { max-width: 260px; border-radius: 8px; border: 1px solid var(--line);
-                           margin: 8px 0 0 22px; display: block; }
-        .t-row .more .go { margin: 10px 0 4px 22px; }
-        /* 8 · соты */
-        .grid.m-hex { display: flex; flex-wrap: wrap; gap: 14px 10px; justify-content: center;
-                      padding: 10px 0 30px; }
+        /* Тень под веером: карточка в середине стоит на «полу» */
+        .grid.m-fan .work::after { content: ""; position: absolute; left: 10%; right: 10%; bottom: -26px;
+                                   height: 26px; border-radius: 50%; pointer-events: none;
+                                   background: radial-gradient(50% 100% at 50% 0%,
+                                     rgba(0,0,0,.55), transparent 70%); }
+
+        /* 5 · соты: ряды сцеплены между собой, как настоящие */
+        .grid.m-hex { display: flex; flex-wrap: wrap; gap: 10px 8px; justify-content: center;
+                      padding: 16px 0 40px; }
         .grid.m-hex .hex { position: relative; width: 210px; height: 240px; cursor: pointer;
+                           margin-bottom: -58px;
                            clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
                            background: linear-gradient(160deg, rgba(25,32,48,.95), rgba(10,15,26,.95));
-                           display: grid; place-items: center; text-align: center; padding: 26px 18px;
+                           display: grid; place-items: center; text-align: center; padding: 30px 20px;
                            transition: transform .22s, filter .22s; }
-        .grid.m-hex .hex:nth-child(even) { margin-top: 34px; }
-        .grid.m-hex .hex:hover { transform: translateY(-5px) scale(1.03); }
+        .grid.m-hex .hex:nth-child(even) { margin-top: 62px; }
+        .grid.m-hex .hex:hover { transform: translateY(-6px) scale(1.04); z-index: 3; }
         .grid.m-hex .hex .fill { position: absolute; inset: 0; background: center/cover no-repeat;
-                                 opacity: .32; filter: saturate(1.1); }
+                                 opacity: .3; filter: saturate(1.1); transition: opacity .22s; }
+        .grid.m-hex .hex:hover .fill { opacity: .5; }
         .grid.m-hex .hex .glow { position: absolute; inset: 0;
                                  background: radial-gradient(70% 60% at 50% 0%, var(--ac), transparent 70%);
                                  opacity: .22; }
+        .grid.m-hex .hex .rim { position: absolute; inset: 0; z-index: 3; pointer-events: none;
+                                clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%,
+                                                   50% 0%, 50% 2%, 3% 26.2%, 3% 73.8%, 50% 98%,
+                                                   97% 73.8%, 97% 26.2%, 50% 2%);
+                                background: color-mix(in srgb, var(--ac) 55%, transparent); }
         .grid.m-hex .hex .in { position: relative; z-index: 2; }
         .grid.m-hex .hex b { display: block; font-size: .96rem; color: #f2f8ff; }
-        .grid.m-hex .hex span { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical;
+        .grid.m-hex .hex span { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
                                 overflow: hidden; margin-top: 6px; color: #93a3b8;
-                                font-size: .68rem; line-height: 1.5; }
-        /* 9 · хроника */
-        .grid.m-time { display: block; position: relative; padding-left: 26px; }
-        .grid.m-time::before { content: ""; position: absolute; left: 7px; top: 6px; bottom: 6px; width: 2px;
-                               background: linear-gradient(180deg, var(--pc), rgba(45,226,255,.05)); }
-        .grid.m-time .work { margin-bottom: 16px; }
-        .grid.m-time .work::after { content: ""; position: absolute; left: -25px; top: 26px;
-                                    width: 11px; height: 11px; border-radius: 50%;
-                                    background: var(--ac); box-shadow: 0 0 12px var(--ac); }
-        .grid.m-time .shot { display: none; }
-        /* 10 · бенто: первая карточка крупная */
-        .grid.m-bento { display: grid; gap: 14px; grid-auto-rows: 210px;
-                        grid-template-columns: repeat(4, 1fr); }
-        .grid.m-bento .work { grid-column: span 2; grid-row: span 1; }
-        .grid.m-bento .work:nth-child(1) { grid-column: span 2; grid-row: span 2; }
-        .grid.m-bento .work:nth-child(4) { grid-column: span 4; }
-        .grid.m-bento .work .shot { flex: 1; aspect-ratio: auto; }
-        .grid.m-bento .work .body { flex: none; }
-        .grid.m-bento .work p, .grid.m-bento .work .tagrow,
-        .grid.m-bento .work .open-row { display: none; }
-        .grid.m-bento .work:nth-child(1) p,
-        .grid.m-bento .work:nth-child(1) .tagrow { display: flex; }
-        .grid.m-bento .work:nth-child(1) p { display: block; }
-        @media (max-width: 900px) { .grid.m-bento { grid-template-columns: repeat(2, 1fr); }
-                                    .grid.m-bento .work:nth-child(4) { grid-column: span 2; } }
-
+                                font-size: .68rem; line-height: 1.5; transition: -webkit-line-clamp .2s; }
+        .grid.m-hex .hex:hover span { -webkit-line-clamp: 5; color: #b9c8da; }
+        @media (max-width: 520px) {
+          .grid.m-hex .hex { width: 172px; height: 198px; padding: 24px 16px; margin-bottom: -46px; }
+          .grid.m-hex .hex:nth-child(even) { margin-top: 50px; }
+        }
         /* Цвет карточки задаётся в шапке кода строкой «цвет:», отсюда --ac. */
         .work { --ac: var(--pc); position: relative; display: flex; flex-direction: column;
                 overflow: hidden; background: rgba(25,32,48,.82);
@@ -11451,8 +11538,11 @@ def diy_page():
                            text-shadow: 0 0 26px color-mix(in srgb, var(--ac) 45%, transparent);
                            opacity: .9; }
         .body { flex: 1; display: flex; flex-direction: column; gap: 10px; padding: 16px 18px 18px; }
-        .kind { align-self: flex-start; padding: 3px 10px; color: #9fe8ff;
-                background: rgba(45,226,255,.12); border-radius: 999px;
+        .kind { align-self: flex-start; padding: 3px 10px;
+                color: color-mix(in srgb, var(--kc, var(--pc)) 72%, #ffffff);
+                background: color-mix(in srgb, var(--kc, var(--pc)) 14%, transparent);
+                border: 1px solid color-mix(in srgb, var(--kc, var(--pc)) 28%, transparent);
+                border-radius: 999px;
                 font: 700 .64rem "Cascadia Code", Consolas, monospace;
                 letter-spacing: .12em; text-transform: uppercase; }
         .work h2 { margin: 0; font-size: 1.18rem; letter-spacing: -.02em; }
@@ -11590,8 +11680,12 @@ def diy_page():
         <h1>СТРАНА DIY</h1>
 
         <div class="bar" id="bar"></div>
+        <div class="shelfrow"><span class="lbl">полка</span>
+          <div class="shelf" id="shelf"></div></div>
+        <p class="shelf-hint" id="shelfhint"></p>
         <div class="modes" id="modes"></div>
         <section class="grid m-grid" id="grid"></section>
+        <div class="rail" id="rail" hidden><i></i></div>
         <p class="empty" id="empty" hidden>Пока пусто</p>
       </main>
 
@@ -11637,18 +11731,23 @@ def diy_page():
         };
 
         let works = [];
-        let kinds = ["другое"];
+        let kinds = ["разное"];
         let canEdit = false;
         let asGuest = false;      // хозяин смотрит витрину чужими глазами
 
         const admin = () => canEdit && !asGuest;
 
+        let firstLoad = true;
         const load = async () => {
           const r = await fetch("/api/diy", { credentials: "same-origin" });
           const d = await r.json();
           works = d.works || [];
           kinds = d.kinds || kinds;
+          if (d.themes && d.themes.length) themes = [ALL].concat(d.themes);
           canEdit = !!d.can_edit;
+          // Полка могла исчезнуть между заходами — тогда возвращаемся ко «всему»
+          if (theme && !themes.some((t) => t.id === theme)) theme = "";
+          if (firstLoad) { mode = viewOf(theme); firstLoad = false; }
           draw();
         };
 
@@ -11734,47 +11833,76 @@ def diy_page():
           '<a href="' + esc(l.url) + '" target="_blank" rel="noopener">' +
           esc(l.label) + "</a>").join("");
 
-        /* ── Десять способов листать ──────────────────────────────────
-           Разметка карточки общая, меняется раскладка и — у колоды, веера и
-           барабана — ещё и поведение. Выбранный номер живёт в localStorage. */
+        /* ── Полки и пять способов листать ────────────────────────────
+           Сначала выбирается тематика, потом — как её листать. Разметка
+           карточки общая, меняется раскладка и — у барабана, веера и сот —
+           ещё и поведение. Для каждой полки свой запомненный вид. */
         const MODES = [
-          ["Сетка", "m-grid"], ["Барабан", "m-drum"], ["Колода", "m-deck"],
-          ["Лента", "m-reel"], ["Мозаика", "m-mosaic"], ["Веер", "m-fan"],
-          ["Терминал", "m-term"], ["Соты", "m-hex"], ["Хроника", "m-time"],
-          ["Бенто", "m-bento"],
+          ["Сетка", "m-grid"], ["Барабан", "m-drum"], ["Кладка", "m-mosaic"],
+          ["Веер", "m-fan"], ["Соты", "m-hex"],
         ];
-        let mode = 1, deckAt = 0;
-        try { mode = Math.min(10, Math.max(1, +localStorage.getItem("vgDiyMode") || 1)); }
-        catch (e) { mode = 1; }
+        const ALL = { id: "", name: "Всё", color: "#2de2ff", view: 1,
+                      hint: "все творения подряд, от свежих к старым" };
+        let themes = [ALL];
+        let theme = "";
+        let mode = 1;
+
+        /* Что выбрано, помним по полкам: {"": 1, "программы": 3, …} */
+        const VIEWS = "vgDiyViews";
+        let views = {};
+        try { views = JSON.parse(localStorage.getItem(VIEWS) || "{}") || {}; }
+        catch (e) { views = {}; }
+        try { theme = localStorage.getItem("vgDiyShelf") || ""; } catch (e) { theme = ""; }
+
+        const themeOf = (id) => themes.find((t) => t.id === id) || ALL;
+
+        /* Вид для полки: свой запомненный, иначе тот, что ей идёт. */
+        const viewOf = (id) => {
+          const saved = +views[id];
+          return saved >= 1 && saved <= MODES.length ? saved : themeOf(id).view;
+        };
+
+        const rememberView = () => {
+          views[theme] = mode;
+          try { localStorage.setItem(VIEWS, JSON.stringify(views)); } catch (e) { /* и ладно */ }
+        };
 
         const shotSrc = (w) => w.shot
           ? "/diy/asset/" + w.id + "/" + encodeURIComponent(w.shot)
           : (w.cover ? "/diy/cover/" + w.id : "");
 
+        /* Записи выбранной полки. Пустая полка — значит, всё подряд. */
+        const shelfList = () => {
+          const list = asGuest ? works.filter((w) => !w.hidden) : works;
+          return theme ? list.filter((w) => w.kind === theme) : list;
+        };
+
+        const drawShelf = () => {
+          const seen = asGuest ? works.filter((w) => !w.hidden) : works;
+          const count = (id) => id ? seen.filter((w) => w.kind === id).length : seen.length;
+          const chip = (t) =>
+            '<button data-shelf="' + esc(t.id) + '" style="--tc:' + esc(t.color) + '"' +
+            (theme === t.id ? ' class="on"' : "") + "><i></i>" + esc(t.name) +
+            "<u>" + count(t.id) + "</u></button>";
+          $("shelf").innerHTML =
+            [ALL].concat(themes.filter((t) => t.id)).map(chip).join("");
+          $("shelfhint").textContent = themeOf(theme).hint;
+          document.documentElement.style.setProperty("--th", themeOf(theme).color);
+          // выбранную полку подтягиваем в видимую часть ленты на телефоне
+          const on = $("shelf").querySelector("button.on");
+          if (on && on.scrollIntoView) on.scrollIntoView({ block: "nearest", inline: "nearest" });
+        };
+
         const drawModes = () => {
-          const nav = (mode === 2 || mode === 3 || mode === 6)
+          const nav = (mode === 2 || mode === 4)
             ? '<span class="navs"><button data-step="-1" title="Назад">‹</button>' +
               '<button data-step="1" title="Вперёд">›</button></span>'
             : "";
           $("modes").innerHTML = '<span class="lbl">вид</span>' +
             MODES.map((m, i) =>
               '<button data-mode="' + (i + 1) + '"' + (mode === i + 1 ? ' class="on"' : "") +
-              ">" + (i + 1) + "</button>").join("") +
+              ' title="' + esc(m[0]) + '">' + (i + 1) + "</button>").join("") +
             '<span class="name"><b>' + MODES[mode - 1][0] + "</b></span>" + nav;
-        };
-
-        /* Колода: верхняя карта прямо, следующие уходят вглубь. */
-        const layDeck = () => {
-          const cards = [...$("grid").querySelectorAll(".work")];
-          cards.forEach((el, i) => {
-            const off = (i - deckAt + cards.length) % cards.length;
-            el.dataset.off = Math.min(off, 4);
-            const back = Math.min(off, 4);
-            el.style.transform = "translateX(-50%) translateY(" + (back * 16) + "px) " +
-              "scale(" + (1 - back * .05) + ") rotateX(" + (back * 2) + "deg)";
-            el.style.opacity = off > 3 ? "0" : String(1 - back * .16);
-            el.style.pointerEvents = off === 0 ? "auto" : "none";
-          });
         };
 
         /* Веер: чем дальше карточка от середины, тем сильнее повёрнута. */
@@ -11787,69 +11915,121 @@ def diy_page():
             el.style.transform = "rotateY(" + (-k * 34) + "deg) scale(" + (1 - Math.abs(k) * .16) + ")" +
               " translateZ(" + (-Math.abs(k) * 90) + "px)";
             el.style.opacity = String(1 - Math.abs(k) * .35);
+            // Средняя карточка стоит прямо и по ней можно кликать; боковые
+            // повёрнуты, и попасть в кнопку на них всё равно не выходит.
+            el.style.pointerEvents = Math.abs(k) < .4 ? "auto" : "none";
           });
         };
 
+        /* Барабан: подсвечиваем ту карточку, что сейчас в середине, и ведём
+           полосу хода под лентой. */
+        const layDrum = () => {
+          const grid = $("grid"), rail = $("rail");
+          const mid = grid.scrollLeft + grid.clientWidth / 2;
+          grid.querySelectorAll(".work").forEach((el) => {
+            const d = Math.abs(el.offsetLeft + el.offsetWidth / 2 - mid) / el.offsetWidth;
+            el.classList.toggle("mid", d < .5);
+            el.classList.toggle("far", d > 1.4);
+          });
+          const room = grid.scrollWidth - grid.clientWidth;
+          rail.firstElementChild.style.width =
+            (room > 4 ? 12 + (grid.scrollLeft / room) * 88 : 100) + "%";
+        };
+
+        const relay = () => { if (mode === 2) layDrum(); if (mode === 4) layFan(); };
+
         const step = (dir) => {
           const grid = $("grid");
-          if (mode === 3) { const n = grid.querySelectorAll(".work").length;
-                            if (n) { deckAt = (deckAt + dir + n) % n; layDeck(); } return; }
           const card = grid.querySelector(".work");
           if (card) grid.scrollBy({ left: dir * (card.offsetWidth + 22), behavior: "smooth" });
         };
 
+        /* Тянуть ленту мышью — на компьютере это удобнее, чем ловить полосу
+           прокрутки. Пока тянем, прилипание выключено, иначе лента дёргается. */
+        let haul = null;
+        const hauling = (grid) => {
+          grid.addEventListener("pointerdown", (e) => {
+            if (e.pointerType !== "mouse" || e.button !== 0) return;
+            haul = { x: e.clientX, at: grid.scrollLeft, moved: false };
+          });
+          grid.addEventListener("pointermove", (e) => {
+            if (!haul) return;
+            const by = e.clientX - haul.x;
+            if (!haul.moved && Math.abs(by) < 5) return;
+            haul.moved = true;
+            grid.classList.add("hauling");
+            grid.scrollLeft = haul.at - by;
+            relay();
+          });
+          const stop = () => {
+            if (!haul) return;
+            haul = null;
+            grid.classList.remove("hauling");
+          };
+          grid.addEventListener("pointerup", stop);
+          grid.addEventListener("pointerleave", stop);
+          grid.addEventListener("pointercancel", stop);
+          // Обычное колесо мыши крутит ленту вбок: вертикального хода у неё нет.
+          grid.addEventListener("wheel", (e) => {
+            if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+            e.preventDefault();
+            grid.scrollLeft += e.deltaY;
+            relay();
+          }, { passive: false });
+        };
+
+        /* Появление карточек по мере прокрутки. Наблюдатель заводится заново
+           на каждую перерисовку — старые карточки к тому времени уже выкинуты. */
+        let eye = null;
+        const reveal = (grid) => {
+          if (eye) { eye.disconnect(); eye = null; }
+          const cards = [...grid.children];
+          const slow = matchMedia("(prefers-reduced-motion: reduce)").matches;
+          if (slow || !("IntersectionObserver" in window) || mode === 2 || mode === 4) return;
+          cards.forEach((el) => el.classList.add("up"));
+          eye = new IntersectionObserver((rows) => {
+            rows.forEach((r) => {
+              if (!r.isIntersecting) return;
+              const i = cards.indexOf(r.target);
+              setTimeout(() => r.target.classList.add("seen"), Math.min(i, 6) * 55);
+              eye.unobserve(r.target);
+            });
+          }, { threshold: .12, rootMargin: "0px 0px -40px" });
+          cards.forEach((el) => eye.observe(el));
+        };
+
         const drawGrid = () => {
           const grid = $("grid");
-          const list = asGuest ? works.filter((w) => !w.hidden) : works;
+          const list = shelfList();
           $("empty").hidden = list.length > 0;
           $("empty").textContent = admin()
-            ? "Пока пусто. Нажми «Добавить» — и появится первая запись."
-            : "Пока пусто";
+            ? (theme ? "На этой полке пусто. Нажми «Добавить»."
+                     : "Пока пусто. Нажми «Добавить» — и появится первая запись.")
+            : (theme ? "На этой полке пока пусто" : "Пока пусто");
           grid.className = "grid " + MODES[mode - 1][1];
+          $("rail").hidden = mode !== 2;
+          drawShelf();
           drawModes();
 
-          /* Терминал: строчки как вывод команды, тык раскрывает описание. */
-          if (mode === 7) {
-            grid.innerHTML = list.map((w) => {
-              const src = shotSrc(w);
-              return '<div class="t-row" data-row="' + w.id + '"' +
-                (w.accent ? ' style="--ac:' + esc(w.accent) + '"' : "") + '>' +
-                '<div class="ln"><span class="ar">▸</span><span class="nm">' + esc(w.title) + "</span>" +
-                '<span class="kd">[' + esc(w.kind) + "]</span>" +
-                '<span class="tg">' + esc((w.tags || []).join(" · ")) + "</span></div>" +
-                '<div class="more"><div>' + esc(w.summary || "") + "</div>" +
-                (src ? '<img src="' + src + '" alt="" loading="lazy">' : "") +
-                '<div class="go"><button class="btn" data-open="' + w.id + '">Открыть статью →</button></div>' +
-                "</div></div>";
-            }).join("");
-            grid.querySelectorAll(".t-row").forEach((el) =>
-              el.addEventListener("click", (e) => {
-                if (e.target.closest("[data-open]")) return;
-                el.classList.toggle("open");
-                el.querySelector(".ar").textContent = el.classList.contains("open") ? "▾" : "▸";
-              }));
-            return;
-          }
-
           /* Соты: шестиугольники с названием и парой слов. */
-          if (mode === 8) {
+          if (mode === 5) {
             grid.innerHTML = list.map((w) => {
               const src = shotSrc(w);
               return '<div class="hex" data-open="' + w.id + '"' +
                 (w.accent ? ' style="--ac:' + esc(w.accent) + '"' : "") + '>' +
                 (src ? '<div class="fill" style="background-image:url(' + src + ')"></div>' : "") +
-                '<div class="glow"></div><div class="in"><b>' + esc(w.title) + "</b>" +
+                '<div class="glow"></div><div class="rim"></div>' +
+                '<div class="in"><b>' + esc(w.title) + "</b>" +
                 "<span>" + esc(w.summary || "") + "</span></div></div>";
             }).join("");
+            reveal(grid);
             return;
           }
 
-          grid.innerHTML = list.map((w) => {
+          grid.innerHTML = list.map((w, i) => {
             // Обложка: сперва картинка, названная в шапке кода, потом старая
             // загруженная обложка, и только если нет ни той ни другой — заглушка.
-            const src = w.shot
-              ? "/diy/asset/" + w.id + "/" + encodeURIComponent(w.shot)
-              : (w.cover ? "/diy/cover/" + w.id : "");
+            const src = shotSrc(w);
             // Картинку показываем целиком: вертикальные скриншоты программ
             // при обрезке по центру превращались в кашу. Фон — та же картинка,
             // размытая и растянутая, чтобы не было пустых полей по бокам.
@@ -11860,7 +12040,7 @@ def diy_page():
                 '</div>'
               // Нет картинки — рисуем свою: градиент из цвета записи, косая
               // штриховка и монограмма. Пустая плашка «без фото» смотрелась
-              // дырой, особенно в сотах и бенто.
+              // дырой, особенно в сотах.
               : '<div class="shot none" data-open="' + w.id + '">' +
                   '<span class="mono">' + esc((w.title || "?").trim().slice(0, 2)) + "</span>" +
                 "</div>";
@@ -11876,8 +12056,13 @@ def diy_page():
             const tags = (w.tags || []).length
               ? '<div class="tagrow">' + w.tags.map((t) => "<i>" + esc(t) + "</i>").join("") + "</div>"
               : "";
-            const style = w.accent ? ' style="--ac:' + esc(w.accent) + '"' : "";
-            return '<article class="work' + (w.hidden ? " draft" : "") + '"' + style + '>' + shot +
+            // Цвет записи — свой, цвет плашки с названием полки — полки.
+            const shelfColor = themeOf(w.kind).color;
+            const style = ' style="--kc:' + esc(shelfColor) +
+              (w.accent ? ";--ac:" + esc(w.accent) : "") + '"';
+            // В сетке первая закреплённая запись занимает две клетки
+            const wide = (mode === 1 && i === 0 && w.pinned) ? " wide" : "";
+            return '<article class="work' + (w.hidden ? " draft" : "") + wide + '"' + style + '>' + shot +
               '<div class="body">' +
               (flags.length ? '<div class="flags">' + flags.join("") + "</div>" : "") +
               '<span class="kind">' + esc(w.kind) + "</span>" +
@@ -11889,19 +12074,34 @@ def diy_page():
               tools + "</div></article>";
           }).join("");
 
-          // Колоде и вееру нужна раскладка после отрисовки
+          // Барабану и вееру нужна раскладка после отрисовки
           grid.onscroll = null;
-          if (mode === 3) { deckAt = Math.min(deckAt, Math.max(0, list.length - 1)); layDeck(); }
-          if (mode === 6) { layFan(); grid.onscroll = layFan; requestAnimationFrame(layFan); }
+          if (mode === 2 || mode === 4) {
+            grid.onscroll = relay;
+            requestAnimationFrame(relay);
+          }
+          reveal(grid);
         };
 
-        /* Переключение вида и стрелки листания */
+        // Тянуть мышью умеют обе горизонтальные ленты; вешаем один раз.
+        hauling($("grid"));
+
+        /* Переключение полки, вида и стрелки листания */
+        $("shelf").addEventListener("click", (e) => {
+          const b = e.target.closest("[data-shelf]");
+          if (!b) return;
+          theme = b.dataset.shelf;
+          try { localStorage.setItem("vgDiyShelf", theme); } catch (err) { /* и ладно */ }
+          mode = viewOf(theme);
+          $("grid").scrollLeft = 0;
+          drawGrid();
+        });
         $("modes").addEventListener("click", (e) => {
           const m = e.target.closest("[data-mode]");
           if (m) {
             mode = +m.dataset.mode;
-            deckAt = 0;
-            try { localStorage.setItem("vgDiyMode", String(mode)); } catch (err) { /* и ладно */ }
+            rememberView();
+            $("grid").scrollLeft = 0;
             drawGrid();
             return;
           }
@@ -11910,11 +12110,11 @@ def diy_page():
         });
         addEventListener("keydown", (e) => {
           if (e.target.matches("input, textarea, select")) return;
+          if (mode !== 2 && mode !== 4) return;
           if (e.key === "ArrowRight") step(1);
           if (e.key === "ArrowLeft") step(-1);
         });
-        addEventListener("resize", () => { if (mode === 6) layFan(); });
-
+        addEventListener("resize", relay);
         const draw = () => { drawBar(); drawGrid(); };
 
         /* ── окно правки ───────────────────────────────────────────── */
@@ -11936,7 +12136,7 @@ def diy_page():
             "<h3>" + (fresh ? "Новое творение" : "Правим запись") + "</h3>" +
             '<label class="field"><span>Название</span>' +
             '<input id="f-title" maxlength="80" value="' + esc(work.title) + '"></label>' +
-            '<label class="field"><span>Тип</span><select id="f-kind">' +
+            '<label class="field"><span>Полка</span><select id="f-kind">' +
             kinds.map((k) => '<option' + (k === work.kind ? " selected" : "") + ">" + esc(k) + "</option>").join("") +
             "</select></label>" +
             '<label class="field"><span>Код статьи</span>' +
