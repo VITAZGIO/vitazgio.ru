@@ -3324,6 +3324,28 @@ __ICONLINKS__
                 .replace("__BODY__", body))
 
 
+@app.get("/api/drop/qr")
+@login_required
+def drop_qr():
+    """Ссылка картинкой: показать телефону, а не диктовать вслух.
+
+    Рисуем прямо на сервере в SVG — он чёткий на любом экране и весит
+    считанные килобайты. Кодируем только свои же ссылки на этот сайт."""
+    url = (request.args.get("url") or "").strip()[:900]
+    if not url.startswith(request.host_url.rstrip("/")):
+        return "Чужая ссылка", 400
+    try:
+        import segno
+    except ImportError:
+        return "Нечем нарисовать", 501
+    buf = io.BytesIO()
+    segno.make(url, error="m").save(buf, kind="svg", scale=1, border=2,
+                                    dark="#04121c", light="#ffffff", xmldecl=False)
+    response = Response(buf.getvalue(), mimetype="image/svg+xml")
+    response.headers["Cache-Control"] = "private, max-age=600"
+    return response
+
+
 @app.delete("/api/drop/<item_id>")
 @login_required
 def drop_delete(item_id):
@@ -6730,6 +6752,13 @@ def drop_page():
         .fi-cell:hover { border-color: rgba(45,226,255,.5); background: rgba(45,226,255,.09); }
         .fi-cell.on { border-color: #2de2ff; background: rgba(45,226,255,.16); }
 
+        /* Ссылка кодом: белое поле обязательно, иначе камера не прочтёт. */
+        .qr-box { display: grid; place-items: center; gap: 8px; margin: 0 0 14px; }
+        .qr-box img { width: 190px; height: 190px; padding: 8px; border-radius: 10px;
+                      background: #fff; image-rendering: pixelated; }
+        .qr-box span { color: #6b7c8f; font-size: .68rem; letter-spacing: .08em;
+                       text-transform: uppercase; }
+
         /* Выданная раньше ссылка — её надо уметь показать и скопировать снова */
         .lk-url { margin: 0 0 14px; padding: 11px; color: #9fd7e8; font-size: .72rem;
                   word-break: break-all; line-height: 1.55;
@@ -7359,10 +7388,21 @@ def drop_page():
             "<h3>Ссылка активна</h3>" +
             '<div class="lk-url">' + esc(url) + "</div>" +
             '<p class="share-note">' + esc(life) + "</p>" +
+            '<div class="qr-box" id="lk-qr" hidden>' +
+              '<img alt="Ссылка кодом"><span>наведи телефоном</span></div>' +
             '<div class="share-btns">' +
               '<button type="button" class="go" id="lk-copy">⧉ КОПИРОВАТЬ</button>' +
-              '<button type="button" class="bad" id="lk-del">УДАЛИТЬ ССЫЛКУ</button>' +
+              '<button type="button" id="lk-qrbtn">QR</button>' +
+              '<button type="button" class="bad" id="lk-del">УДАЛИТЬ</button>' +
             "</div>");
+          // Ссылку удобно не копировать, а показать телефону кодом.
+          m.box.querySelector("#lk-qrbtn").addEventListener("click", () => {
+            const box = m.box.querySelector("#lk-qr");
+            const img = box.querySelector("img");
+            if (!img.getAttribute("src"))
+              img.src = "/api/drop/qr?url=" + encodeURIComponent(url);
+            box.hidden = !box.hidden;
+          });
           m.box.querySelector("#lk-copy").addEventListener("click", async () => {
             try { await navigator.clipboard.writeText(url); toast("Ссылка скопирована"); }
             catch { prompt("Ссылка:", url); }
