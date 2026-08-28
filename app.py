@@ -4115,7 +4115,7 @@ def cabinet():
            страницей — плитка-замок, сцепленная с соседями ступенькой.
            Раскладка: NetBird строкой, ниже четыре плитки, потом две
            разворачивающиеся, внизу темы и копия. */
-        .cab { display: grid; gap: 12px; grid-template-columns: repeat(4, 1fr); margin-top: 14px; }
+        .cab { display: grid; gap: 20px; grid-template-columns: repeat(4, 1fr); margin-top: 14px; }
         .c4 { grid-column: span 4; } .c2 { grid-column: span 2; }
 
         /* разворачивающиеся */
@@ -4127,21 +4127,21 @@ def cabinet():
         .cabp:hover { border-color: color-mix(in srgb, var(--a) 50%, transparent);
                       transform: scale(1.012); z-index: 3; }
         .ex-head { position: relative; width: 100%; display: flex; align-items: center; gap: 13px;
-                   padding: 14px 17px; cursor: pointer; color: inherit; text-align: left;
+                   padding: 17px 40px 17px 20px; cursor: pointer; color: inherit; text-align: left;
                    border: 0; background: none; font: inherit; }
         .ex-head::before { content: ""; position: absolute; left: 0; top: 11px; bottom: 11px; width: 2px;
                            border-radius: 2px; background: var(--a); box-shadow: 0 0 12px var(--a); }
-        .ex-ic { width: 40px; height: 40px; flex: none; display: grid; place-items: center; }
+        .ex-ic { width: 48px; height: 48px; flex: none; display: grid; place-items: center; }
         .ex-ic svg, .ex-ic img { width: 100%; height: 100%; object-fit: contain; display: block; }
         .ex-tx { flex: 1; min-width: 0; }
-        .ex-tx b { display: block; color: #f8fbff; font-size: 1rem; font-weight: 800; }
-        .ex-tx i { display: block; margin-top: 3px; font-style: normal; color: #98a5ba; font-size: .78rem; }
+        .ex-tx b { display: block; color: #f8fbff; font-size: 1.2rem; font-weight: 800; }
+        .ex-tx i { display: block; margin-top: 4px; font-style: normal; color: #9fadc2; font-size: .88rem; }
         .ex-ar { flex: none; color: var(--a); font-size: 1rem; opacity: .75; transition: transform .25s; }
         .ex-head[aria-expanded="true"] .ex-ar { transform: rotate(180deg); }
 
         /* плитки-замок: сцепляются ступенькой, как детали в пазу */
         .zrow { display: flex; }
-        .z { --a: #2de2ff; --s: 56px; position: relative; flex: 1 1 0; min-width: 0; min-height: 122px;
+        .z { --a: #2de2ff; --s: 56px; position: relative; flex: 1 1 0; min-width: 0; min-height: 150px;
              display: flex; flex-direction: column; color: inherit; text-decoration: none;
              margin-left: calc(var(--s) * -1 + 5px); cursor: pointer; border: 0; font: inherit;
              padding: 0; text-align: left; transform-origin: center;
@@ -4156,17 +4156,18 @@ def cabinet():
         .z:last-child {
              clip-path: polygon(var(--s) 0, 100% 0, 100% 100%, 0 100%, 0 56%, var(--s) 46%); }
         .z:hover { filter: brightness(1.35) saturate(1.1); transform: scale(1.02); z-index: 3; }
-        .z .ztop { flex: 0 0 50%; display: flex; align-items: center; gap: 9px;
-                   padding: 0 11px 0 calc(var(--s) + 11px); }
-        .z:first-child .ztop { padding-left: 11px; }
-        .z-ic { width: 32px; height: 32px; flex: none; display: grid; place-items: center; }
+        .z .ztop { flex: 0 0 50%; display: flex; align-items: center; gap: 13px;
+                   padding: 0 40px 0 calc(var(--s) + 20px); }
+        .z:first-child .ztop { padding-left: 20px; }
+        .z-ic { width: 42px; height: 42px; flex: none; display: grid; place-items: center; }
         .z-ic svg, .z-ic img { width: 100%; height: 100%; object-fit: contain; display: block; }
-        .z .ztop b { color: #f8fbff; font-size: .95rem; font-weight: 800; line-height: 1.2; }
-        .z .zbot { flex: 1; display: flex; align-items: center; justify-content: space-between; gap: 8px;
-                   padding: 0 calc(var(--s) + 11px) 0 11px; }
-        .z:last-child .zbot { padding-right: 11px; }
-        .z .zbot i { font-style: normal; color: #a9b7cc; font-size: .78rem; line-height: 1.25; }
-        .z .zbot em { font-style: normal; flex: none; color: var(--a); font-size: .98rem; opacity: .85;
+        .z .ztop b { color: #f8fbff; font-size: 1.16rem; font-weight: 800; line-height: 1.2; }
+        .z .zbot { flex: 1; display: flex; align-items: center; justify-content: space-between; gap: 10px;
+                   padding: 0 calc(var(--s) + 40px) 0 20px; }
+        .z:last-child .zbot { padding-right: 40px; }
+        .z .zbot i { font-style: normal; color: #b3c0d4; font-size: .88rem;
+                     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.25; }
+        .z .zbot em { font-style: normal; flex: none; color: var(--a); font-size: 1.1rem; opacity: .85;
                       transition: transform .25s; }
         .z[aria-expanded="true"] .zbot em { transform: rotate(180deg); }
 
@@ -4179,7 +4180,7 @@ def cabinet():
           .cab { grid-template-columns: repeat(2, 1fr); gap: 9px; }
           .c4, .c2 { grid-column: span 2; }
           .zrow { flex-wrap: wrap; gap: 9px 0; }
-          .z { --s: 28px; flex: 1 1 calc(50% - 1px); min-height: 96px; }
+          .z { --s: 34px; flex: 1 1 calc(50% - 1px); min-height: 124px; }
           .z:nth-child(3) { margin-left: 0;
              clip-path: polygon(0 0, 100% 0, 100% 46%, calc(100% - var(--s)) 56%,
                         calc(100% - var(--s)) 100%, 0 100%); }
@@ -4187,13 +4188,16 @@ def cabinet():
           .z:nth-child(2) {
              clip-path: polygon(var(--s) 0, 100% 0, 100% 100%, 0 100%, 0 56%, var(--s) 46%); }
           .z:nth-child(2) .zbot { padding-right: 9px; }
-          .z .ztop { padding: 0 9px 0 calc(var(--s) + 9px); gap: 7px; }
-          .z .zbot { padding: 0 calc(var(--s) + 9px) 0 9px; }
-          .z-ic { width: 23px; height: 23px; }
-          .z .ztop b { font-size: .7rem; } .z .zbot i { font-size: .57rem; }
-          .ex-head { padding: 10px 13px; gap: 10px; }
-          .ex-ic { width: 30px; height: 30px; }
-          .ex-tx b { font-size: .76rem; } .ex-tx i { font-size: .59rem; }
+          .z .ztop { padding: 0 22px 0 calc(var(--s) + 11px); gap: 9px; }
+          .z:first-child .ztop, .z:nth-child(3) .ztop { padding-left: 11px; }
+          .z .zbot { padding: 0 calc(var(--s) + 22px) 0 11px; }
+          .z-ic { width: 30px; height: 30px; }
+          .z .ztop b { font-size: .86rem; }
+          .z .zbot i { font-size: .68rem; white-space: normal; display: -webkit-box;
+                       -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.3; }
+          .ex-head { padding: 13px 22px 13px 13px; gap: 11px; }
+          .ex-ic { width: 36px; height: 36px; }
+          .ex-tx b { font-size: .92rem; } .ex-tx i { font-size: .68rem; }
         }
         .log-more { width: 100%; margin-top: 8px; padding: 9px 12px; cursor: pointer;
                     color: #9fd8ff; font: 700 .76rem "Cascadia Code", Consolas, monospace;
@@ -4325,7 +4329,7 @@ def cabinet():
                   </span>
                   <b>Личный дроп</b>
                 </span>
-                <span class="zbot"><i>файлы и обмен</i><em aria-hidden="true">⟶</em></span>
+                <span class="zbot"><i>файлы и текст между машинами</i><em aria-hidden="true">⟶</em></span>
               </a>
 
               <a class="z" href="/neuro" style="--a:#7b6bff">
@@ -4345,36 +4349,46 @@ def cabinet():
                   </span>
                   <b>Нейронки</b>
                 </span>
-                <span class="zbot"><i>DeepSeek и Claude</i><em aria-hidden="true">⟶</em></span>
+                <span class="zbot"><i>два чата: DeepSeek и Claude</i><em aria-hidden="true">⟶</em></span>
               </a>
 
               <a class="z" href="/notebook" style="--a:#0a7ce0">
                 <span class="ztop">
                   <span class="z-ic">
                     <svg viewBox="0 0 48 40" aria-hidden="true">
-                      <rect x="6" y="4" width="36" height="32" rx="4" fill="#eaf1fb" stroke="#0067c0" stroke-width="2"/>
-                      <rect x="6" y="4" width="9" height="32" rx="4" fill="#0067c0" fill-opacity=".14"/>
-                      <path d="M20 13h16M20 20h16M20 27h11" stroke="#0067c0" stroke-width="2.2" stroke-linecap="round"/>
-                      <path d="M15 2v6M23 2v6" stroke="#0067c0" stroke-width="2.4" stroke-linecap="round"/>
+                      <defs>
+                        <linearGradient id="nb-cover" x1="0" y1="0" x2="1" y2="1">
+                          <stop offset="0" stop-color="#3aa0f5"/><stop offset="1" stop-color="#0a63c4"/>
+                        </linearGradient>
+                        <linearGradient id="nb-page" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#dce9f9"/>
+                        </linearGradient>
+                      </defs>
+                      <rect x="5" y="3" width="38" height="34" rx="5" fill="url(#nb-cover)"/>
+                      <path d="M12 8h20l7 7v14a3 3 0 0 1-3 3H12a3 3 0 0 1-3-3V11a3 3 0 0 1 3-3Z"
+                            fill="url(#nb-page)"/>
+                      <path d="M32 8v5a2 2 0 0 0 2 2h5Z" fill="#9dc7ef"/>
+                      <path d="M14 20h16M14 25h16M14 30h10" stroke="#1668c4" stroke-width="2"
+                            stroke-linecap="round"/>
                     </svg>
                   </span>
                   <b>Блокнот</b>
                 </span>
-                <span class="zbot"><i>ссылки и тексты</i><em aria-hidden="true">⟶</em></span>
+                <span class="zbot"><i>заметки, ссылки и файлы</i><em aria-hidden="true">⟶</em></span>
               </a>
 
               <a class="z" href="/music" style="--a:#35e0f0">
                 <span class="ztop">
                   <span class="z-ic">
                     <svg viewBox="0 0 48 40" aria-hidden="true">
-                      <path d="M18 8l20-4v22" fill="none" stroke="#35e0f0" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+                      <path d="M18 30V8l20-4v22" fill="none" stroke="#35e0f0" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
                       <circle cx="13" cy="30" r="6" fill="#35e0f0" fill-opacity=".2" stroke="#35e0f0" stroke-width="3"/>
                       <circle cx="33" cy="26" r="6" fill="#35e0f0" fill-opacity=".2" stroke="#35e0f0" stroke-width="3"/>
                     </svg>
                   </span>
                   <b>Музыка</b>
                 </span>
-                <span class="zbot"><i>фонотека и плеер</i><em aria-hidden="true">⟶</em></span>
+                <span class="zbot"><i>фонотека и плеер в отдельном окне</i><em aria-hidden="true">⟶</em></span>
               </a>
             </div>
 
@@ -4394,7 +4408,7 @@ def cabinet():
                   </span>
                   <b>Запомнить устройства</b>
                 </span>
-                <span class="zbot"><i>вход без пароля</i><em aria-hidden="true">⌄</em></span>
+                <span class="zbot"><i>вход без пароля на 90 дней</i><em aria-hidden="true">⌄</em></span>
               </button>
 
               <button class="z panel-head" id="loginlog-toggle" type="button"
@@ -4404,13 +4418,13 @@ def cabinet():
                     <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
                       <circle cx="24" cy="24" r="17" stroke="#2de2ff" stroke-width="2.6" stroke-opacity=".55"/>
                       <path d="M24 13v11l7.5 4.5" stroke="#7fe9ff" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>
-                      <path d="M7 24a17 17 0 0 1 5-12" stroke="#2de2ff" stroke-width="2.6" stroke-linecap="round"/>
+                      <path d="M24 7a17 17 0 0 1 14.6 25.7" stroke="#2de2ff" stroke-width="2.6" stroke-linecap="round"/>
                       <circle cx="24" cy="24" r="2.6" fill="#7fe9ff"/>
                     </svg>
                   </span>
                   <b>Журнал входов</b>
                 </span>
-                <span class="zbot"><i>кто и когда</i><em aria-hidden="true">⌄</em></span>
+                <span class="zbot"><i>кто и когда заходил · 2 недели</i><em aria-hidden="true">⌄</em></span>
               </button>
 
               <a class="z" href="/themes" style="--a:#ff3fa4">
@@ -4425,7 +4439,7 @@ def cabinet():
                   </span>
                   <b>Тестовые темы</b>
                 </span>
-                <span class="zbot"><i>оформление сайта</i><em aria-hidden="true">⟶</em></span>
+                <span class="zbot"><i>витрина оформления · киберпанк</i><em aria-hidden="true">⟶</em></span>
               </a>
 
               <button class="z panel-head" id="backup-toggle" type="button"
@@ -4440,7 +4454,7 @@ def cabinet():
                   </span>
                   <b>Резервная копия</b>
                 </span>
-                <span class="zbot"><i>скачать и вернуть</i><em aria-hidden="true">⌄</em></span>
+                <span class="zbot"><i>скачать всё и вернуть обратно</i><em aria-hidden="true">⌄</em></span>
               </button>
             </div>
 
