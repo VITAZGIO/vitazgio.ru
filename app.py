@@ -3913,6 +3913,11 @@ def cabinet():
         body { margin: 0; min-height: 100svh; color: #e9fbff; font-family: "Cascadia Code", Consolas, monospace; background: radial-gradient(circle at top left, #192a44, #0d1321 55%); }
         .cabinet { min-height: 100svh; padding: clamp(24px, 4vw, 54px); background: linear-gradient(135deg, rgba(10,18,32,.25), transparent 60%); display: flex; flex-direction: column; }
         .cabinet-header { display: flex; align-items: center; gap: 20px; }
+        .cabinet-header .back { width: 44px; height: 44px; flex: none; display: grid; place-items: center;
+          color: #2de2ff; text-decoration: none; border: 1px solid rgba(45,226,255,.3); border-radius: 50%;
+          background: rgba(45,226,255,.07); transition: all .18s; }
+        .cabinet-header .back:hover { color: #fff; border-color: #2de2ff; background: rgba(45,226,255,.18); }
+        .cabinet-header .back svg { width: 20px; height: 20px; display: block; }
         h1 { margin: 0; font-size: clamp(1.7rem, 3.6vw, 2.6rem); font-weight: 700; letter-spacing: -.02em;
              color: #eaf6ff; text-shadow: 0 0 22px rgba(45,226,255,.35); }
         h1 span { color: #2de2ff; text-shadow: 0 0 22px rgba(45,226,255,.5); }
@@ -3922,7 +3927,10 @@ def cabinet():
         .install-button { margin-left: auto; color: #1a0d04; border: 0; background: linear-gradient(90deg, #ff782f, #ffb35c); }
         .install-button:hover { border: 0; background: linear-gradient(90deg, #ff8f4f, #ffc379); }
         [hidden] { display: none !important; }
-        .workspace { flex: 1 1 auto; min-width: 0; margin-top: clamp(22px, 3.5vw, 40px); }
+        .workspace { flex: 1 1 auto; min-width: 0; margin-top: clamp(22px, 3.5vw, 40px);
+                     display: flex; flex-direction: column; min-height: 0; }
+        .workspace > .dash { flex: 1 1 auto; }
+        .workspace > .cab { flex: none; }
         .device-list { container-type: inline-size; margin: 0; padding: 8px 18px 18px; list-style: none; border-top: 1px solid rgba(255,255,255,.07); }
         .device { min-height: 48px; display: grid; grid-template-columns: 150px 1fr 70px 36px 116px 82px; align-items: center; gap: 12px; border-bottom: 1px solid rgba(255,255,255,.06); }
         .device:last-child { border-bottom: 0; }
@@ -4313,9 +4321,13 @@ def cabinet():
     <body>
       <main class="cabinet">
         <header class="cabinet-header">
+          <a class="back" href="/" title="На главную" aria-label="На главную">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M19 12H5m0 0 6-6m-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </a>
           <h1>Личный <span>кабинет</span></h1>
           <button class="logout-button install-button" id="install" type="button" hidden>Установить приложение</button>
-          <form class="logout-form" action="/logout" method="post"><button class="logout-button" type="submit">Выйти</button></form>
         </header>
         <div class="cabinet-cols">
         <div class="workspace">
@@ -13874,7 +13886,7 @@ OPENROUTER_KEY = os.environ.get("OPENROUTER_KEY", "").strip()
 OPENROUTER_URL = os.environ.get(
     "OPENROUTER_URL", "https://openrouter.ai/api/v1/chat/completions").strip()
 OPENROUTER_MODEL = os.environ.get(
-    "OPENROUTER_MODEL", "deepseek/deepseek-chat-v3-0324:free").strip()
+    "OPENROUTER_MODEL", "deepseek/deepseek-chat-v3.1:free").strip()
 # Vision-модель отдельно: у бесплатного DeepSeek картинок нет, поэтому фото
 # уходит той модели, что назвал хозяин здесь. Пусто — кнопка фото прячется.
 OPENROUTER_VISION_MODEL = os.environ.get("OPENROUTER_VISION_MODEL", "").strip()
