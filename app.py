@@ -3851,6 +3851,27 @@ def drop_trash_purge(item_id):
     return jsonify(ok=True)
 
 
+@app.delete("/api/drop/trash")
+@login_required
+def drop_trash_empty():
+    """Выкинуть всю корзину разом.
+
+    Удалять по одному, когда там сотня файлов, — занятие на полчаса. Сносим
+    только то, что лежит в корзине верхним уровнем: вложенное уедет вместе с
+    папкой, за это отвечает _drop_discard."""
+    if not session.get("drop_trash"):
+        return jsonify(error="Корзина закрыта."), 403
+    with drop_lock:
+        _drop_sweep_trash()
+        roots = list(_drop_trash_roots())
+        for item_id in roots:
+            _drop_discard(item_id)
+        if roots:
+            _drop_write_index()
+        return jsonify(ok=True, gone=len(roots), trash=_drop_trash_bytes(),
+                       used=_drop_used(), quota=DROP_QUOTA)
+
+
 @app.get("/cabinet")
 @login_required
 def cabinet():
@@ -7395,7 +7416,13 @@ def drop_page():
         .btn.bad { color: #ff9aa6; border-color: rgba(255,90,110,.35); }
         .btn.bad:hover { color: #fff; border-color: #ff5a6e; background: rgba(255,90,110,.14); }
         .trash-empty { padding: 26px 0; color: #6b7c8f; text-align: center; font-size: .82rem; }
-        .trash-keys { display: flex; justify-content: flex-end; }
+        /* «Очистить всё» слева, «Закрыть» справа: разные по весу действия
+           не должны стоять вплотную, чтобы не промахнуться. */
+        .trash-keys { display: flex; justify-content: space-between; gap: 10px; }
+        .trash-keys .btn { height: 34px; }
+        #trash-all i { font-style: normal; margin-left: 2px; padding: 1px 6px;
+                       font-size: .68rem; border-radius: 999px;
+                       color: #ffd0d6; background: rgba(255,90,110,.18); }
 
         /* Окно ввода пароля от корзины */
         .trash-lock { width: min(390px, 100%); text-align: left; }
@@ -7871,7 +7898,13 @@ def drop_page():
             '<p class="trash-note">Файлы лежат здесь до месяца, потом удаляются сами. ' +
               'Всего в корзине: <b>' + fmtSize(data.trash || 0) + '</b>.</p>' +
             '<div class="trash-list">' + rows + '</div>' +
-            '<div class="trash-keys"><button class="btn" type="button" id="trash-close">Закрыть</button></div>';
+            '<div class="trash-keys">' +
+              (items.length
+                ? '<button class="btn bad" type="button" id="trash-all">Очистить всё' +
+                  ' <i>' + items.length + '</i></button>'
+                : "") +
+              '<button class="btn" type="button" id="trash-close">Закрыть</button>' +
+            '</div>';
         };
 
         // Красивое окно ввода пароля от корзины: тот же тёмный стиль, что и
@@ -7946,8 +7979,19 @@ def drop_page():
             if (e.target.closest("#trash-close")) { m.shut(); return; }
             const rest = e.target.closest("[data-restore]");
             const purge = e.target.closest("[data-purge]");
+            const all = e.target.closest("#trash-all");
             try {
-              if (rest) {
+              if (all) {
+                // Разом — значит разом: спрашиваем один раз, но честно
+                // называем, сколько и на сколько мегабайт сейчас исчезнет.
+                const many = (data.items || []).length;
+                if (!confirm("Выкинуть из корзины всё — " + many + " " +
+                             plural(many, ["объект", "объекта", "объектов"]) +
+                             " на " + fmtSize(data.trash || 0) + "?\\n" +
+                             "Это не отменить.")) return;
+                const done = await api("/api/drop/trash", { method: "DELETE" });
+                toast("Корзина пуста — выкинуто: " + (done.gone || many));
+              } else if (rest) {
                 await api("/api/drop/" + rest.dataset.restore + "/restore", { method: "POST" });
                 toast("Возвращено");
               } else if (purge) {
@@ -7957,7 +8001,7 @@ def drop_page():
               } else { return; }
             } catch (err) { toast(err.message, true); return; }
             const nd = await trashList();
-            if (nd) renderTrash(panel, nd);
+            if (nd) { data = nd; renderTrash(panel, nd); }
             load();                                       // обновить шкалу занятости
           });
         };
