@@ -4231,21 +4231,19 @@ def cabinet():
                                    animation: cab-halo 2.6s ease-in-out infinite; }
         @keyframes cab-halo {
           0%, 100% { filter:
-              drop-shadow( 2px 0 0 #ff3fa4) drop-shadow(-2px 0 0 #ff3fa4)
-              drop-shadow(0  2px 0 #ff3fa4) drop-shadow(0 -2px 0 #ff3fa4)
-              drop-shadow(0 0 12px #ff3fa4)
-              drop-shadow(0 0 26px rgba(255,63,164,.6)); }
+              drop-shadow( 1px 0 0 rgba(255,63,164,.55)) drop-shadow(-1px 0 0 rgba(255,63,164,.55))
+              drop-shadow(0  1px 0 rgba(255,63,164,.55)) drop-shadow(0 -1px 0 rgba(255,63,164,.55))
+              drop-shadow(0 0 6px rgba(255,63,164,.28)); }
           50%      { filter:
-              drop-shadow( 3px 0 0 #ff5cb4) drop-shadow(-3px 0 0 #ff5cb4)
-              drop-shadow(0  3px 0 #ff5cb4) drop-shadow(0 -3px 0 #ff5cb4)
-              drop-shadow(0 0 26px #ff3fa4)
-              drop-shadow(0 0 52px rgba(255,63,164,.85)); }
+              drop-shadow( 1px 0 0 rgba(255,92,180,.8)) drop-shadow(-1px 0 0 rgba(255,92,180,.8))
+              drop-shadow(0  1px 0 rgba(255,92,180,.8)) drop-shadow(0 -1px 0 rgba(255,92,180,.8))
+              drop-shadow(0 0 12px rgba(255,63,164,.45)); }
         }
         @media (prefers-reduced-motion: reduce) {
           .z[aria-expanded="true"] { animation: none;
-              filter: drop-shadow(1px 0 0 #ff3fa4) drop-shadow(-1px 0 0 #ff3fa4)
-                      drop-shadow(0 1px 0 #ff3fa4) drop-shadow(0 -1px 0 #ff3fa4)
-                      drop-shadow(0 0 16px rgba(255,63,164,.7)); }
+              filter: drop-shadow(1px 0 0 rgba(255,63,164,.6)) drop-shadow(-1px 0 0 rgba(255,63,164,.6))
+                      drop-shadow(0 1px 0 rgba(255,63,164,.6)) drop-shadow(0 -1px 0 rgba(255,63,164,.6))
+                      drop-shadow(0 0 8px rgba(255,63,164,.3)); }
         }
 
         @media (max-width: 620px) {
