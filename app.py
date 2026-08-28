@@ -4324,8 +4324,34 @@ def cabinet():
               <span class="panel-arrow panel-arrow--go" aria-hidden="true">⟶</span>
             </span>
           </a>
-          <!-- Журнал входов — логотип справа -->
-          <section class="panel panel--right" style="--accent:#2de2ff">
+
+          <!-- Нейросеть — логотип справа. Чат с DeepSeek через OpenRouter:
+               модель в облаке, история разговоров хранится на самом сайте. -->
+          <a class="panel panel--right" href="/ai" style="--accent:#4d6bfe">
+            <span class="panel-head">
+              <span class="panel-logo">
+                <svg viewBox="0 0 48 40" aria-hidden="true">
+                  <path d="M24 6c-6 0-9 3.6-9 8 0 1.4.4 2.7 1.1 3.8-1.9 1-3.1 2.9-3.1 5.2 0 3.6 3 6.4 7 6.4h.5"
+                        fill="none" stroke="#4d6bfe" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M24 6c6 0 9 3.6 9 8 0 1.4-.4 2.7-1.1 3.8 1.9 1 3.1 2.9 3.1 5.2 0 3.6-3 6.4-7 6.4H27"
+                        fill="none" stroke="#8b7bff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M24 9v24" stroke="#4d6bfe" stroke-width="2.2" stroke-opacity=".55"/>
+                  <circle cx="16" cy="15" r="1.8" fill="#8b7bff"/>
+                  <circle cx="32" cy="15" r="1.8" fill="#4d6bfe"/>
+                  <circle cx="18" cy="24" r="1.8" fill="#4d6bfe"/>
+                  <circle cx="30" cy="24" r="1.8" fill="#8b7bff"/>
+                </svg>
+              </span>
+              <span class="panel-text">
+                <span class="panel-title">Нейросеть</span>
+                <span class="panel-sub">чат с DeepSeek, история хранится на сайте</span>
+              </span>
+              <span class="panel-arrow panel-arrow--go" aria-hidden="true">⟶</span>
+            </span>
+          </a>
+
+          <!-- Журнал входов — логотип слева -->
+          <section class="panel" style="--accent:#2de2ff">
             <button class="panel-head" id="loginlog-toggle" type="button" aria-expanded="false" aria-controls="loginlog-body">
               <span class="panel-logo">
                 <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
@@ -4347,7 +4373,7 @@ def cabinet():
           </section>
 
           <!-- Запомненные устройства — логотип слева -->
-          <section class="panel" style="--accent:#63f5ad">
+          <section class="panel panel--right" style="--accent:#63f5ad">
             <button class="panel-head" id="devices-toggle" type="button" aria-expanded="false" aria-controls="devices-body">
               <span class="panel-logo">
                 <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
@@ -4379,7 +4405,7 @@ def cabinet():
           </section>
 
           <!-- Тестовые темы: витрина оформления -->
-          <a class="panel panel--right" href="/themes" style="--accent:#ff3fa4; margin-bottom:32px">
+          <a class="panel" href="/themes" style="--accent:#ff3fa4; margin-bottom:32px">
             <span class="panel-head">
               <span class="panel-logo">
                 <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
@@ -4398,7 +4424,7 @@ def cabinet():
           </a>
 
           <!-- Резервная копия — в самом низу: сюда заходят редко и по делу -->
-          <section class="panel" style="--accent:#63f5ad; margin-bottom:32px">
+          <section class="panel panel--right" style="--accent:#63f5ad; margin-bottom:32px">
             <button class="panel-head" id="backup-toggle" type="button"
                     aria-expanded="false" aria-controls="backup-body">
               <span class="panel-logo">
@@ -13736,6 +13762,817 @@ def sebastian_page():
     """
     return (html.replace("__ICONLINKS__", ICON_LINKS)
                 .replace("__ICON_BUTLER__", _GAME_ICONS.get(SEBASTIAN_ICON, "")))
+
+
+# ---- Нейросеть: чат с DeepSeek через OpenRouter ---------------------------
+# Отдельная страница-чат в кабинете. В отличие от Себастьяна (тот крутится
+# дома на видеокарте и потому один на всех), эта модель живёт в облаке
+# OpenRouter — дома ничего не грузит, видеопамять свободна. OpenRouter говорит
+# на языке OpenAI, так что запрос простой. Историю держит сам сайт: рядом с
+# блокнотом, под паролем кабинета. Между запросами ни OpenRouter, ни DeepSeek
+# ничего не помнят — весь разговор шлём заново каждый раз.
+OPENROUTER_KEY = os.environ.get("OPENROUTER_KEY", "").strip()
+OPENROUTER_URL = os.environ.get(
+    "OPENROUTER_URL", "https://openrouter.ai/api/v1/chat/completions").strip()
+OPENROUTER_MODEL = os.environ.get(
+    "OPENROUTER_MODEL", "deepseek/deepseek-chat-v3-0324:free").strip()
+# Vision-модель отдельно: у бесплатного DeepSeek картинок нет, поэтому фото
+# уходит той модели, что назвал хозяин здесь. Пусто — кнопка фото прячется.
+OPENROUTER_VISION_MODEL = os.environ.get("OPENROUTER_VISION_MODEL", "").strip()
+
+AI_CHAT_PATH = os.path.join(DATA_DIR, "aichat.json")
+AI_IMG_DIR = os.path.join(DATA_DIR, "aichat_img")
+AI_TEXT_MAX = 8000
+AI_CTX_MSGS = 16            # сколько последних реплик отдаём модели
+AI_CHATS_MAX = 200         # столько чатов храним, старше — выкидываем
+AI_MSGS_MAX = 600          # столько реплик на чат
+AI_REPLY_TOKENS = 1400
+AI_TIMEOUT = 120
+AI_IMG_MAX = 4 * 1024 * 1024
+AI_SYS_PROMPT = ("Ты дружелюбный и толковый собеседник на личном сайте. "
+                 "Отвечай по-русски, живо и по делу. Просят код — давай рабочий "
+                 "и с коротким пояснением.")
+
+os.makedirs(AI_IMG_DIR, exist_ok=True)
+ai_data: dict = {"chats": []}
+ai_lock = threading.Lock()
+
+
+def _ai_load():
+    try:
+        with open(AI_CHAT_PATH, encoding="utf-8") as fh:
+            saved = json.load(fh) or {}
+        ai_data["chats"] = saved.get("chats", [])
+    except (OSError, ValueError):
+        pass
+
+
+def _ai_write():
+    """Вызывать под ai_lock."""
+    try:
+        tmp = AI_CHAT_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(ai_data, fh, ensure_ascii=False)
+        os.replace(tmp, AI_CHAT_PATH)
+    except OSError:
+        pass
+
+
+_ai_load()
+
+
+def _ai_ready():
+    return bool(OPENROUTER_KEY)
+
+
+def _ai_find(chat_id):
+    for c in ai_data["chats"]:
+        if c.get("id") == chat_id:
+            return c
+    return None
+
+
+def _ai_card(c):
+    return {"id": c["id"], "title": c.get("title") or "Новый чат",
+            "updated": c.get("updated", 0), "count": len(c.get("messages", [])),
+            "model": c.get("model", OPENROUTER_MODEL)}
+
+
+def _ai_img_path(img_id):
+    return os.path.join(AI_IMG_DIR, img_id)
+
+
+def _ai_drop_images(chat):
+    for m in chat.get("messages", []):
+        if m.get("img"):
+            try:
+                os.remove(_ai_img_path(m["img"]))
+            except OSError:
+                pass
+
+
+def _sse(obj):
+    return "data: " + json.dumps(obj, ensure_ascii=False) + "\n\n"
+
+
+def _ai_http_error(code):
+    if code == 429:
+        return ("Дневной лимит бесплатных запросов исчерпан. "
+                "Приходите позже или смените модель в .env.")
+    if code == 401:
+        return "OpenRouter не принял ключ — проверьте OPENROUTER_KEY."
+    if code == 402:
+        return "На счету OpenRouter не хватает средств для этой модели."
+    return f"OpenRouter вернул ошибку {code}."
+
+
+@app.get("/api/ai/state")
+@login_required
+def ai_state_api():
+    """Готовность и список прошлых чатов — страница спрашивает при открытии."""
+    with ai_lock:
+        cards = [_ai_card(c) for c in ai_data["chats"]]
+    cards.sort(key=lambda x: x["updated"], reverse=True)
+    return jsonify(ready=_ai_ready(), model=OPENROUTER_MODEL,
+                   vision=bool(OPENROUTER_VISION_MODEL), chats=cards)
+
+
+@app.get("/api/ai/chat/<chat_id>")
+@login_required
+def ai_chat_get(chat_id):
+    with ai_lock:
+        c = _ai_find(chat_id)
+        if not c:
+            return jsonify(error="Чат не найден."), 404
+        msgs = [{"role": m.get("role"), "text": m.get("text", ""),
+                 "img": m.get("img") or "", "ts": m.get("ts", 0)}
+                for m in c.get("messages", [])]
+        title = c.get("title") or "Новый чат"
+    return jsonify(id=chat_id, title=title, messages=msgs)
+
+
+@app.post("/api/ai/chat")
+@login_required
+def ai_chat_new():
+    cid = uuid.uuid4().hex[:12]
+    now = time.time()
+    chat = {"id": cid, "title": "", "model": OPENROUTER_MODEL,
+            "created": now, "updated": now, "messages": []}
+    with ai_lock:
+        ai_data["chats"].insert(0, chat)
+        if len(ai_data["chats"]) > AI_CHATS_MAX:
+            for old in ai_data["chats"][AI_CHATS_MAX:]:
+                _ai_drop_images(old)
+            del ai_data["chats"][AI_CHATS_MAX:]
+        _ai_write()
+    return jsonify(id=cid, title="Новый чат")
+
+
+@app.patch("/api/ai/chat/<chat_id>")
+@login_required
+def ai_chat_rename(chat_id):
+    payload = request.get_json(silent=True) or {}
+    name = (payload.get("title") or "").strip()[:80]
+    with ai_lock:
+        c = _ai_find(chat_id)
+        if not c:
+            return jsonify(error="Чат не найден."), 404
+        c["title"] = name
+        _ai_write()
+    return jsonify(ok=True, title=name or "Новый чат")
+
+
+@app.delete("/api/ai/chat/<chat_id>")
+@login_required
+def ai_chat_delete(chat_id):
+    with ai_lock:
+        c = _ai_find(chat_id)
+        if not c:
+            return jsonify(error="Чат не найден."), 404
+        _ai_drop_images(c)
+        ai_data["chats"] = [x for x in ai_data["chats"] if x is not c]
+        _ai_write()
+    return jsonify(ok=True)
+
+
+@app.get("/api/ai/img/<img_id>")
+@login_required
+def ai_img_api(img_id):
+    if not re.match(r"^[0-9a-f]{8,40}\.jpg$", img_id):
+        return jsonify(error="нет"), 404
+    path = _ai_img_path(img_id)
+    if not os.path.isfile(path):
+        return jsonify(error="нет"), 404
+    return send_file(path, mimetype="image/jpeg")
+
+
+@app.post("/api/ai/chat/<chat_id>/send")
+@login_required
+def ai_chat_send(chat_id):
+    """Принимает реплику (текст + необязательное фото), шлёт разговор в
+    OpenRouter и отдаёт ответ потоком (SSE). Пользовательскую реплику
+    сохраняем СРАЗУ: даже если модель сегодня молчит из-за лимита, написанное
+    не пропадёт и текст продолжит работать в следующий раз."""
+    if not _ai_ready():
+        return jsonify(error="Ключ OpenRouter на сервере не задан."), 503
+
+    payload = request.get_json(silent=True) or {}
+    text = (payload.get("text") or "").strip()[:AI_TEXT_MAX]
+    image_data = payload.get("image") or ""
+    if not text and not image_data:
+        return jsonify(error="Пустое сообщение."), 400
+
+    use_vision = bool(image_data) and bool(OPENROUTER_VISION_MODEL)
+    img_id, img_b64 = None, None
+    if image_data:
+        m = re.match(r"^data:image/(?:png|jpe?g|webp);base64,(.+)$",
+                     image_data, re.I)
+        if m:
+            try:
+                raw = base64.b64decode(m.group(1), validate=True)
+            except Exception:
+                raw = b""
+            if raw and len(raw) <= AI_IMG_MAX:
+                img_id = uuid.uuid4().hex[:16] + ".jpg"
+                try:
+                    with open(_ai_img_path(img_id), "wb") as fh:
+                        fh.write(raw)
+                    img_b64 = base64.b64encode(raw).decode("ascii")
+                except OSError:
+                    img_id, img_b64 = None, None
+
+    with ai_lock:
+        c = _ai_find(chat_id)
+        if not c:
+            return jsonify(error="Чат не найден."), 404
+        umsg = {"role": "user", "text": text, "ts": time.time()}
+        if img_id:
+            umsg["img"] = img_id
+        c.setdefault("messages", []).append(umsg)
+        if not c.get("title"):
+            c["title"] = text[:60] or "Фото"
+        c["updated"] = time.time()
+        if len(c["messages"]) > AI_MSGS_MAX:
+            for old in c["messages"][:-AI_MSGS_MAX]:
+                if old.get("img"):
+                    try:
+                        os.remove(_ai_img_path(old["img"]))
+                    except OSError:
+                        pass
+            c["messages"] = c["messages"][-AI_MSGS_MAX:]
+        _ai_write()
+        ctx = list(c["messages"][-AI_CTX_MSGS:])
+    model = OPENROUTER_VISION_MODEL if use_vision else OPENROUTER_MODEL
+
+    # Собираем разговор в формате OpenAI. Картинку прикрепляем только к самой
+    # последней реплике и только когда есть vision-модель.
+    api_msgs = [{"role": "system", "content": AI_SYS_PROMPT}]
+    last = ctx[-1] if ctx else None
+    for msg in ctx:
+        if msg is last and use_vision and img_b64:
+            content = []
+            if msg.get("text"):
+                content.append({"type": "text", "text": msg["text"]})
+            content.append({"type": "image_url", "image_url": {
+                "url": "data:image/jpeg;base64," + img_b64}})
+            api_msgs.append({"role": "user", "content": content})
+        else:
+            body = msg.get("text", "")
+            if not body and msg.get("img"):
+                body = "[фото]"
+            api_msgs.append({"role": msg.get("role", "user"), "content": body})
+
+    req_body = json.dumps({
+        "model": model,
+        "messages": api_msgs,
+        "stream": True,
+        "max_tokens": AI_REPLY_TOKENS,
+    }).encode("utf-8")
+
+    def save_reply(full):
+        with ai_lock:
+            cc = _ai_find(chat_id)
+            if cc is not None:
+                cc.setdefault("messages", []).append(
+                    {"role": "assistant", "text": full, "ts": time.time()})
+                cc["updated"] = time.time()
+                _ai_write()
+
+    def gen():
+        from urllib import request as urlrequest, error as urlerror
+        headers = {"Authorization": "Bearer " + OPENROUTER_KEY,
+                   "Content-Type": "application/json",
+                   "HTTP-Referer": "https://vitazgio.ru",
+                   "X-Title": "vitazgio.ru"}
+        req = urlrequest.Request(OPENROUTER_URL, data=req_body, headers=headers)
+        acc, resp = [], None
+        try:
+            resp = urlrequest.urlopen(req, timeout=AI_TIMEOUT)
+        except urlerror.HTTPError as e:
+            yield _sse({"error": _ai_http_error(e.code)})
+            return
+        except urlerror.URLError:
+            yield _sse({"error": "OpenRouter не отвечает. Попробуйте позже."})
+            return
+        try:
+            for rawline in resp:
+                line = rawline.decode("utf-8", "replace").strip()
+                if not line.startswith("data:"):
+                    continue
+                chunk = line[5:].strip()
+                if chunk == "[DONE]":
+                    break
+                try:
+                    obj = json.loads(chunk)
+                except ValueError:
+                    continue
+                choices = obj.get("choices") or [{}]
+                delta = (choices[0].get("delta") or {}).get("content")
+                if delta:
+                    acc.append(delta)
+                    yield _sse({"delta": delta})
+        except Exception:
+            pass
+        finally:
+            try:
+                resp.close()
+            except Exception:
+                pass
+        full = "".join(acc).strip()
+        if full:
+            save_reply(full)
+            yield _sse({"done": True, "text": full})
+        else:
+            yield _sse({"error": "Модель промолчала — попробуйте ещё раз."})
+
+    return Response(gen(), mimetype="text/event-stream",
+                    headers={"Cache-Control": "no-store",
+                             "X-Accel-Buffering": "no"})
+
+
+@app.get("/ai")
+@login_required
+def ai_page():
+    """Чат с нейросетью (DeepSeek через OpenRouter). Личная страница хозяина:
+    история чатов хранится на сайте под паролем кабинета, поэтому за замком."""
+    html = r"""<!doctype html>
+    <html lang="ru">
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <meta name="theme-color" content="#0b1020">
+      <meta name="description" content="Чат с нейросетью — vitazgio.ru">
+      __ICONLINKS__
+      <link rel="manifest" href="/manifest.webmanifest">
+      <title>Нейросеть · vitazgio.ru</title>
+      <style>
+        :root { color-scheme:dark; --line:rgba(255,255,255,.1); --muted:#8b93a7;
+                --ac:#4d6bfe; --ac2:#8b7bff; --ok:#63f5ad; --warm:#ffd84a;
+                --panel:rgba(12,17,32,.72); }
+        * { box-sizing:border-box; }
+        html, body { height:100%; margin:0; }
+        body { color:#eef2fb; font-family:"Cascadia Code", Consolas, monospace;
+               background:radial-gradient(1100px 700px at 12% -8%, #1a2550, #0b1020 55%);
+               display:flex; flex-direction:column; overflow:hidden; }
+        a { color:inherit; }
+
+        .bar { display:flex; align-items:center; gap:12px; padding:11px clamp(12px,2vw,20px);
+               border-bottom:1px solid var(--line); background:rgba(8,12,24,.5); flex:none; }
+        .back, .burger { width:40px; height:40px; flex:none; display:grid; place-items:center;
+                 color:var(--ac); text-decoration:none; cursor:pointer;
+                 border:1px solid rgba(77,107,254,.32); border-radius:11px;
+                 background:rgba(77,107,254,.08); transition:.16s; }
+        .back:hover, .burger:hover { color:#fff; border-color:var(--ac); background:rgba(77,107,254,.2); }
+        .back svg, .burger svg { width:19px; height:19px; }
+        .burger { display:none; }
+        .brand { flex:1; min-width:0; }
+        .brand b { display:block; font-size:1.06rem; letter-spacing:-.01em; }
+        .brand span { display:block; margin-top:2px; color:var(--muted); font-size:.68rem;
+                      white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .dot { display:inline-block; width:7px; height:7px; border-radius:50%; margin-right:5px;
+               background:var(--muted); vertical-align:middle; }
+        .dot.on { background:var(--ok); box-shadow:0 0 9px var(--ok); }
+        .dot.off { background:var(--warm); }
+
+        .wrap { flex:1; min-height:0; display:grid; grid-template-columns:264px 1fr; }
+        .aside { border-right:1px solid var(--line); background:var(--panel);
+                 display:flex; flex-direction:column; min-height:0; }
+        .newbtn { margin:12px; height:44px; flex:none; display:flex; align-items:center;
+                  justify-content:center; gap:9px; cursor:pointer; color:#eaf0ff;
+                  font:700 .82rem inherit; border:1px solid rgba(77,107,254,.4);
+                  border-radius:12px; background:linear-gradient(160deg, rgba(77,107,254,.22), rgba(139,123,255,.14));
+                  transition:.16s; }
+        .newbtn:hover { border-color:var(--ac); background:linear-gradient(160deg, rgba(77,107,254,.34), rgba(139,123,255,.2)); }
+        .newbtn svg { width:17px; height:17px; }
+        .list { flex:1; min-height:0; overflow-y:auto; padding:0 8px 12px;
+                scrollbar-width:thin; scrollbar-color:rgba(77,107,254,.5) transparent; }
+        .list::-webkit-scrollbar { width:8px; }
+        .list::-webkit-scrollbar-thumb { border-radius:99px;
+                background:linear-gradient(180deg, var(--ac), rgba(77,107,254,.3)); }
+        .row { display:flex; align-items:center; gap:8px; padding:9px 10px; margin-bottom:4px;
+               border-radius:10px; cursor:pointer; border:1px solid transparent; transition:.13s; }
+        .row:hover { background:rgba(255,255,255,.05); }
+        .row.on { background:rgba(77,107,254,.16); border-color:rgba(77,107,254,.4); }
+        .row .ico { width:8px; height:8px; flex:none; border-radius:50%; background:var(--ac2); opacity:.6; }
+        .row .meta { flex:1; min-width:0; }
+        .row .ttl { display:block; font-size:.8rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .row .sub { display:block; margin-top:2px; color:var(--muted); font-size:.63rem; }
+        .row .x { flex:none; width:24px; height:24px; display:grid; place-items:center; opacity:0;
+                  color:var(--muted); border-radius:7px; transition:.13s; font-size:1rem; line-height:1; }
+        .row:hover .x { opacity:.7; }
+        .row .x:hover { opacity:1; color:#ff8a8a; background:rgba(255,90,90,.12); }
+        .empty-list { color:var(--muted); font-size:.72rem; text-align:center; padding:24px 14px; line-height:1.6; }
+
+        .main { display:flex; flex-direction:column; min-width:0; min-height:0; position:relative; }
+        .chat { flex:1; min-height:0; overflow-y:auto; padding:clamp(14px,2.4vw,26px);
+                display:flex; flex-direction:column; gap:16px;
+                scrollbar-width:thin; scrollbar-color:rgba(77,107,254,.4) transparent; }
+        .chat::-webkit-scrollbar { width:9px; }
+        .chat::-webkit-scrollbar-thumb { border-radius:99px; background:rgba(77,107,254,.35); }
+        .msg { display:flex; gap:12px; max-width:min(760px,100%); align-self:center; width:100%; }
+        .msg .av { width:34px; height:34px; flex:none; border-radius:11px; display:grid;
+                   place-items:center; font-size:.6rem; font-weight:800; color:#050a18;
+                   background:linear-gradient(160deg,#8fa4ff,#4d6bfe); }
+        .msg.me .av { color:#eef2fb; background:rgba(255,255,255,.08); border:1px solid var(--line); }
+        .msg .bd { min-width:0; }
+        .msg .txt { padding:12px 15px; border-radius:14px; font-size:.9rem; line-height:1.62;
+                    background:rgba(255,255,255,.045); border:1px solid var(--line);
+                    overflow-wrap:anywhere; }
+        .msg.me { flex-direction:row-reverse; }
+        .msg.me .txt { background:rgba(77,107,254,.14); border-color:rgba(77,107,254,.3); }
+        .msg.err .txt { color:#ffb3b3; background:rgba(255,90,90,.1); border-color:rgba(255,90,90,.32); }
+        .msg .txt img { max-width:260px; max-height:260px; border-radius:9px; display:block;
+                        margin:0 0 8px; border:1px solid var(--line); }
+        .msg .txt p:first-child { margin-top:0; } .msg .txt p:last-child { margin-bottom:0; }
+        .txt pre { margin:9px 0; padding:11px 13px; overflow-x:auto; border-radius:10px;
+                   background:rgba(3,7,18,.7); border:1px solid var(--line);
+                   scrollbar-width:thin; }
+        .txt pre code { font-size:.82rem; line-height:1.5; color:#d7e2ff; }
+        .txt code { font-family:inherit; }
+        .txt :not(pre) > code { padding:1px 6px; border-radius:6px; font-size:.84rem;
+                   background:rgba(139,123,255,.16); color:#cfd6ff; }
+        .txt a { color:#9db4ff; text-decoration:underline; text-underline-offset:2px; }
+        .cursor::after { content:"▋"; margin-left:1px; color:var(--ac); animation:blink 1s steps(2) infinite; }
+        @keyframes blink { 50% { opacity:0; } }
+        .dots span { display:inline-block; width:6px; height:6px; margin-right:4px; border-radius:50%;
+                     background:var(--ac); animation:blip 1.1s ease-in-out infinite; }
+        .dots span:nth-child(2){ animation-delay:.18s } .dots span:nth-child(3){ animation-delay:.36s }
+        @keyframes blip { 0%,100%{opacity:.25; transform:translateY(0)} 50%{opacity:1; transform:translateY(-3px)} }
+
+        .hello { margin:auto; text-align:center; max-width:520px; padding:20px; }
+        .hello h2 { margin:0 0 8px; font-size:1.35rem; font-weight:800;
+                    background:linear-gradient(90deg,#a9b8ff,#8b7bff); -webkit-background-clip:text;
+                    background-clip:text; -webkit-text-fill-color:transparent; }
+        .hello p { margin:0 0 18px; color:var(--muted); font-size:.82rem; line-height:1.6; }
+        .seeds { display:flex; flex-wrap:wrap; gap:8px; justify-content:center; }
+        .seeds button { padding:9px 13px; cursor:pointer; color:#cfd8ee; font:400 .76rem inherit;
+                        border:1px solid var(--line); border-radius:10px; background:rgba(255,255,255,.04);
+                        transition:.15s; }
+        .seeds button:hover { color:#fff; border-color:rgba(77,107,254,.5); background:rgba(77,107,254,.12); }
+
+        .compose { flex:none; border-top:1px solid var(--line); padding:12px clamp(12px,2.4vw,26px) 14px;
+                   background:rgba(8,12,24,.55); }
+        .imgchip { display:inline-flex; align-items:center; gap:9px; margin-bottom:9px; padding:6px 9px;
+                   border:1px solid var(--line); border-radius:10px; background:rgba(255,255,255,.04); }
+        .imgchip img { width:34px; height:34px; object-fit:cover; border-radius:7px; }
+        .imgchip button { cursor:pointer; color:var(--muted); background:none; border:0; font-size:1rem; }
+        .imgchip button:hover { color:#ff8a8a; }
+        .field { display:flex; align-items:flex-end; gap:9px; max-width:820px; margin:0 auto; }
+        .attach { width:46px; height:46px; flex:none; display:grid; place-items:center; cursor:pointer;
+                  color:var(--muted); border:1px solid var(--line); border-radius:13px;
+                  background:rgba(255,255,255,.04); transition:.15s; }
+        .attach:hover { color:var(--ac2); border-color:rgba(139,123,255,.5); }
+        .attach svg { width:20px; height:20px; }
+        .field textarea { flex:1; min-height:46px; max-height:190px; padding:12px 15px; resize:none;
+                 color:#f4f7ff; font:400 .9rem inherit; line-height:1.5; border:1px solid var(--line);
+                 border-radius:13px; outline:none; background:rgba(4,9,20,.65); }
+        .field textarea:focus { border-color:var(--ac); }
+        .send { width:46px; height:46px; flex:none; display:grid; place-items:center; cursor:pointer;
+                color:#050a18; border:0; border-radius:13px;
+                background:linear-gradient(160deg,#8fa4ff,#4d6bfe); transition:.15s; }
+        .send:hover { filter:brightness(1.08); } .send:disabled { opacity:.4; cursor:not-allowed; }
+        .send svg { width:20px; height:20px; }
+        .note { max-width:820px; margin:8px auto 0; color:#5c6780; font-size:.66rem; text-align:center; line-height:1.5; }
+
+        .scrim { display:none; }
+        @media (max-width:760px) {
+          .burger { display:grid; }
+          .wrap { grid-template-columns:1fr; }
+          .aside { position:absolute; z-index:20; top:0; bottom:0; left:0; width:min(300px,84vw);
+                   transform:translateX(-104%); transition:transform .22s ease;
+                   box-shadow:24px 0 60px rgba(0,0,0,.5); }
+          .wrap.open .aside { transform:none; }
+          .scrim { position:absolute; inset:0; z-index:15; background:rgba(2,5,12,.55); }
+          .wrap.open .scrim { display:block; }
+        }
+        @media (prefers-reduced-motion: reduce) { * { animation:none !important; transition:none !important; } }
+      </style>
+    </head>
+    <body>
+      <div class="bar">
+        <a class="back" href="/cabinet" title="В кабинет" aria-label="В кабинет"><svg viewBox="0 0 24 24" fill="none"><path d="M19 12H5m0 0 6-6m-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
+        <button class="burger" id="burger" type="button" aria-label="Список чатов"><svg viewBox="0 0 24 24" fill="none"><path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+        <div class="brand"><b>Нейросеть</b><span id="brand-sub"><i class="dot"></i>проверяю связь…</span></div>
+      </div>
+
+      <div class="wrap" id="wrap">
+        <div class="scrim" id="scrim"></div>
+        <aside class="aside">
+          <button class="newbtn" id="newbtn" type="button">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
+            Новый чат
+          </button>
+          <div class="list" id="list"></div>
+        </aside>
+
+        <main class="main">
+          <div class="chat" id="chat"></div>
+          <div class="compose">
+            <div id="chip-slot"></div>
+            <form class="field" id="field">
+              <label class="attach" id="attach" title="Прикрепить фото" hidden>
+                <svg viewBox="0 0 24 24" fill="none"><path d="M21 12.5 12.5 21a5 5 0 0 1-7-7l8-8a3.5 3.5 0 0 1 5 5l-8 8a2 2 0 0 1-3-3l7.5-7.5" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                <input type="file" id="file" accept="image/*" hidden>
+              </label>
+              <textarea id="text" rows="1" placeholder="Напишите сообщение…" aria-label="Сообщение"></textarea>
+              <button class="send" id="send" type="submit" title="Отправить" aria-label="Отправить">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12h15m0 0-6-6m6 6-6 6"/></svg>
+              </button>
+            </form>
+            <p class="note" id="note">История этих чатов хранится на сайте под паролем кабинета. Модель — в облаке, дома ничего не грузит.</p>
+          </div>
+        </main>
+      </div>
+
+      <script>
+      (() => {
+        "use strict";
+        const $ = (id) => document.getElementById(id);
+        const chat = $("chat"), list = $("list"), wrap = $("wrap");
+        let chats = [], curId = null, busy = false, ready = false, vision = false, modelName = "";
+        let pendImg = null;
+
+        const esc = (s) => (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+        // Небольшой безопасный markdown: сначала прячем блоки кода, экранируем
+        // остальное, потом возвращаем стили. Так теги из ответа не выполнятся.
+        const md = (src) => {
+          const blocks = [];
+          let t = (src || "").replace(/```([\s\S]*?)```/g, (m, code) => {
+            let body = code.replace(/^[a-zA-Z0-9_+.-]*\n/, "");
+            blocks.push("<pre><code>" + esc(body.replace(/\s+$/, "")) + "</code></pre>");
+            return "" + (blocks.length - 1) + "";
+          });
+          t = esc(t);
+          t = t.replace(/`([^`]+)`/g, "<code>$1</code>");
+          t = t.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+          t = t.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g,
+                        (m, txt, url) => '<a href="' + url + '" target="_blank" rel="noopener">' + txt + "</a>");
+          t = t.replace(/^(\s*)[-*] +/gm, "$1• ");
+          t = t.replace(/\n/g, "<br>");
+          t = t.replace(/(\d+)/g, (m, i) => blocks[+i]);
+          return t;
+        };
+
+        const ago = (ts) => {
+          if (!ts) return "";
+          const s = Math.max(0, Date.now() / 1000 - ts);
+          if (s < 60) return "только что";
+          if (s < 3600) return Math.floor(s / 60) + " мин";
+          if (s < 86400) return Math.floor(s / 3600) + " ч";
+          if (s < 604800) return Math.floor(s / 86400) + " дн";
+          return new Date(ts * 1000).toLocaleDateString("ru-RU");
+        };
+
+        const scrollDown = () => { chat.scrollTop = chat.scrollHeight; };
+
+        const bubble = (role, html, cls) => {
+          const el = document.createElement("div");
+          el.className = "msg " + (role === "me" ? "me" : "bot") + (cls ? " " + cls : "");
+          const av = document.createElement("span");
+          av.className = "av";
+          av.textContent = role === "me" ? "Я" : "DS";
+          const bd = document.createElement("div");
+          bd.className = "bd";
+          const tx = document.createElement("div");
+          tx.className = "txt";
+          if (html === null) tx.innerHTML = '<span class="dots"><span></span><span></span><span></span></span>';
+          else tx.innerHTML = html;
+          bd.appendChild(tx);
+          el.append(av, bd);
+          chat.appendChild(el);
+          scrollDown();
+          return tx;
+        };
+
+        const showHello = () => {
+          chat.innerHTML = "";
+          const box = document.createElement("div");
+          box.className = "hello";
+          box.innerHTML = '<h2>Чат с нейросетью</h2>' +
+            '<p>' + (ready
+              ? "Спрашивайте что угодно — модель " + esc(modelName) + " отвечает через OpenRouter. Разговор сохранится слева."
+              : "Ключ OpenRouter на сервере пока не задан, поэтому отвечать нечем. Как получить ключ — в инструкции у хозяина.") + '</p>' +
+            '<div class="seeds">' +
+              '<button type="button">Объясни простыми словами, что такое нейросеть</button>' +
+              '<button type="button">Придумай план на выходные</button>' +
+              '<button type="button">Помоги написать письмо</button>' +
+              '<button type="button">Дай рецепт из того, что есть в холодильнике</button>' +
+            '</div>';
+          chat.appendChild(box);
+          box.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => {
+            $("text").value = b.textContent;
+            grow();
+            submit();
+          }));
+        };
+
+        const renderList = () => {
+          list.innerHTML = "";
+          if (!chats.length) {
+            list.innerHTML = '<div class="empty-list">Пока пусто.<br>Нажмите «Новый чат».</div>';
+            return;
+          }
+          chats.forEach((c) => {
+            const row = document.createElement("div");
+            row.className = "row" + (c.id === curId ? " on" : "");
+            row.innerHTML = '<span class="ico"></span><span class="meta">' +
+              '<span class="ttl">' + esc(c.title) + '</span>' +
+              '<span class="sub">' + c.count + ' сообщ. · ' + ago(c.updated) + '</span></span>' +
+              '<span class="x" title="Удалить">✕</span>';
+            row.querySelector(".meta").addEventListener("click", () => openChat(c.id));
+            row.querySelector(".x").addEventListener("click", (e) => { e.stopPropagation(); delChat(c.id); });
+            list.appendChild(row);
+          });
+        };
+
+        const closeDrawer = () => wrap.classList.remove("open");
+
+        const loadState = async () => {
+          try {
+            const r = await fetch("/api/ai/state", { credentials: "same-origin" });
+            const d = await r.json();
+            ready = !!d.ready; vision = !!d.vision; modelName = d.model || "";
+            chats = d.chats || [];
+            $("brand-sub").innerHTML = '<i class="dot ' + (ready ? "on" : "off") + '"></i>' +
+              (ready ? esc(modelName) : "ключ OpenRouter не задан");
+            $("attach").hidden = !(ready && vision);
+            renderList();
+            if (chats.length) openChat(chats[0].id);
+            else showHello();
+          } catch (e) {
+            $("brand-sub").innerHTML = '<i class="dot off"></i>не отвечает';
+          }
+        };
+
+        const newChat = async () => {
+          if (!ready) return;
+          try {
+            const r = await fetch("/api/ai/chat", { method: "POST", credentials: "same-origin" });
+            const d = await r.json();
+            chats.unshift({ id: d.id, title: d.title, count: 0, updated: Date.now() / 1000 });
+            curId = d.id;
+            renderList();
+            chat.innerHTML = "";
+            showHello();
+            closeDrawer();
+            $("text").focus();
+          } catch (e) {}
+        };
+
+        const openChat = async (id) => {
+          curId = id;
+          renderList();
+          closeDrawer();
+          chat.innerHTML = '<div class="hello"><p>Загружаю…</p></div>';
+          try {
+            const r = await fetch("/api/ai/chat/" + id, { credentials: "same-origin" });
+            const d = await r.json();
+            chat.innerHTML = "";
+            if (!d.messages || !d.messages.length) { showHello(); return; }
+            d.messages.forEach((m) => {
+              const isMe = m.role === "user";
+              let html = "";
+              if (m.img) html += '<img src="/api/ai/img/' + encodeURIComponent(m.img) + '" alt="фото">';
+              html += isMe ? esc(m.text).replace(/\n/g, "<br>") : md(m.text);
+              bubble(isMe ? "me" : "bot", html);
+            });
+          } catch (e) {
+            chat.innerHTML = "";
+            bubble("bot", "Не удалось открыть чат.", "err");
+          }
+        };
+
+        const delChat = async (id) => {
+          if (!confirm("Удалить этот чат целиком?")) return;
+          try {
+            await fetch("/api/ai/chat/" + id, { method: "DELETE", credentials: "same-origin" });
+          } catch (e) {}
+          chats = chats.filter((c) => c.id !== id);
+          if (curId === id) { curId = null; chat.innerHTML = ""; }
+          if (chats.length && !curId) openChat(chats[0].id);
+          else if (!chats.length) { curId = null; showHello(); }
+          renderList();
+        };
+
+        const bumpCard = () => {
+          const c = chats.find((x) => x.id === curId);
+          if (c) { c.updated = Date.now() / 1000; c.count = (c.count || 0) + 1; }
+          chats.sort((a, b) => b.updated - a.updated);
+          renderList();
+        };
+
+        const submit = async () => {
+          if (busy || !ready) return;
+          const ta = $("text");
+          const text = ta.value.trim();
+          const img = pendImg;
+          if (!text && !img) return;
+          if (!curId) { await newChat(); }
+          if (!curId) return;
+
+          // если открыт экран-приветствие — очищаем его перед первой репликой
+          if (chat.querySelector(".hello")) chat.innerHTML = "";
+
+          busy = true; $("send").disabled = true;
+          let meHtml = "";
+          if (img) meHtml += '<img src="' + img + '" alt="фото">';
+          if (text) meHtml += esc(text).replace(/\n/g, "<br>");
+          bubble("me", meHtml);
+          ta.value = ""; grow(); clearImg();
+          bumpCard();
+          const out = bubble("bot", null);
+
+          let acc = "";
+          try {
+            const r = await fetch("/api/ai/chat/" + curId + "/send", {
+              method: "POST", credentials: "same-origin",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ text: text, image: img || undefined }),
+            });
+            if (!r.ok || !r.body) {
+              const d = await r.json().catch(() => ({}));
+              out.parentElement.parentElement.classList.add("err");
+              out.textContent = d.error || "Не удалось отправить.";
+              busy = false; $("send").disabled = false; return;
+            }
+            const reader = r.body.getReader();
+            const dec = new TextDecoder();
+            let buf = "";
+            out.classList.add("cursor");
+            for (;;) {
+              const { value, done } = await reader.read();
+              if (done) break;
+              buf += dec.decode(value, { stream: true });
+              let i;
+              while ((i = buf.indexOf("\n\n")) >= 0) {
+                const frame = buf.slice(0, i); buf = buf.slice(i + 2);
+                const line = frame.split("\n").find((l) => l.startsWith("data:"));
+                if (!line) continue;
+                let ev;
+                try { ev = JSON.parse(line.slice(5).trim()); } catch (e) { continue; }
+                if (ev.delta) { acc += ev.delta; out.innerHTML = md(acc); scrollDown(); }
+                else if (ev.error) {
+                  out.classList.remove("cursor");
+                  out.parentElement.parentElement.classList.add("err");
+                  out.textContent = ev.error;
+                }
+                else if (ev.done && ev.text) { acc = ev.text; out.innerHTML = md(acc); }
+              }
+            }
+            out.classList.remove("cursor");
+            if (!acc && !out.textContent) out.textContent = "Пустой ответ.";
+            bumpCard();
+          } catch (e) {
+            out.classList.remove("cursor");
+            out.parentElement.parentElement.classList.add("err");
+            out.textContent = "Оборвалась связь с сервером.";
+          } finally {
+            busy = false; $("send").disabled = false; $("text").focus();
+          }
+        };
+
+        // ── ввод ──
+        const grow = () => { const ta = $("text"); ta.style.height = "auto"; ta.style.height = Math.min(190, ta.scrollHeight) + "px"; };
+        $("text").addEventListener("input", grow);
+        $("text").addEventListener("keydown", (e) => {
+          if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); }
+        });
+        $("field").addEventListener("submit", (e) => { e.preventDefault(); submit(); });
+        $("newbtn").addEventListener("click", newChat);
+        $("burger").addEventListener("click", () => wrap.classList.toggle("open"));
+        $("scrim").addEventListener("click", closeDrawer);
+
+        // ── фото: ужимаем в браузере, чтобы не гонять гигантские файлы ──
+        const clearImg = () => { pendImg = null; $("chip-slot").innerHTML = ""; $("file").value = ""; };
+        $("file").addEventListener("change", () => {
+          const f = $("file").files[0];
+          if (!f) return;
+          const img = new Image();
+          const rd = new FileReader();
+          rd.onload = () => { img.onload = () => {
+            const max = 1024, sc = Math.min(1, max / Math.max(img.width, img.height));
+            const cv = document.createElement("canvas");
+            cv.width = Math.round(img.width * sc); cv.height = Math.round(img.height * sc);
+            cv.getContext("2d").drawImage(img, 0, 0, cv.width, cv.height);
+            pendImg = cv.toDataURL("image/jpeg", 0.85);
+            $("chip-slot").innerHTML = "";
+            const chip = document.createElement("div");
+            chip.className = "imgchip";
+            chip.innerHTML = '<img src="' + pendImg + '" alt=""><span>фото готово</span><button type="button" title="Убрать">✕</button>';
+            chip.querySelector("button").addEventListener("click", clearImg);
+            $("chip-slot").appendChild(chip);
+          }; img.src = rd.result; };
+          rd.readAsDataURL(f);
+        });
+
+        loadState();
+      })();
+      </script>
+    </body>
+    </html>
+    """
+    return html.replace("__ICONLINKS__", ICON_LINKS)
 
 
 @app.get("/servers")
