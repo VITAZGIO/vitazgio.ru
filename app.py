@@ -4042,10 +4042,11 @@ def cabinet():
         /* Колонка фиксированного размера: не тянется за левой стороной,
            сколько бы панелей там ни развернули. */
         .cabinet-cols { display: flex; align-items: stretch; gap: 20px; max-width: 1900px; flex: 1 1 auto; min-height: 0; }
-        .rail { width: 268px; flex: none; display: flex; flex-direction: column; gap: 12px;
-                margin-top: clamp(22px, 3.5vw, 40px); }
-        /* плеер добирает высоту до низа левой колонки */
-        .rail .player { flex: 1 1 auto; min-height: 320px; display: flex;
+        .rail { width: 268px; flex: none; align-self: flex-start; display: flex;
+                flex-direction: column; gap: 12px; margin-top: clamp(22px, 3.5vw, 40px); }
+        /* Высоту плееру ставит скрипт — по спокойному виду страницы, и дальше
+           она не меняется, чем бы ни раскрывали панели слева. */
+        .rail .player { flex: none; min-height: 320px; display: flex;
                         flex-direction: column; }
         /* Узкий экран или половина окна — правой колонки просто нет. */
         @media (max-width: 1220px) { .rail { display: none; } }
@@ -4158,6 +4159,10 @@ def cabinet():
              margin-left: calc(var(--s) * -1); cursor: pointer; border: 0; font: inherit;
              padding: 0; text-align: left; transform-origin: center;
              transition: filter .18s, transform .18s ease;
+             background: none; }
+        /* Цвет и ступенчатая форма живут на подложке. Так плитка сама остаётся
+           необрезанной, и свет по периметру не срезается своим же контуром. */
+        .z::before { content: ""; position: absolute; inset: 0; z-index: 0;
              background: linear-gradient(150deg, color-mix(in srgb, var(--a) 30%, #0b1020),
                          color-mix(in srgb, var(--a) 7%, #0b1020));
              clip-path: polygon(calc(var(--s) + var(--g) / 2) 0, calc(100% - var(--g) / 2) 0,
@@ -4166,12 +4171,14 @@ def cabinet():
                         calc(100% - var(--s) - var(--g) / 2) 100%, calc(var(--g) / 2) 100%,
                         calc(var(--g) / 2) calc(50% + var(--g) / 2),
                         calc(var(--s) + var(--g) / 2) calc(50% + var(--g) / 2)); }
-        .z:first-child { margin-left: 0;
+        .z > * { position: relative; z-index: 1; }
+        .z:first-child { margin-left: 0; }
+        .z:first-child::before {
              clip-path: polygon(0 0, calc(100% - var(--g) / 2) 0,
                         calc(100% - var(--g) / 2) calc(50% - var(--g) / 2),
                         calc(100% - var(--s) - var(--g) / 2) calc(50% - var(--g) / 2),
                         calc(100% - var(--s) - var(--g) / 2) 100%, 0 100%); }
-        .z:last-child {
+        .z:last-child::before {
              clip-path: polygon(calc(var(--s) + var(--g) / 2) 0, 100% 0, 100% 100%,
                         calc(var(--g) / 2) 100%, calc(var(--g) / 2) calc(50% + var(--g) / 2),
                         calc(var(--s) + var(--g) / 2) calc(50% + var(--g) / 2)); }
@@ -4224,15 +4231,15 @@ def cabinet():
                                    animation: cab-halo 2.6s ease-in-out infinite; }
         @keyframes cab-halo {
           0%, 100% { filter:
-              drop-shadow( 1px 0 0 #ff3fa4) drop-shadow(-1px 0 0 #ff3fa4)
-              drop-shadow(0  1px 0 #ff3fa4) drop-shadow(0 -1px 0 #ff3fa4)
-              drop-shadow(0 0 10px rgba(255,63,164,.55))
-              drop-shadow(0 0 22px rgba(255,63,164,.25)); }
-          50%      { filter:
               drop-shadow( 2px 0 0 #ff3fa4) drop-shadow(-2px 0 0 #ff3fa4)
               drop-shadow(0  2px 0 #ff3fa4) drop-shadow(0 -2px 0 #ff3fa4)
-              drop-shadow(0 0 22px rgba(255,63,164,.95))
-              drop-shadow(0 0 44px rgba(255,63,164,.5)); }
+              drop-shadow(0 0 12px #ff3fa4)
+              drop-shadow(0 0 26px rgba(255,63,164,.6)); }
+          50%      { filter:
+              drop-shadow( 3px 0 0 #ff5cb4) drop-shadow(-3px 0 0 #ff5cb4)
+              drop-shadow(0  3px 0 #ff5cb4) drop-shadow(0 -3px 0 #ff5cb4)
+              drop-shadow(0 0 26px #ff3fa4)
+              drop-shadow(0 0 52px rgba(255,63,164,.85)); }
         }
         @media (prefers-reduced-motion: reduce) {
           .z[aria-expanded="true"] { animation: none;
@@ -4246,13 +4253,14 @@ def cabinet():
           .c4, .c2 { grid-column: span 2; }
           .zrow { flex-wrap: wrap; gap: 9px 0; }
           .z { --s: 34px; --g: 9px; flex: 1 1 calc(50%); min-height: 148px; }
-          .z:nth-child(3) { margin-left: 0;
+          .z:nth-child(3) { margin-left: 0; }
+          .z:nth-child(3)::before {
              clip-path: polygon(0 0, calc(100% - var(--g) / 2) 0,
                         calc(100% - var(--g) / 2) calc(50% - var(--g) / 2),
                         calc(100% - var(--s) - var(--g) / 2) calc(50% - var(--g) / 2),
                         calc(100% - var(--s) - var(--g) / 2) 100%, 0 100%); }
           .z:nth-child(3) .ztop { padding-left: 9px; }
-          .z:nth-child(2) {
+          .z:nth-child(2)::before {
              clip-path: polygon(calc(var(--s) + var(--g) / 2) 0, 100% 0, 100% 100%,
                         calc(var(--g) / 2) 100%, calc(var(--g) / 2) calc(50% + var(--g) / 2),
                         calc(var(--s) + var(--g) / 2) calc(50% + var(--g) / 2)); }
@@ -5903,6 +5911,26 @@ def cabinet():
             drawBars();
             load(false);   // плеер молчит, пока не нажмут play
           }
+        }
+
+        // ── Высота плеера ──
+        // Меряем «спокойный» вид: низ плеера совпадает с низом резервной
+        // копии. Пока что-то раскрыто — не пересчитываем, иначе колонка
+        // поедет вслед за раскрытой панелью.
+        {
+          const pl = document.getElementById("player");
+          const cab = document.querySelector(".cab");
+          const fit = () => {
+            if (!pl || !cab) return;
+            if (cab.querySelector('[aria-expanded="true"]')) return;
+            const h = Math.round(cab.getBoundingClientRect().bottom
+                               - pl.getBoundingClientRect().top);
+            if (h > 240) pl.style.height = h + "px";
+          };
+          fit();
+          window.addEventListener("resize", fit);
+          if (document.fonts && document.fonts.ready) document.fonts.ready.then(fit);
+          setTimeout(fit, 400);
         }
 
         // ── Раскрытие виджетов ──
@@ -11832,7 +11860,7 @@ def claude_page():
     остался висеть в tmux и ждёт возвращения."""
     g.frameable = True
     html = """<!doctype html>
-    <html lang="ru">
+    <html lang="ru" data-net="%%NET%%">
     <head>
       <meta charset="utf-8">
       <script>try{if(window.top!==window.self)document.documentElement.classList.add("embed");}catch(e){document.documentElement.classList.add("embed");}</script>
@@ -13934,6 +13962,9 @@ OPENROUTER_MODEL = os.environ.get(
 # первый эшелон, если из .env ничего не задано. Список пополняется живым
 # ответом от /api/v1/models — тем моделям, у которых prompt/completion == 0.
 OPENROUTER_FALLBACKS = [
+    "minimax/minimax-m3:free",
+    "nvidia/nemotron-3-ultra-550b-a55b:free",
+    "nvidia/nemotron-3-super-120b-a12b:free",
     "openrouter/auto",                    # роутер сам выберет живую бесплатную
     "qwen/qwen3-coder:free",
     "qwen/qwen-2.5-72b-instruct:free",
@@ -14276,7 +14307,9 @@ def ai_chat_send(chat_id):
         with _ai_active_lock:
             primary = _ai_active_model if not use_vision else model
         if requested_model:
-            candidates = [requested_model]      # вкладка сама решила модель
+            # Вкладка назвала свою модель. Ставим её первой, но если она
+            # молчит — дальше по общему списку, чтобы чат не встал колом.
+            candidates = _ai_models_to_try(requested_model)
         elif use_vision:
             candidates = [model]
         else:
@@ -14293,9 +14326,20 @@ def ai_chat_send(chat_id):
                 chosen = candidate
                 break
             except urlerror.HTTPError as e:
-                if e.code == 404 and candidate != candidates[-1]:
-                    continue          # эту модель сняли — пробуем следующую
-                yield _sse({"error": _ai_http_error(e.code) + f" (модель {candidate})"})
+                detail = ""
+                try:
+                    body = json.loads(e.read().decode("utf-8", "replace"))
+                    detail = ((body.get("error") or {}).get("message") or "").strip()
+                except Exception:
+                    pass
+                # 400/402/404/429 — модель переименовали, сняли или упёрлись
+                # в лимит: пробуем следующую из списка, пока они есть.
+                if e.code in (400, 402, 404, 429) and candidate != candidates[-1]:
+                    continue
+                msg = _ai_http_error(e.code) + f" (модель {candidate})"
+                if detail:
+                    msg += " — " + detail[:200]
+                yield _sse({"error": msg})
                 return
             except urlerror.URLError:
                 yield _sse({"error": "OpenRouter не отвечает. Попробуйте позже."})
@@ -14303,9 +14347,10 @@ def ai_chat_send(chat_id):
         if resp is None:
             yield _sse({"error": "Ни одна из известных бесплатных моделей не ответила."})
             return
-        if not use_vision and not requested_model and chosen != _ai_active_model:
-            with _ai_active_lock:
-                _ai_active_model = chosen
+        if not use_vision and chosen != (requested_model or _ai_active_model):
+            if not requested_model:
+                with _ai_active_lock:
+                    _ai_active_model = chosen
             yield _sse({"model": chosen})
         acc = []
         try:
@@ -14363,7 +14408,7 @@ def neuro_page():
       <title>Нейронки · vitazgio.ru</title>
       <style>
         :root { color-scheme:dark; --line:rgba(255,255,255,.1);
-                --mm1:#ff6ea3; --mm2:#ff9a3d;   /* MiniMax: розово-оранжевый */
+                --mm1:#ff3d9a; --mm2:#b44dff;   /* MiniMax: малиново-фиолетовый */
                 --nv1:#76c900; --nv2:#39ff14;   /* NVIDIA: зелёный */
                 --cl1:#d97757; --cl2:#f0a184;   /* Claude: оранжевый */
                 --ac:var(--mm1); --ac2:var(--mm2); }
@@ -14428,8 +14473,8 @@ def neuro_page():
       <div class="stage">
         <div class="spin" id="spin">открываю…</div>
         <iframe id="fr-mm" class="on" title="MiniMax" src="/ai?m=minimax%2Fminimax-m3%3Afree" loading="eager"></iframe>
-        <iframe id="fr-nv" title="NVIDIA" data-src="/ai?m=nvidia%2Fnemotron-3-ultra%3Afree" loading="lazy"></iframe>
-        <iframe id="fr-cl" title="Claude" data-src="/claude" loading="lazy"></iframe>
+        <iframe id="fr-nv" title="NVIDIA" data-src="/ai?m=nvidia%2Fnemotron-3-ultra-550b-a55b%3Afree"></iframe>
+        <iframe id="fr-cl" title="Claude" data-src="/claude"></iframe>
       </div>
 
       <script>
@@ -14478,13 +14523,17 @@ def neuro_page():
 @login_required
 def ai_page():
     _preset = (request.args.get("m") or "").strip()
+    _low = _preset.lower()
+    _net = ("minimax" if "minimax" in _low else
+            "nvidia" if ("nvidia" in _low or "nemotron" in _low) else
+            "deepseek" if "deepseek" in _low else "")
     """Чат с нейросетью (DeepSeek через OpenRouter). Личная страница хозяина:
     история чатов хранится на сайте под паролем кабинета, поэтому за замком.
     Разрешаем встраивание в свой же iframe — страница «Нейронки» показывает её
     вкладкой рядом с Claude."""
     g.frameable = True
     html = r"""<!doctype html>
-    <html lang="ru">
+    <html lang="ru" data-net="%%NET%%">
     <head>
       <meta charset="utf-8">
       <script>try{if(window.top!==window.self)document.documentElement.classList.add("embed");}catch(e){document.documentElement.classList.add("embed");}</script>
@@ -14498,10 +14547,13 @@ def ai_page():
         :root { color-scheme:dark; --line:rgba(255,255,255,.1); --muted:#8b93a7;
                 --ac:#4d6bfe; --ac2:#8b7bff; --ok:#63f5ad; --warm:#ffd84a;
                 --panel:rgba(12,17,32,.72); }
+        /* Каждая нейронка со своим цветом — как вкладки сверху */
+        html[data-net="minimax"] { --ac:#ff3d9a; --ac2:#b44dff; }
+        html[data-net="nvidia"]  { --ac:#76c900; --ac2:#39ff14; }
         * { box-sizing:border-box; }
         html, body { height:100%; margin:0; }
         body { color:#eef2fb; font-family:"Cascadia Code", Consolas, monospace;
-               background:radial-gradient(1100px 700px at 12% -8%, #1a2550, #0b1020 55%);
+               background:radial-gradient(1100px 700px at 12% -8%, color-mix(in srgb, var(--ac) 22%, #0b1020), #0b1020 55%);
                display:flex; flex-direction:column; overflow:hidden; }
         a { color:inherit; }
 
@@ -14642,7 +14694,7 @@ def ai_page():
       <div class="bar">
         <a class="back" href="/cabinet" title="В кабинет" aria-label="В кабинет"><svg viewBox="0 0 24 24" fill="none"><path d="M19 12H5m0 0 6-6m-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
         <button class="burger" id="burger" type="button" aria-label="Список чатов"><svg viewBox="0 0 24 24" fill="none"><path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
-        <div class="brand"><b>Нейросеть</b><span id="brand-sub"><i class="dot"></i>проверяю связь…</span></div>
+        <div class="brand"><b id="brand-name">Нейросеть</b><span id="brand-sub"><i class="dot"></i>проверяю связь…</span></div>
       </div>
 
       <div class="wrap" id="wrap">
@@ -14681,6 +14733,13 @@ def ai_page():
         const $ = (id) => document.getElementById(id);
         const chat = $("chat"), list = $("list"), wrap = $("wrap");
         const PRESET = window.__PRESET__ || "";
+        // Две буквы для аватарки собеседника: по названию модели
+        const AVA = /minimax/i.test(PRESET) ? "MM"
+                  : /nvidia|nemotron/i.test(PRESET) ? "NV"
+                  : /qwen/i.test(PRESET) ? "QW"
+                  : /gemma|google/i.test(PRESET) ? "GM"
+                  : /llama|meta/i.test(PRESET) ? "LL"
+                  : /deepseek/i.test(PRESET) ? "DS" : "AI";
         let chats = [], curId = null, busy = false, ready = false, vision = false, modelName = PRESET;
         let pendImg = null;
 
@@ -14723,7 +14782,7 @@ def ai_page():
           el.className = "msg " + (role === "me" ? "me" : "bot") + (cls ? " " + cls : "");
           const av = document.createElement("span");
           av.className = "av";
-          av.textContent = role === "me" ? "Я" : "DS";
+          av.textContent = role === "me" ? "Я" : AVA;
           const bd = document.createElement("div");
           bd.className = "bd";
           const tx = document.createElement("div");
@@ -14787,6 +14846,13 @@ def ai_page():
             ready = !!d.ready; vision = !!d.vision; modelName = d.model || "";
             chats = d.chats || [];
             const shownModel = PRESET || modelName;
+            const family = /minimax/i.test(shownModel) ? "MiniMax"
+                         : /nvidia|nemotron/i.test(shownModel) ? "NVIDIA"
+                         : /qwen/i.test(shownModel) ? "Qwen"
+                         : /gemma|google/i.test(shownModel) ? "Gemma"
+                         : /llama|meta/i.test(shownModel) ? "Llama"
+                         : /deepseek/i.test(shownModel) ? "DeepSeek" : "Нейросеть";
+            const nameEl = $("brand-name"); if (nameEl) nameEl.textContent = family;
             $("brand-sub").innerHTML = '<i class="dot ' + (ready ? "on" : "off") + '"></i>' +
               (ready ? esc(shownModel) : "ключ OpenRouter не задан");
             $("attach").hidden = !(ready && vision);
@@ -14966,7 +15032,7 @@ def ai_page():
     </body>
     </html>
     """
-    return html.replace("__ICONLINKS__", ICON_LINKS).replace("%%PRESET%%", _preset.replace("\"", "\\\""))
+    return html.replace("__ICONLINKS__", ICON_LINKS).replace("%%PRESET%%", _preset.replace("\"", "\\\"")).replace("%%NET%%", _net)
 
 
 @app.get("/servers")
