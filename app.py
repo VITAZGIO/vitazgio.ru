@@ -4115,34 +4115,37 @@ def cabinet():
            страницей — плитка-замок, сцепленная с соседями ступенькой.
            Раскладка: NetBird строкой, ниже четыре плитки, потом две
            разворачивающиеся, внизу темы и копия. */
-        .cab { display: grid; gap: 10px; grid-template-columns: repeat(4, 1fr);
-               max-width: 744px; margin-top: 14px; }
+        .cab { display: grid; gap: 12px; grid-template-columns: repeat(4, 1fr); margin-top: 14px; }
         .c4 { grid-column: span 4; } .c2 { grid-column: span 2; }
 
         /* разворачивающиеся */
-        .cabp { --a: #2de2ff; border: 1px solid rgba(255,255,255,.1); border-radius: 11px;
+        .cabp { --a: #2de2ff; position: relative; border: 1px solid rgba(255,255,255,.1);
+                border-radius: 11px; overflow: hidden; transform-origin: center;
                 background: linear-gradient(100deg, color-mix(in srgb, var(--a) 9%, transparent),
-                            rgba(255,255,255,.022) 55%); overflow: hidden; transition: border-color .17s; }
-        .cabp:hover { border-color: color-mix(in srgb, var(--a) 50%, transparent); }
-        .ex-head { position: relative; width: 100%; display: flex; align-items: center; gap: 12px;
-                   padding: 11px 15px; cursor: pointer; color: inherit; text-align: left;
+                            rgba(255,255,255,.022) 55%);
+                transition: border-color .17s, transform .17s ease; }
+        .cabp:hover { border-color: color-mix(in srgb, var(--a) 50%, transparent);
+                      transform: scale(1.012); z-index: 3; }
+        .ex-head { position: relative; width: 100%; display: flex; align-items: center; gap: 13px;
+                   padding: 14px 17px; cursor: pointer; color: inherit; text-align: left;
                    border: 0; background: none; font: inherit; }
         .ex-head::before { content: ""; position: absolute; left: 0; top: 11px; bottom: 11px; width: 2px;
                            border-radius: 2px; background: var(--a); box-shadow: 0 0 12px var(--a); }
-        .ex-ic { width: 34px; height: 34px; flex: none; display: grid; place-items: center; }
+        .ex-ic { width: 40px; height: 40px; flex: none; display: grid; place-items: center; }
         .ex-ic svg, .ex-ic img { width: 100%; height: 100%; object-fit: contain; display: block; }
         .ex-tx { flex: 1; min-width: 0; }
-        .ex-tx b { display: block; color: #f8fbff; font-size: .82rem; font-weight: 800; }
-        .ex-tx i { display: block; margin-top: 2px; font-style: normal; color: #8e9ab0; font-size: .63rem; }
+        .ex-tx b { display: block; color: #f8fbff; font-size: 1rem; font-weight: 800; }
+        .ex-tx i { display: block; margin-top: 3px; font-style: normal; color: #98a5ba; font-size: .78rem; }
         .ex-ar { flex: none; color: var(--a); font-size: 1rem; opacity: .75; transition: transform .25s; }
         .ex-head[aria-expanded="true"] .ex-ar { transform: rotate(180deg); }
 
         /* плитки-замок: сцепляются ступенькой, как детали в пазу */
         .zrow { display: flex; }
-        .z { --a: #2de2ff; --s: 38px; position: relative; flex: 1 1 0; min-width: 0; min-height: 104px;
+        .z { --a: #2de2ff; --s: 56px; position: relative; flex: 1 1 0; min-width: 0; min-height: 122px;
              display: flex; flex-direction: column; color: inherit; text-decoration: none;
              margin-left: calc(var(--s) * -1 + 5px); cursor: pointer; border: 0; font: inherit;
-             padding: 0; text-align: left; transition: filter .18s;
+             padding: 0; text-align: left; transform-origin: center;
+             transition: filter .18s, transform .18s ease;
              background: linear-gradient(150deg, color-mix(in srgb, var(--a) 30%, #0b1020),
                          color-mix(in srgb, var(--a) 7%, #0b1020));
              clip-path: polygon(var(--s) 0, 100% 0, 100% 46%, calc(100% - var(--s)) 56%,
@@ -4152,18 +4155,18 @@ def cabinet():
                         calc(100% - var(--s)) 100%, 0 100%); }
         .z:last-child {
              clip-path: polygon(var(--s) 0, 100% 0, 100% 100%, 0 100%, 0 56%, var(--s) 46%); }
-        .z:hover { filter: brightness(1.35) saturate(1.1); }
+        .z:hover { filter: brightness(1.35) saturate(1.1); transform: scale(1.02); z-index: 3; }
         .z .ztop { flex: 0 0 50%; display: flex; align-items: center; gap: 9px;
                    padding: 0 11px 0 calc(var(--s) + 11px); }
         .z:first-child .ztop { padding-left: 11px; }
-        .z-ic { width: 26px; height: 26px; flex: none; display: grid; place-items: center; }
+        .z-ic { width: 32px; height: 32px; flex: none; display: grid; place-items: center; }
         .z-ic svg, .z-ic img { width: 100%; height: 100%; object-fit: contain; display: block; }
-        .z .ztop b { color: #f8fbff; font-size: .76rem; font-weight: 800; line-height: 1.2; }
+        .z .ztop b { color: #f8fbff; font-size: .95rem; font-weight: 800; line-height: 1.2; }
         .z .zbot { flex: 1; display: flex; align-items: center; justify-content: space-between; gap: 8px;
                    padding: 0 calc(var(--s) + 11px) 0 11px; }
         .z:last-child .zbot { padding-right: 11px; }
-        .z .zbot i { font-style: normal; color: #9fadc2; font-size: .63rem; line-height: 1.25; }
-        .z .zbot em { font-style: normal; flex: none; color: var(--a); font-size: .82rem; opacity: .8;
+        .z .zbot i { font-style: normal; color: #a9b7cc; font-size: .78rem; line-height: 1.25; }
+        .z .zbot em { font-style: normal; flex: none; color: var(--a); font-size: .98rem; opacity: .85;
                       transition: transform .25s; }
         .z[aria-expanded="true"] .zbot em { transform: rotate(180deg); }
 
@@ -4192,6 +4195,11 @@ def cabinet():
           .ex-ic { width: 30px; height: 30px; }
           .ex-tx b { font-size: .76rem; } .ex-tx i { font-size: .59rem; }
         }
+        .log-more { width: 100%; margin-top: 8px; padding: 9px 12px; cursor: pointer;
+                    color: #9fd8ff; font: 700 .76rem "Cascadia Code", Consolas, monospace;
+                    border: 1px solid rgba(45,226,255,.28); border-radius: 9px;
+                    background: rgba(45,226,255,.07); transition: .16s; }
+        .log-more:hover { color: #fff; border-color: rgba(45,226,255,.6); background: rgba(45,226,255,.16); }
         .panel-body { padding: 0 18px 16px; }
         /* Резервная копия */
         .bk-note { margin: 0 0 12px; color: #8f99ab; font-size: .78rem; line-height: 1.6; }
@@ -4370,57 +4378,41 @@ def cabinet():
               </a>
             </div>
 
-            <!-- Две разворачивающиеся в строку -->
-            <section class="cabp c2" style="--a:#63f5ad">
-              <button class="ex-head panel-head" id="devices-toggle" type="button"
-                      aria-expanded="false" aria-controls="devices-body">
-                <span class="ex-ic">
-                  <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
-                    <rect x="4" y="10" width="28" height="19" rx="2.5" stroke="#63f5ad" stroke-width="2.6"/>
-                    <path d="M2 33h32" stroke="#63f5ad" stroke-width="2.6" stroke-linecap="round"/>
-                    <rect x="30" y="20" width="14" height="22" rx="2.5" fill="#0d1321" stroke="#a8ffd6" stroke-width="2.6"/>
-                    <path d="M35 38h4" stroke="#a8ffd6" stroke-width="2.2" stroke-linecap="round"/>
-                  </svg>
-                </span>
-                <span class="ex-tx"><b>Запомнить устройства</b><i>вход без пароля</i></span>
-                <span class="ex-ar" aria-hidden="true">⌄</span>
-              </button>
-              <div id="devices-body" hidden class="panel-body">
-                <label class="dev-remember">
-                  <input type="checkbox" id="dev-remember-cb">
-                  <span>Запомнить это устройство</span>
-                </label>
-                <p class="dev-hint" id="dev-hint">Вход в кабинет без пароля на 90 дней. Снять галку — устройство забудется.</p>
-                <div class="dev-confirm" id="dev-confirm" hidden>
-                  <input type="password" id="dev-daily" placeholder="Суточный пароль" autocomplete="off">
-                  <button class="dev-confirm-btn" id="dev-confirm-btn" type="button">Подтвердить</button>
-                </div>
-                <p class="dev-error" id="dev-error"></p>
-                <div id="devices-list"><p class="widget-empty">Загрузка…</p></div>
-              </div>
-            </section>
-
-            <section class="cabp c2" style="--a:#2de2ff">
-              <button class="ex-head panel-head" id="loginlog-toggle" type="button"
-                      aria-expanded="false" aria-controls="loginlog-body">
-                <span class="ex-ic">
-                  <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
-                    <circle cx="24" cy="24" r="17" stroke="#2de2ff" stroke-width="2.6" stroke-opacity=".55"/>
-                    <path d="M24 13v11l7.5 4.5" stroke="#7fe9ff" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>
-                    <path d="M7 24a17 17 0 0 1 5-12" stroke="#2de2ff" stroke-width="2.6" stroke-linecap="round"/>
-                    <circle cx="24" cy="24" r="2.6" fill="#7fe9ff"/>
-                  </svg>
-                </span>
-                <span class="ex-tx"><b>Журнал входов</b><i>кто и когда</i></span>
-                <span class="ex-ar" aria-hidden="true">⌄</span>
-              </button>
-              <div id="loginlog-body" hidden class="panel-body">
-                <div id="loginlog-list"><p class="widget-empty">Загрузка…</p></div>
-              </div>
-            </section>
-
-            <!-- Внизу: темы открываются страницей, копия разворачивается тут -->
+            <!-- Второй ряд замком: две разворачиваются панелью снизу,
+                 темы уходят своей страницей, копия тоже разворачивается. -->
             <div class="zrow c4">
+              <button class="z panel-head" id="devices-toggle" type="button"
+                      aria-expanded="false" aria-controls="devices-body" style="--a:#63f5ad">
+                <span class="ztop">
+                  <span class="z-ic">
+                    <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
+                      <rect x="4" y="10" width="28" height="19" rx="2.5" stroke="#63f5ad" stroke-width="2.6"/>
+                      <path d="M2 33h32" stroke="#63f5ad" stroke-width="2.6" stroke-linecap="round"/>
+                      <rect x="30" y="20" width="14" height="22" rx="2.5" fill="#0d1321" stroke="#a8ffd6" stroke-width="2.6"/>
+                      <path d="M35 38h4" stroke="#a8ffd6" stroke-width="2.2" stroke-linecap="round"/>
+                    </svg>
+                  </span>
+                  <b>Запомнить устройства</b>
+                </span>
+                <span class="zbot"><i>вход без пароля</i><em aria-hidden="true">⌄</em></span>
+              </button>
+
+              <button class="z panel-head" id="loginlog-toggle" type="button"
+                      aria-expanded="false" aria-controls="loginlog-body" style="--a:#2de2ff">
+                <span class="ztop">
+                  <span class="z-ic">
+                    <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
+                      <circle cx="24" cy="24" r="17" stroke="#2de2ff" stroke-width="2.6" stroke-opacity=".55"/>
+                      <path d="M24 13v11l7.5 4.5" stroke="#7fe9ff" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>
+                      <path d="M7 24a17 17 0 0 1 5-12" stroke="#2de2ff" stroke-width="2.6" stroke-linecap="round"/>
+                      <circle cx="24" cy="24" r="2.6" fill="#7fe9ff"/>
+                    </svg>
+                  </span>
+                  <b>Журнал входов</b>
+                </span>
+                <span class="zbot"><i>кто и когда</i><em aria-hidden="true">⌄</em></span>
+              </button>
+
               <a class="z" href="/themes" style="--a:#ff3fa4">
                 <span class="ztop">
                   <span class="z-ic">
@@ -4437,7 +4429,7 @@ def cabinet():
               </a>
 
               <button class="z panel-head" id="backup-toggle" type="button"
-                      aria-expanded="false" aria-controls="backup-body" style="--a:#63f5ad">
+                      aria-expanded="false" aria-controls="backup-body" style="--a:#4ade80">
                 <span class="ztop">
                   <span class="z-ic">
                     <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
@@ -4450,6 +4442,29 @@ def cabinet():
                 </span>
                 <span class="zbot"><i>скачать и вернуть</i><em aria-hidden="true">⌄</em></span>
               </button>
+            </div>
+
+            <!-- Панели этого ряда раскрываются снизу, во всю ширину -->
+            <div class="zbody c4" id="devices-body" hidden>
+              <div class="panel-body">
+                <label class="dev-remember">
+                  <input type="checkbox" id="dev-remember-cb">
+                  <span>Запомнить это устройство</span>
+                </label>
+                <p class="dev-hint" id="dev-hint">Вход в кабинет без пароля на 90 дней. Снять галку — устройство забудется.</p>
+                <div class="dev-confirm" id="dev-confirm" hidden>
+                  <input type="password" id="dev-daily" placeholder="Суточный пароль" autocomplete="off">
+                  <button class="dev-confirm-btn" id="dev-confirm-btn" type="button">Подтвердить</button>
+                </div>
+                <p class="dev-error" id="dev-error"></p>
+                <div id="devices-list"><p class="widget-empty">Загрузка…</p></div>
+              </div>
+            </div>
+
+            <div class="zbody c4" id="loginlog-body" hidden>
+              <div class="panel-body">
+                <div id="loginlog-list"><p class="widget-empty">Загрузка…</p></div>
+              </div>
             </div>
 
             <div class="zbody c4" id="backup-body" hidden style="margin-bottom:32px">
@@ -5864,22 +5879,39 @@ def cabinet():
         {
           const toggle = document.getElementById("loginlog-toggle");
           const listEl = document.getElementById("loginlog-list");
-          let loaded = false;
+          const FIRST = 5;          // сразу показываем только последние пять
+          let rows = null;
+
+          // Рисуем либо короткий список, либо весь. Кнопку показываем, только
+          // когда за пятью записями действительно что-то есть.
+          const draw = (all) => {
+            if (!rows.length) { listEl.innerHTML = '<p class="widget-empty">Нет записей</p>'; return; }
+            const fails = rows.filter(e => e.kind && e.kind !== "ok").length;
+            const head = fails
+              ? `<p class="log-alarm">Неудачных попыток за две недели: ${fails}</p>` : "";
+            const shown = all ? rows : rows.slice(0, FIRST);
+            const more = !all && rows.length > FIRST
+              ? `<button class="log-more" type="button">Показать все · ${rows.length}</button>` : "";
+            listEl.innerHTML = head + shown.map(e => {
+              const bad = e.kind && e.kind !== "ok";
+              return `<div class="log-row${bad ? " log-bad" : ""}"><span class="log-ts">${esc(e.ts)}</span><span class="log-ip">${esc(e.ip)}</span><span class="log-ua">${esc(e.ua)}</span></div>`;
+            }).join("") + more;
+            const btn = listEl.querySelector(".log-more");
+            if (btn) btn.addEventListener("click", () => draw(true));
+          };
+
           const load = async () => {
             try {
               const r = await fetch("/api/login-log", { credentials: "same-origin" });
-              const data = await r.json();
-              if (!data.length) { listEl.innerHTML = '<p class="widget-empty">Нет записей</p>'; return; }
-              const fails = data.filter(e => e.kind && e.kind !== "ok").length;
-              const head = fails
-                ? `<p class="log-alarm">Неудачных попыток за две недели: ${fails}</p>` : "";
-              listEl.innerHTML = head + data.map(e => {
-                const bad = e.kind && e.kind !== "ok";
-                return `<div class="log-row${bad ? " log-bad" : ""}"><span class="log-ts">${esc(e.ts)}</span><span class="log-ip">${esc(e.ip)}</span><span class="log-ua">${esc(e.ua)}</span></div>`;
-              }).join("");
+              rows = await r.json();
+              draw(false);
             } catch {}
           };
-          if (toggle) toggle.addEventListener("widget-open", e => { if (e.detail && !loaded) { loaded = true; load(); } });
+          // Каждое открытие начинается заново с пяти: закрыл, открыл — снова пять.
+          if (toggle) toggle.addEventListener("widget-open", e => {
+            if (!e.detail) return;
+            if (rows) draw(false); else load();
+          });
         }
 
         // ── Запомненные устройства ──
