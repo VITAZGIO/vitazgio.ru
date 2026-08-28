@@ -4117,8 +4117,8 @@ def cabinet():
                    border: 1px solid rgba(45,226,255,.4); outline: none; background: rgba(4,10,20,.7); }
 
         /* Верхний блок: метрики во всю ширину */
-        .dash { padding: 18px 20px 16px; border: 1px solid rgba(45,226,255,.16); background: rgba(10,17,30,.72); }
-        .dash-title { margin-bottom: 14px; color: #8f99ab; font: 700 .76rem "Cascadia Code", Consolas, monospace; letter-spacing: .1em; text-transform: uppercase; }
+        .dash { padding: 20px 22px 22px; border: 1px solid rgba(45,226,255,.16); background: rgba(10,17,30,.72); display: flex; flex-direction: column; }
+        .dash-title { margin: 0 0 16px; color: #8f99ab; font: 700 .82rem "Cascadia Code", Consolas, monospace; letter-spacing: .12em; text-transform: uppercase; flex: none; }
 
         /* Панель с логотипом. Модификатор --right зеркалит: логотип справа. */
         /* ── Сервисы кабинета ──────────────────────────────────────────
@@ -4292,19 +4292,19 @@ def cabinet():
         .btn-line.warn:hover { color: #fff; border-color: #ff8c3c; background: rgba(255,140,60,.18); }
 
         /* Метрики */
-        .metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 12px; }
-        .metrics-host { border: 1px solid rgba(255,255,255,.07); padding: 12px 14px; }
-        .metrics-host-name { font: 700 .82rem "Cascadia Code", Consolas, monospace; color: #c4cad5; margin-bottom: 10px; }
-        .metrics-bars { display: grid; grid-template-columns: 40px 1fr 36px; align-items: center; gap: 5px 8px; font-size: .74rem; }
+        .metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 14px; flex: 1 1 auto; }
+        .metrics-host { border: 1px solid rgba(255,255,255,.07); padding: 22px 24px; display: flex; flex-direction: column; gap: 18px; justify-content: center; }
+        .metrics-host-name { font: 700 1.06rem "Cascadia Code", Consolas, monospace; color: #dfe6f2; margin: 0; }
+        .metrics-bars { display: grid; grid-template-columns: 48px 1fr 52px; align-items: center; gap: 14px 12px; font-size: .92rem; }
         .metrics-label { color: #6b7385; }
-        .metrics-track { height: 6px; background: rgba(255,255,255,.07); border-radius: 3px; overflow: hidden; }
+        .metrics-track { height: 12px; background: rgba(255,255,255,.07); border-radius: 6px; overflow: hidden; }
         .metrics-fill { height: 100%; border-radius: 3px; transition: width .4s ease; }
         .fill-cpu  { background: linear-gradient(90deg,#2de2ff,#69e8ff); }
         .fill-ram  { background: linear-gradient(90deg,#ff782f,#ffb35c); }
         .fill-disk { background: linear-gradient(90deg,#a855f7,#c084fc); }
         .metrics-val { color: #e8fbff; text-align: right; white-space: nowrap; }
-        .metrics-extra { display: flex; gap: 14px; margin-top: 8px; font-size: .72rem; color: #6b7385; }
-        .metrics-offline { color: #4a5060; font-size: .78rem; font-style: italic; }
+        .metrics-extra { display: flex; gap: 20px; margin: 0; font-size: .88rem; color: #8592a7; }
+        .metrics-offline { color: #4a5060; font-size: 1rem; font-style: italic; text-align: center; }
 
 
         /* Деплой */
