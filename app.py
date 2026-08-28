@@ -4217,19 +4217,28 @@ def cabinet():
         }
 
 
-        /* Раскрытая карточка ничего не меняет в себе. Только по периметру,
-           за пределами карточки, зажигается ровный розовый ореол — как будто
-           за плиткой поставили свечу. Ореол чуть дышит: то тусклее, то ярче. */
-        .z[aria-expanded="true"] { z-index: 3;
-                                   animation: cab-halo 3.6s ease-in-out infinite; }
+        /* Раскрытая карточка становится чуть больше — как при наведении —
+           и получает чёткий розовый контур с рассеянной тенью, которые дышат
+           вдох-выдох. Плитку изнутри мы не трогаем: только по её периметру. */
+        .z[aria-expanded="true"] { z-index: 3; transform: scale(1.02);
+                                   animation: cab-halo 2.6s ease-in-out infinite; }
         @keyframes cab-halo {
-          0%, 100% { filter: drop-shadow(0 0 10px rgba(255,63,164,.45))
-                             drop-shadow(0 0 20px rgba(255,63,164,.18)); }
-          50%      { filter: drop-shadow(0 0 18px rgba(255,63,164,.72))
-                             drop-shadow(0 0 34px rgba(255,63,164,.32)); }
+          0%, 100% { filter:
+              drop-shadow( 1px 0 0 #ff3fa4) drop-shadow(-1px 0 0 #ff3fa4)
+              drop-shadow(0  1px 0 #ff3fa4) drop-shadow(0 -1px 0 #ff3fa4)
+              drop-shadow(0 0 10px rgba(255,63,164,.55))
+              drop-shadow(0 0 22px rgba(255,63,164,.25)); }
+          50%      { filter:
+              drop-shadow( 2px 0 0 #ff3fa4) drop-shadow(-2px 0 0 #ff3fa4)
+              drop-shadow(0  2px 0 #ff3fa4) drop-shadow(0 -2px 0 #ff3fa4)
+              drop-shadow(0 0 22px rgba(255,63,164,.95))
+              drop-shadow(0 0 44px rgba(255,63,164,.5)); }
         }
         @media (prefers-reduced-motion: reduce) {
-          .z[aria-expanded="true"] { animation: none; }
+          .z[aria-expanded="true"] { animation: none;
+              filter: drop-shadow(1px 0 0 #ff3fa4) drop-shadow(-1px 0 0 #ff3fa4)
+                      drop-shadow(0 1px 0 #ff3fa4) drop-shadow(0 -1px 0 #ff3fa4)
+                      drop-shadow(0 0 16px rgba(255,63,164,.7)); }
         }
 
         @media (max-width: 620px) {
@@ -14218,7 +14227,8 @@ def ai_chat_send(chat_id):
             c["messages"] = c["messages"][-AI_MSGS_MAX:]
         _ai_write()
         ctx = list(c["messages"][-AI_CTX_MSGS:])
-    model = OPENROUTER_VISION_MODEL if use_vision else OPENROUTER_MODEL
+    requested_model = (payload.get("model") or "").strip()
+    model = OPENROUTER_VISION_MODEL if use_vision else (requested_model or OPENROUTER_MODEL)
 
     # Собираем разговор в формате OpenAI. Картинку прикрепляем только к самой
     # последней реплике и только когда есть vision-модель.
@@ -14265,7 +14275,12 @@ def ai_chat_send(chat_id):
         # пробуем список: если основная 404, следующая; удачную запомним.
         with _ai_active_lock:
             primary = _ai_active_model if not use_vision else model
-        candidates = [model] if use_vision else _ai_models_to_try(primary)
+        if requested_model:
+            candidates = [requested_model]      # вкладка сама решила модель
+        elif use_vision:
+            candidates = [model]
+        else:
+            candidates = _ai_models_to_try(primary)
         resp = None
         chosen = candidates[0]
         for candidate in candidates:
@@ -14288,7 +14303,7 @@ def ai_chat_send(chat_id):
         if resp is None:
             yield _sse({"error": "Ни одна из известных бесплатных моделей не ответила."})
             return
-        if not use_vision and chosen != _ai_active_model:
+        if not use_vision and not requested_model and chosen != _ai_active_model:
             with _ai_active_lock:
                 _ai_active_model = chosen
             yield _sse({"model": chosen})
@@ -14337,7 +14352,7 @@ def neuro_page():
     /ai и /claude; тут только верхние вкладки, которые их показывают в iframe.
     Каждая несёт свою тему, так что переключение меняет и цвет шапки."""
     html = r"""<!doctype html>
-    <html lang="ru" data-tab="ds">
+    <html lang="ru" data-tab="mm">
     <head>
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -14348,8 +14363,11 @@ def neuro_page():
       <title>Нейронки · vitazgio.ru</title>
       <style>
         :root { color-scheme:dark; --line:rgba(255,255,255,.1);
-                --ds1:#4d6bfe; --ds2:#8b7bff; --cl1:#d97757; --cl2:#f0a184;
-                --ac:var(--ds1); --ac2:var(--ds2); }
+                --mm1:#ff6ea3; --mm2:#ff9a3d;   /* MiniMax: розово-оранжевый */
+                --nv1:#76c900; --nv2:#39ff14;   /* NVIDIA: зелёный */
+                --cl1:#d97757; --cl2:#f0a184;   /* Claude: оранжевый */
+                --ac:var(--mm1); --ac2:var(--mm2); }
+        html[data-tab="nv"] { --ac:var(--nv1); --ac2:var(--nv2); }
         html[data-tab="cl"] { --ac:var(--cl1); --ac2:var(--cl2); }
         * { box-sizing:border-box; }
         html, body { height:100%; margin:0; }
@@ -14376,7 +14394,8 @@ def neuro_page():
                border-radius:12px 12px 0 0; background:transparent; transition:color .16s, background .16s; }
         .tab:hover { color:#e6ecf8; background:rgba(255,255,255,.04); }
         .tab i { width:9px; height:9px; flex:none; border-radius:50%; }
-        .tab.ds i { background:linear-gradient(160deg,var(--ds1),var(--ds2)); box-shadow:0 0 10px var(--ds1); }
+        .tab.mm i { background:linear-gradient(160deg,var(--mm1),var(--mm2)); box-shadow:0 0 10px var(--mm1); }
+        .tab.nv i { background:linear-gradient(160deg,var(--nv1),var(--nv2)); box-shadow:0 0 10px var(--nv1); }
         .tab.cl i { background:linear-gradient(160deg,var(--cl1),var(--cl2)); box-shadow:0 0 10px var(--cl1); }
         .tab b { font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
         .tab.on { color:#fff; background:#0b1020; border-color:var(--line);
@@ -14402,12 +14421,14 @@ def neuro_page():
     <body>
       <div class="tabbar">
         <a class="home" href="/cabinet" title="В кабинет" aria-label="В кабинет"><svg viewBox="0 0 24 24" fill="none"><path d="M19 12H5m0 0 6-6m-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
-        <button class="tab ds on" type="button" data-tab="ds"><i></i><b>DeepSeek</b></button>
+        <button class="tab mm on" type="button" data-tab="mm"><i></i><b>MiniMax</b></button>
+        <button class="tab nv" type="button" data-tab="nv"><i></i><b>NVIDIA</b></button>
         <button class="tab cl" type="button" data-tab="cl"><i></i><b>Claude</b></button>
       </div>
       <div class="stage">
         <div class="spin" id="spin">открываю…</div>
-        <iframe id="fr-ds" class="on" title="DeepSeek" src="/ai" loading="eager"></iframe>
+        <iframe id="fr-mm" class="on" title="MiniMax" src="/ai?m=minimax%2Fminimax-m3%3Afree" loading="eager"></iframe>
+        <iframe id="fr-nv" title="NVIDIA" data-src="/ai?m=nvidia%2Fnemotron-3-ultra%3Afree" loading="lazy"></iframe>
         <iframe id="fr-cl" title="Claude" data-src="/claude" loading="lazy"></iframe>
       </div>
 
@@ -14416,11 +14437,14 @@ def neuro_page():
         "use strict";
         const root = document.documentElement;
         const tabs = Array.from(document.querySelectorAll(".tab"));
-        const frames = { ds: document.getElementById("fr-ds"), cl: document.getElementById("fr-cl") };
+        const frames = { mm: document.getElementById("fr-mm"),
+                         nv: document.getElementById("fr-nv"),
+                         cl: document.getElementById("fr-cl") };
         const spin = document.getElementById("spin");
-        const loaded = { ds: true, cl: false };
+        const loaded = { mm: true, nv: false, cl: false };
 
-        frames.ds.addEventListener("load", () => { if (root.getAttribute("data-tab") === "ds") spin.style.display = "none"; });
+        frames.mm.addEventListener("load", () => { if (root.getAttribute("data-tab") === "mm") spin.style.display = "none"; });
+        frames.nv.addEventListener("load", () => { loaded.nv = true; if (root.getAttribute("data-tab") === "nv") spin.style.display = "none"; });
         frames.cl.addEventListener("load", () => { loaded.cl = true; if (root.getAttribute("data-tab") === "cl") spin.style.display = "none"; });
 
         const show = (id) => {
@@ -14439,8 +14463,8 @@ def neuro_page():
 
         tabs.forEach((t) => t.addEventListener("click", () => show(t.dataset.tab)));
 
-        let start = "ds";
-        try { const s = localStorage.getItem("neuroTab"); if (s === "cl" || s === "ds") start = s; } catch (e) {}
+        let start = "mm";
+        try { const s = localStorage.getItem("neuroTab"); if (s === "cl" || s === "nv" || s === "mm") start = s; } catch (e) {}
         show(start);
       })();
       </script>
@@ -14453,6 +14477,7 @@ def neuro_page():
 @app.get("/ai")
 @login_required
 def ai_page():
+    _preset = (request.args.get("m") or "").strip()
     """Чат с нейросетью (DeepSeek через OpenRouter). Личная страница хозяина:
     история чатов хранится на сайте под паролем кабинета, поэтому за замком.
     Разрешаем встраивание в свой же iframe — страница «Нейронки» показывает её
@@ -14650,11 +14675,13 @@ def ai_page():
       </div>
 
       <script>
+      window.__PRESET__ = "%%PRESET%%";
       (() => {
         "use strict";
         const $ = (id) => document.getElementById(id);
         const chat = $("chat"), list = $("list"), wrap = $("wrap");
-        let chats = [], curId = null, busy = false, ready = false, vision = false, modelName = "";
+        const PRESET = window.__PRESET__ || "";
+        let chats = [], curId = null, busy = false, ready = false, vision = false, modelName = PRESET;
         let pendImg = null;
 
         const esc = (s) => (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -14759,8 +14786,9 @@ def ai_page():
             const d = await r.json();
             ready = !!d.ready; vision = !!d.vision; modelName = d.model || "";
             chats = d.chats || [];
+            const shownModel = PRESET || modelName;
             $("brand-sub").innerHTML = '<i class="dot ' + (ready ? "on" : "off") + '"></i>' +
-              (ready ? esc(modelName) : "ключ OpenRouter не задан");
+              (ready ? esc(shownModel) : "ключ OpenRouter не задан");
             $("attach").hidden = !(ready && vision);
             renderList();
             if (chats.length) openChat(chats[0].id);
@@ -14853,7 +14881,7 @@ def ai_page():
             const r = await fetch("/api/ai/chat/" + curId + "/send", {
               method: "POST", credentials: "same-origin",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ text: text, image: img || undefined }),
+              body: JSON.stringify({ text: text, image: img || undefined, model: PRESET || undefined }),
             });
             if (!r.ok || !r.body) {
               const d = await r.json().catch(() => ({}));
@@ -14938,7 +14966,7 @@ def ai_page():
     </body>
     </html>
     """
-    return html.replace("__ICONLINKS__", ICON_LINKS)
+    return html.replace("__ICONLINKS__", ICON_LINKS).replace("%%PRESET%%", _preset.replace("\"", "\\\""))
 
 
 @app.get("/servers")
