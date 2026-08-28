@@ -4129,21 +4129,21 @@ def cabinet():
         .cabp:hover { border-color: color-mix(in srgb, var(--a) 50%, transparent);
                       transform: scale(1.012); z-index: 3; }
         .ex-head { position: relative; width: 100%; display: flex; align-items: center; gap: 13px;
-                   padding: 17px 40px 17px 20px; cursor: pointer; color: inherit; text-align: left;
+                   padding: 19px 72px 19px 36px; cursor: pointer; color: inherit; text-align: left;
                    border: 0; background: none; font: inherit; }
         .ex-head::before { content: ""; position: absolute; left: 0; top: 11px; bottom: 11px; width: 2px;
                            border-radius: 2px; background: var(--a); box-shadow: 0 0 12px var(--a); }
-        .ex-ic { width: 48px; height: 48px; flex: none; display: grid; place-items: center; }
+        .ex-ic { width: 56px; height: 56px; flex: none; display: grid; place-items: center; }
         .ex-ic svg, .ex-ic img { width: 100%; height: 100%; object-fit: contain; display: block; }
         .ex-tx { flex: 1; min-width: 0; }
-        .ex-tx b { display: block; color: #f8fbff; font-size: 1.2rem; font-weight: 800; }
-        .ex-tx i { display: block; margin-top: 4px; font-style: normal; color: #9fadc2; font-size: .88rem; }
+        .ex-tx b { display: block; color: #f8fbff; font-size: 1.34rem; font-weight: 800; }
+        .ex-tx i { display: block; margin-top: 5px; font-style: normal; color: #9fadc2; font-size: .92rem; }
         .ex-ar { flex: none; color: var(--a); font-size: 1rem; opacity: .75; transition: transform .25s; }
         .ex-head[aria-expanded="true"] .ex-ar { transform: rotate(180deg); }
 
         /* плитки-замок: сцепляются ступенькой, как детали в пазу */
         .zrow { display: flex; }
-        .z { --a: #2de2ff; --s: 56px; --g: 11px; position: relative; flex: 1 1 0; min-width: 0; min-height: 150px;
+        .z { --a: #2de2ff; --s: 56px; --g: 11px; position: relative; flex: 1 1 0; min-width: 0; min-height: 172px;
              display: flex; flex-direction: column; color: inherit; text-decoration: none;
              margin-left: calc(var(--s) * -1); cursor: pointer; border: 0; font: inherit;
              padding: 0; text-align: left; transform-origin: center;
@@ -4167,16 +4167,17 @@ def cabinet():
                         calc(var(--s) + var(--g) / 2) calc(50% + var(--g) / 2)); }
         .z:hover { filter: brightness(1.35) saturate(1.1); transform: scale(1.02); z-index: 3; }
         .z .ztop { flex: 0 0 50%; display: flex; align-items: center; gap: 13px;
-                   padding: 0 40px 0 calc(var(--s) + 20px); }
-        .z:first-child .ztop { padding-left: 20px; }
-        .z-ic { width: 42px; height: 42px; flex: none; display: grid; place-items: center; }
+                   padding: 0 72px 0 calc(var(--s) + 36px); }
+        .z:first-child .ztop { padding-left: 36px; }
+        .z-ic { width: 50px; height: 50px; flex: none; display: grid; place-items: center; }
         .z-ic svg, .z-ic img { width: 100%; height: 100%; object-fit: contain; display: block; }
-        .z .ztop b { color: #f8fbff; font-size: 1.16rem; font-weight: 800; line-height: 1.2; }
+        .z .ztop b { color: #f8fbff; font-size: 1.3rem; font-weight: 800; line-height: 1.2; }
         .z .zbot { flex: 1; display: flex; align-items: center; justify-content: space-between; gap: 10px;
-                   padding: 0 calc(var(--s) + 40px) 0 20px; }
-        .z:last-child .zbot { padding-right: 40px; }
-        .z .zbot i { font-style: normal; color: #b3c0d4; font-size: .88rem;
-                     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.25; }
+                   padding: 0 calc(var(--s) + 30px) 0 36px; }
+        .z:last-child .zbot { padding-right: 30px; }
+        .z .zbot i { font-style: normal; color: #b3c0d4; font-size: .92rem; line-height: 1.4;
+                     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+                     overflow: hidden; line-height: 1.25; }
         .z .zbot em { font-style: normal; flex: none; color: var(--a); font-size: 1.1rem; opacity: .85;
                       transition: transform .25s; }
         .z[aria-expanded="true"] .zbot em { transform: rotate(180deg); }
@@ -4192,15 +4193,15 @@ def cabinet():
           .cabinet-cols { max-width: none; gap: 30px; }
           .rail { width: 340px; }
           .cab { gap: 24px; }
-          .z { --s: 68px; --g: 13px; min-height: 176px; }
-          .z-ic { width: 50px; height: 50px; }
-          .z .ztop b { font-size: 1.34rem; }
+          .z { --s: 68px; --g: 13px; min-height: 200px; }
+          .z-ic { width: 58px; height: 58px; }
+          .z .ztop b { font-size: 1.48rem; }
           .z .zbot i { font-size: 1rem; }
-          .z .ztop { padding: 0 48px 0 calc(var(--s) + 24px); gap: 15px; }
-          .z:first-child .ztop { padding-left: 24px; }
-          .z .zbot { padding: 0 calc(var(--s) + 48px) 0 24px; }
-          .z:last-child .zbot { padding-right: 48px; }
-          .ex-head { padding: 21px 48px 21px 24px; gap: 15px; }
+          .z .ztop { padding: 0 88px 0 calc(var(--s) + 44px); gap: 17px; }
+          .z:first-child .ztop { padding-left: 44px; }
+          .z .zbot { padding: 0 calc(var(--s) + 40px) 0 44px; }
+          .z:last-child .zbot { padding-right: 40px; }
+          .ex-head { padding: 24px 88px 24px 44px; gap: 17px; }
           .ex-ic { width: 56px; height: 56px; }
           .ex-tx b { font-size: 1.36rem; } .ex-tx i { font-size: 1rem; }
         }
@@ -4209,7 +4210,7 @@ def cabinet():
           .cab { grid-template-columns: repeat(2, 1fr); gap: 9px; }
           .c4, .c2 { grid-column: span 2; }
           .zrow { flex-wrap: wrap; gap: 9px 0; }
-          .z { --s: 34px; --g: 9px; flex: 1 1 calc(50%); min-height: 124px; }
+          .z { --s: 34px; --g: 9px; flex: 1 1 calc(50%); min-height: 148px; }
           .z:nth-child(3) { margin-left: 0;
              clip-path: polygon(0 0, calc(100% - var(--g) / 2) 0,
                         calc(100% - var(--g) / 2) calc(50% - var(--g) / 2),
@@ -4221,14 +4222,13 @@ def cabinet():
                         calc(var(--g) / 2) 100%, calc(var(--g) / 2) calc(50% + var(--g) / 2),
                         calc(var(--s) + var(--g) / 2) calc(50% + var(--g) / 2)); }
           .z:nth-child(2) .zbot { padding-right: 9px; }
-          .z .ztop { padding: 0 22px 0 calc(var(--s) + 11px); gap: 9px; }
-          .z:first-child .ztop, .z:nth-child(3) .ztop { padding-left: 11px; }
-          .z .zbot { padding: 0 calc(var(--s) + 22px) 0 11px; }
+          .z .ztop { padding: 0 32px 0 calc(var(--s) + 16px); gap: 9px; }
+          .z:first-child .ztop, .z:nth-child(3) .ztop { padding-left: 16px; }
+          .z .zbot { padding: 0 calc(var(--s) + 14px) 0 16px; }
           .z-ic { width: 30px; height: 30px; }
           .z .ztop b { font-size: .86rem; }
-          .z .zbot i { font-size: .68rem; white-space: normal; display: -webkit-box;
-                       -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.3; }
-          .ex-head { padding: 13px 22px 13px 13px; gap: 11px; }
+          .z .zbot i { font-size: .68rem; -webkit-line-clamp: 3; line-height: 1.32; }
+          .ex-head { padding: 13px 30px 13px 16px; gap: 11px; }
           .ex-ic { width: 36px; height: 36px; }
           .ex-tx b { font-size: .92rem; } .ex-tx i { font-size: .68rem; }
         }
@@ -4362,7 +4362,7 @@ def cabinet():
                   </span>
                   <b>Личный дроп</b>
                 </span>
-                <span class="zbot"><i>файлы и текст между машинами</i><em aria-hidden="true">⟶</em></span>
+                <span class="zbot"><i>перебросить файлы и текст между машинами</i><em aria-hidden="true">⟶</em></span>
               </a>
 
               <a class="z" href="/neuro" style="--a:#7b6bff">
@@ -4382,7 +4382,7 @@ def cabinet():
                   </span>
                   <b>Нейронки</b>
                 </span>
-                <span class="zbot"><i>два чата: DeepSeek и Claude</i><em aria-hidden="true">⟶</em></span>
+                <span class="zbot"><i>два чата: DeepSeek в облаке, Claude дома</i><em aria-hidden="true">⟶</em></span>
               </a>
 
               <a class="z" href="/notebook" style="--a:#0a7ce0">
@@ -4407,7 +4407,7 @@ def cabinet():
                   </span>
                   <b>Блокнот</b>
                 </span>
-                <span class="zbot"><i>заметки, ссылки и файлы</i><em aria-hidden="true">⟶</em></span>
+                <span class="zbot"><i>заметки, ссылки и файлы по вкладкам</i><em aria-hidden="true">⟶</em></span>
               </a>
 
               <a class="z" href="/music" style="--a:#35e0f0">
@@ -4441,7 +4441,7 @@ def cabinet():
                   </span>
                   <b>Запомнить устройства</b>
                 </span>
-                <span class="zbot"><i>вход без пароля на 90 дней</i><em aria-hidden="true">⌄</em></span>
+                <span class="zbot"><i>вход без пароля на 90 дней на своих</i><em aria-hidden="true">⌄</em></span>
               </button>
 
               <button class="z panel-head" id="loginlog-toggle" type="button"
@@ -4457,7 +4457,7 @@ def cabinet():
                   </span>
                   <b>Журнал входов</b>
                 </span>
-                <span class="zbot"><i>кто и когда заходил · 2 недели</i><em aria-hidden="true">⌄</em></span>
+                <span class="zbot"><i>кто и когда заходил, за две недели</i><em aria-hidden="true">⌄</em></span>
               </button>
 
               <a class="z" href="/themes" style="--a:#ff3fa4">
@@ -4487,7 +4487,7 @@ def cabinet():
                   </span>
                   <b>Резервная копия</b>
                 </span>
-                <span class="zbot"><i>скачать всё и вернуть обратно</i><em aria-hidden="true">⌄</em></span>
+                <span class="zbot"><i>скачать всё архивом и вернуть обратно</i><em aria-hidden="true">⌄</em></span>
               </button>
             </div>
 
