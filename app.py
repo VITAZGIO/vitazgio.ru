@@ -4222,24 +4222,14 @@ def cabinet():
            за плиткой поставили свечу. Ореол чуть дышит: то тусклее, то ярче. */
         .z[aria-expanded="true"] { z-index: 3;
                                    animation: cab-halo 3.6s ease-in-out infinite; }
-        .cabp:has(.ex-head[aria-expanded="true"]) {
-                                   z-index: 3; border-color: rgba(255,63,164,.55);
-                                   animation: cab-halo-box 3.6s ease-in-out infinite; }
         @keyframes cab-halo {
           0%, 100% { filter: drop-shadow(0 0 10px rgba(255,63,164,.45))
                              drop-shadow(0 0 20px rgba(255,63,164,.18)); }
           50%      { filter: drop-shadow(0 0 18px rgba(255,63,164,.72))
                              drop-shadow(0 0 34px rgba(255,63,164,.32)); }
         }
-        @keyframes cab-halo-box {
-          0%, 100% { box-shadow: 0 0 14px rgba(255,63,164,.35),
-                                 0 0 30px rgba(255,63,164,.14); }
-          50%      { box-shadow: 0 0 24px rgba(255,63,164,.6),
-                                 0 0 48px rgba(255,63,164,.28); }
-        }
         @media (prefers-reduced-motion: reduce) {
-          .z[aria-expanded="true"],
-          .cabp:has(.ex-head[aria-expanded="true"]) { animation: none; }
+          .z[aria-expanded="true"] { animation: none; }
         }
 
         @media (max-width: 620px) {
@@ -13931,22 +13921,75 @@ OPENROUTER_MODEL = os.environ.get(
 # OpenRouter время от времени переименовывает и снимает с раздачи бесплатные
 # модели DeepSeek. Держим короткий список запасных: если основная вернула
 # 404, сервер сам пойдёт по списку и запомнит рабочую до перезапуска.
+# Известные рабочие бесплатные модели на разных провайдерах: держим их как
+# первый эшелон, если из .env ничего не задано. Список пополняется живым
+# ответом от /api/v1/models — тем моделям, у которых prompt/completion == 0.
 OPENROUTER_FALLBACKS = [
-    "deepseek/deepseek-chat-v3.1:free",
-    "deepseek/deepseek-r1-0528:free",
+    "openrouter/auto",                    # роутер сам выберет живую бесплатную
+    "qwen/qwen3-coder:free",
+    "qwen/qwen-2.5-72b-instruct:free",
+    "google/gemma-3-27b-it:free",
+    "google/gemma-2-9b-it:free",
+    "meta-llama/llama-3.3-70b-instruct:free",
+    "meta-llama/llama-3.2-3b-instruct:free",
+    "mistralai/mistral-7b-instruct:free",
+    "openai/gpt-oss-120b:free",
+    "openai/gpt-oss-20b:free",
+    "deepseek/deepseek-chat-v3.1:free",   # вдруг вернутся
     "deepseek/deepseek-r1:free",
-    "deepseek/deepseek-chat:free",
-    "deepseek/deepseek-v3.2-exp:free",
 ]
 _ai_active_model = OPENROUTER_MODEL
 _ai_active_lock = threading.Lock()
+_ai_discovered = []            # что вернул /models на прошлом запросе
+_ai_discovered_at = 0
+_AI_DISCOVER_TTL = 900          # секунд между обращениями к каталогу
+
+
+def _ai_discover():
+    """Смотрит каталог OpenRouter и запоминает id всех бесплатных моделей."""
+    global _ai_discovered, _ai_discovered_at
+    if not OPENROUTER_KEY:
+        return []
+    if time.time() - _ai_discovered_at < _AI_DISCOVER_TTL and _ai_discovered:
+        return _ai_discovered
+    from urllib import request as urlrequest, error as urlerror
+    base = OPENROUTER_URL.rsplit("/chat/completions", 1)[0]
+    req = urlrequest.Request(base + "/models",
+                             headers={"Authorization": "Bearer " + OPENROUTER_KEY})
+    try:
+        with urlrequest.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8", "replace"))
+    except (urlerror.URLError, ValueError, OSError):
+        return _ai_discovered
+    free = []
+    for m in data.get("data", []):
+        pr = m.get("pricing") or {}
+        try:
+            if float(pr.get("prompt", 0)) == 0 and float(pr.get("completion", 0)) == 0:
+                mid = m.get("id")
+                if mid:
+                    free.append(mid)
+        except (TypeError, ValueError):
+            continue
+    if free:
+        _ai_discovered = free
+        _ai_discovered_at = time.time()
+    return _ai_discovered
+
 
 def _ai_models_to_try(primary):
-    seen = []
-    for m in [primary] + OPENROUTER_FALLBACKS:
+    """Порядок: сначала указанная (из .env или прошлая удачная), затем
+    живой каталог бесплатных, потом наши запасные, без повторов."""
+    seen, order = set(), []
+    def add(m):
         if m and m not in seen:
-            seen.append(m)
-    return seen
+            seen.add(m); order.append(m)
+    add(primary)
+    for m in _ai_discover():
+        add(m)
+    for m in OPENROUTER_FALLBACKS:
+        add(m)
+    return order
 # Vision-модель отдельно: у бесплатного DeepSeek картинок нет, поэтому фото
 # уходит той модели, что назвал хозяин здесь. Пусто — кнопка фото прячется.
 OPENROUTER_VISION_MODEL = os.environ.get("OPENROUTER_VISION_MODEL", "").strip()
