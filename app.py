@@ -13915,6 +13915,25 @@ OPENROUTER_URL = os.environ.get(
     "OPENROUTER_URL", "https://openrouter.ai/api/v1/chat/completions").strip()
 OPENROUTER_MODEL = os.environ.get(
     "OPENROUTER_MODEL", "deepseek/deepseek-chat-v3.1:free").strip()
+# OpenRouter время от времени переименовывает и снимает с раздачи бесплатные
+# модели DeepSeek. Держим короткий список запасных: если основная вернула
+# 404, сервер сам пойдёт по списку и запомнит рабочую до перезапуска.
+OPENROUTER_FALLBACKS = [
+    "deepseek/deepseek-chat-v3.1:free",
+    "deepseek/deepseek-r1-0528:free",
+    "deepseek/deepseek-r1:free",
+    "deepseek/deepseek-chat:free",
+    "deepseek/deepseek-v3.2-exp:free",
+]
+_ai_active_model = OPENROUTER_MODEL
+_ai_active_lock = threading.Lock()
+
+def _ai_models_to_try(primary):
+    seen = []
+    for m in [primary] + OPENROUTER_FALLBACKS:
+        if m and m not in seen:
+            seen.append(m)
+    return seen
 # Vision-модель отдельно: у бесплатного DeepSeek картинок нет, поэтому фото
 # уходит той модели, что назвал хозяин здесь. Пусто — кнопка фото прячется.
 OPENROUTER_VISION_MODEL = os.environ.get("OPENROUTER_VISION_MODEL", "").strip()
@@ -14012,7 +14031,9 @@ def ai_state_api():
     with ai_lock:
         cards = [_ai_card(c) for c in ai_data["chats"]]
     cards.sort(key=lambda x: x["updated"], reverse=True)
-    return jsonify(ready=_ai_ready(), model=OPENROUTER_MODEL,
+    with _ai_active_lock:
+        active = _ai_active_model
+    return jsonify(ready=_ai_ready(), model=active,
                    vision=bool(OPENROUTER_VISION_MODEL), chats=cards)
 
 
@@ -14178,21 +14199,44 @@ def ai_chat_send(chat_id):
                 _ai_write()
 
     def gen():
+        global _ai_active_model
         from urllib import request as urlrequest, error as urlerror
         headers = {"Authorization": "Bearer " + OPENROUTER_KEY,
                    "Content-Type": "application/json",
                    "HTTP-Referer": "https://vitazgio.ru",
                    "X-Title": "vitazgio.ru"}
-        req = urlrequest.Request(OPENROUTER_URL, data=req_body, headers=headers)
-        acc, resp = [], None
-        try:
-            resp = urlrequest.urlopen(req, timeout=AI_TIMEOUT)
-        except urlerror.HTTPError as e:
-            yield _sse({"error": _ai_http_error(e.code)})
+        # Vision-запрос идёт на свою модель без замены. У обычного —
+        # пробуем список: если основная 404, следующая; удачную запомним.
+        with _ai_active_lock:
+            primary = _ai_active_model if not use_vision else model
+        candidates = [model] if use_vision else _ai_models_to_try(primary)
+        resp = None
+        chosen = candidates[0]
+        for candidate in candidates:
+            body_try = req_body if candidate == model else json.dumps({
+                "model": candidate, "messages": api_msgs, "stream": True,
+                "max_tokens": AI_REPLY_TOKENS}).encode("utf-8")
+            req = urlrequest.Request(OPENROUTER_URL, data=body_try, headers=headers)
+            try:
+                resp = urlrequest.urlopen(req, timeout=AI_TIMEOUT)
+                chosen = candidate
+                break
+            except urlerror.HTTPError as e:
+                if e.code == 404 and candidate != candidates[-1]:
+                    continue          # эту модель сняли — пробуем следующую
+                yield _sse({"error": _ai_http_error(e.code) + f" (модель {candidate})"})
+                return
+            except urlerror.URLError:
+                yield _sse({"error": "OpenRouter не отвечает. Попробуйте позже."})
+                return
+        if resp is None:
+            yield _sse({"error": "Ни одна из известных бесплатных моделей не ответила."})
             return
-        except urlerror.URLError:
-            yield _sse({"error": "OpenRouter не отвечает. Попробуйте позже."})
-            return
+        if not use_vision and chosen != _ai_active_model:
+            with _ai_active_lock:
+                _ai_active_model = chosen
+            yield _sse({"model": chosen})
+        acc = []
         try:
             for rawline in resp:
                 line = rawline.decode("utf-8", "replace").strip()
@@ -14776,7 +14820,8 @@ def ai_page():
                 if (!line) continue;
                 let ev;
                 try { ev = JSON.parse(line.slice(5).trim()); } catch (e) { continue; }
-                if (ev.delta) { acc += ev.delta; out.innerHTML = md(acc); scrollDown(); }
+                if (ev.model) { modelName = ev.model; $("brand-sub").innerHTML = '<i class="dot on"></i>' + esc(modelName); }
+                else if (ev.delta) { acc += ev.delta; out.innerHTML = md(acc); scrollDown(); }
                 else if (ev.error) {
                   out.classList.remove("cursor");
                   out.parentElement.parentElement.classList.add("err");
