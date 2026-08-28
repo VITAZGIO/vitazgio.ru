@@ -4033,9 +4033,11 @@ def cabinet():
 
         /* Колонка фиксированного размера: не тянется за левой стороной,
            сколько бы панелей там ни развернули. */
-        .cabinet-cols { display: flex; align-items: flex-start; gap: 20px; max-width: 1900px; }
+        .cabinet-cols { display: flex; align-items: stretch; gap: 20px; max-width: 1900px; }
         .rail { width: 268px; flex: none; display: flex; flex-direction: column; gap: 12px;
                 margin-top: clamp(22px, 3.5vw, 40px); }
+        /* плеер добирает высоту до низа левой колонки */
+        .rail .player { flex: 1 1 auto; min-height: 320px; }
         /* Узкий экран или половина окна — правой колонки просто нет. */
         @media (max-width: 1220px) { .rail { display: none; } }
 
@@ -4141,20 +4143,28 @@ def cabinet():
 
         /* плитки-замок: сцепляются ступенькой, как детали в пазу */
         .zrow { display: flex; }
-        .z { --a: #2de2ff; --s: 56px; position: relative; flex: 1 1 0; min-width: 0; min-height: 150px;
+        .z { --a: #2de2ff; --s: 56px; --g: 11px; position: relative; flex: 1 1 0; min-width: 0; min-height: 150px;
              display: flex; flex-direction: column; color: inherit; text-decoration: none;
-             margin-left: calc(var(--s) * -1 + 5px); cursor: pointer; border: 0; font: inherit;
+             margin-left: calc(var(--s) * -1); cursor: pointer; border: 0; font: inherit;
              padding: 0; text-align: left; transform-origin: center;
              transition: filter .18s, transform .18s ease;
              background: linear-gradient(150deg, color-mix(in srgb, var(--a) 30%, #0b1020),
                          color-mix(in srgb, var(--a) 7%, #0b1020));
-             clip-path: polygon(var(--s) 0, 100% 0, 100% 46%, calc(100% - var(--s)) 56%,
-                        calc(100% - var(--s)) 100%, 0 100%, 0 56%, var(--s) 46%); }
+             clip-path: polygon(calc(var(--s) + var(--g) / 2) 0, calc(100% - var(--g) / 2) 0,
+                        calc(100% - var(--g) / 2) calc(50% - var(--g) / 2),
+                        calc(100% - var(--s) - var(--g) / 2) calc(50% - var(--g) / 2),
+                        calc(100% - var(--s) - var(--g) / 2) 100%, calc(var(--g) / 2) 100%,
+                        calc(var(--g) / 2) calc(50% + var(--g) / 2),
+                        calc(var(--s) + var(--g) / 2) calc(50% + var(--g) / 2)); }
         .z:first-child { margin-left: 0;
-             clip-path: polygon(0 0, 100% 0, 100% 46%, calc(100% - var(--s)) 56%,
-                        calc(100% - var(--s)) 100%, 0 100%); }
+             clip-path: polygon(0 0, calc(100% - var(--g) / 2) 0,
+                        calc(100% - var(--g) / 2) calc(50% - var(--g) / 2),
+                        calc(100% - var(--s) - var(--g) / 2) calc(50% - var(--g) / 2),
+                        calc(100% - var(--s) - var(--g) / 2) 100%, 0 100%); }
         .z:last-child {
-             clip-path: polygon(var(--s) 0, 100% 0, 100% 100%, 0 100%, 0 56%, var(--s) 46%); }
+             clip-path: polygon(calc(var(--s) + var(--g) / 2) 0, 100% 0, 100% 100%,
+                        calc(var(--g) / 2) 100%, calc(var(--g) / 2) calc(50% + var(--g) / 2),
+                        calc(var(--s) + var(--g) / 2) calc(50% + var(--g) / 2)); }
         .z:hover { filter: brightness(1.35) saturate(1.1); transform: scale(1.02); z-index: 3; }
         .z .ztop { flex: 0 0 50%; display: flex; align-items: center; gap: 13px;
                    padding: 0 40px 0 calc(var(--s) + 20px); }
@@ -4176,17 +4186,40 @@ def cabinet():
                  background: rgba(255,255,255,.025); }
         .zbody > .panel-body { padding: 14px 16px; }
 
+        /* На широком мониторе не оставляем пустое поле справа: колонки
+           раздаются, правая полоса и плитки становятся крупнее. */
+        @media (min-width: 2200px) {
+          .cabinet-cols { max-width: none; gap: 30px; }
+          .rail { width: 340px; }
+          .cab { gap: 24px; }
+          .z { --s: 68px; --g: 13px; min-height: 176px; }
+          .z-ic { width: 50px; height: 50px; }
+          .z .ztop b { font-size: 1.34rem; }
+          .z .zbot i { font-size: 1rem; }
+          .z .ztop { padding: 0 48px 0 calc(var(--s) + 24px); gap: 15px; }
+          .z:first-child .ztop { padding-left: 24px; }
+          .z .zbot { padding: 0 calc(var(--s) + 48px) 0 24px; }
+          .z:last-child .zbot { padding-right: 48px; }
+          .ex-head { padding: 21px 48px 21px 24px; gap: 15px; }
+          .ex-ic { width: 56px; height: 56px; }
+          .ex-tx b { font-size: 1.36rem; } .ex-tx i { font-size: 1rem; }
+        }
+
         @media (max-width: 620px) {
           .cab { grid-template-columns: repeat(2, 1fr); gap: 9px; }
           .c4, .c2 { grid-column: span 2; }
           .zrow { flex-wrap: wrap; gap: 9px 0; }
-          .z { --s: 34px; flex: 1 1 calc(50% - 1px); min-height: 124px; }
+          .z { --s: 34px; --g: 9px; flex: 1 1 calc(50%); min-height: 124px; }
           .z:nth-child(3) { margin-left: 0;
-             clip-path: polygon(0 0, 100% 0, 100% 46%, calc(100% - var(--s)) 56%,
-                        calc(100% - var(--s)) 100%, 0 100%); }
+             clip-path: polygon(0 0, calc(100% - var(--g) / 2) 0,
+                        calc(100% - var(--g) / 2) calc(50% - var(--g) / 2),
+                        calc(100% - var(--s) - var(--g) / 2) calc(50% - var(--g) / 2),
+                        calc(100% - var(--s) - var(--g) / 2) 100%, 0 100%); }
           .z:nth-child(3) .ztop { padding-left: 9px; }
           .z:nth-child(2) {
-             clip-path: polygon(var(--s) 0, 100% 0, 100% 100%, 0 100%, 0 56%, var(--s) 46%); }
+             clip-path: polygon(calc(var(--s) + var(--g) / 2) 0, 100% 0, 100% 100%,
+                        calc(var(--g) / 2) 100%, calc(var(--g) / 2) calc(50% + var(--g) / 2),
+                        calc(var(--s) + var(--g) / 2) calc(50% + var(--g) / 2)); }
           .z:nth-child(2) .zbot { padding-right: 9px; }
           .z .ztop { padding: 0 22px 0 calc(var(--s) + 11px); gap: 9px; }
           .z:first-child .ztop, .z:nth-child(3) .ztop { padding-left: 11px; }
@@ -4355,7 +4388,7 @@ def cabinet():
               <a class="z" href="/notebook" style="--a:#0a7ce0">
                 <span class="ztop">
                   <span class="z-ic">
-                    <svg viewBox="0 0 48 40" aria-hidden="true">
+                    <svg viewBox="0 0 40 48" aria-hidden="true">
                       <defs>
                         <linearGradient id="nb-cover" x1="0" y1="0" x2="1" y2="1">
                           <stop offset="0" stop-color="#3aa0f5"/><stop offset="1" stop-color="#0a63c4"/>
@@ -4364,11 +4397,11 @@ def cabinet():
                           <stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#dce9f9"/>
                         </linearGradient>
                       </defs>
-                      <rect x="5" y="3" width="38" height="34" rx="5" fill="url(#nb-cover)"/>
-                      <path d="M12 8h20l7 7v14a3 3 0 0 1-3 3H12a3 3 0 0 1-3-3V11a3 3 0 0 1 3-3Z"
+                      <rect x="3" y="2" width="34" height="44" rx="5" fill="url(#nb-cover)"/>
+                      <path d="M9 7h16l7 7v25a2.5 2.5 0 0 1-2.5 2.5h-20A2.5 2.5 0 0 1 7 39V9.5A2.5 2.5 0 0 1 9.5 7Z"
                             fill="url(#nb-page)"/>
-                      <path d="M32 8v5a2 2 0 0 0 2 2h5Z" fill="#9dc7ef"/>
-                      <path d="M14 20h16M14 25h16M14 30h10" stroke="#1668c4" stroke-width="2"
+                      <path d="M25 7v5a2 2 0 0 0 2 2h5Z" fill="#9dc7ef"/>
+                      <path d="M12 21h16M12 27h16M12 33h10" stroke="#1668c4" stroke-width="2.2"
                             stroke-linecap="round"/>
                     </svg>
                   </span>
