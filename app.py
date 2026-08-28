@@ -4109,30 +4109,89 @@ def cabinet():
         .dash-title { margin-bottom: 14px; color: #8f99ab; font: 700 .76rem "Cascadia Code", Consolas, monospace; letter-spacing: .1em; text-transform: uppercase; }
 
         /* Панель с логотипом. Модификатор --right зеркалит: логотип справа. */
-        .panel { display: block; margin-top: 14px; color: inherit; text-decoration: none;
-                 border: 1px solid color-mix(in srgb, var(--accent, #2de2ff) 26%, transparent);
-                 background: rgba(10,17,30,.72); transition: border-color .2s, background .2s; }
-        .panel:hover { border-color: color-mix(in srgb, var(--accent, #2de2ff) 55%, transparent); }
-        .panel-head { width: 100%; display: flex; align-items: center; gap: 16px; padding: 16px 18px;
-                      text-align: left; border: 0; background: linear-gradient(100deg,
-                        color-mix(in srgb, var(--accent, #2de2ff) 9%, transparent), transparent 65%);
-                      cursor: pointer; }
-        .panel-head:hover { background: linear-gradient(100deg,
-                        color-mix(in srgb, var(--accent, #2de2ff) 17%, transparent), transparent 70%); }
-        .panel--right .panel-head { flex-direction: row-reverse; text-align: right;
-                      background: linear-gradient(260deg,
-                        color-mix(in srgb, var(--accent, #2de2ff) 9%, transparent), transparent 65%); }
-        .panel--right .panel-head:hover { background: linear-gradient(260deg,
-                        color-mix(in srgb, var(--accent, #2de2ff) 17%, transparent), transparent 70%); }
-        .panel-logo { width: 54px; height: 54px; flex: none; display: grid; place-items: center;
-                      padding: 7px; border-radius: 14px; background: #050608; }
-        .panel-logo img, .panel-logo svg { width: 100%; height: 100%; object-fit: contain; display: block; }
-        .panel-text { flex: 1; min-width: 0; }
-        .panel-title { display: block; color: #f8fbff; font-size: 1.18rem; font-weight: 800; }
-        .panel-sub { display: block; margin-top: 5px; color: #8f99ab; font-size: .72rem; letter-spacing: .06em; text-transform: uppercase; }
-        .panel-arrow { flex: none; color: var(--accent, #2de2ff); font-size: 1.3rem; transition: transform .25s; }
-        .panel-head[aria-expanded="true"] .panel-arrow { transform: rotate(180deg); }
-        .panel:hover .panel-arrow--go { transform: translateX(5px); }
+        /* ── Сервисы кабинета ──────────────────────────────────────────
+           Форма говорит о поведении: что разворачивается прямо здесь —
+           обычный прямоугольник со стрелкой вниз; что открывается своей
+           страницей — плитка-замок, сцепленная с соседями ступенькой.
+           Раскладка: NetBird строкой, ниже четыре плитки, потом две
+           разворачивающиеся, внизу темы и копия. */
+        .cab { display: grid; gap: 10px; grid-template-columns: repeat(4, 1fr);
+               max-width: 744px; margin-top: 14px; }
+        .c4 { grid-column: span 4; } .c2 { grid-column: span 2; }
+
+        /* разворачивающиеся */
+        .cabp { --a: #2de2ff; border: 1px solid rgba(255,255,255,.1); border-radius: 11px;
+                background: linear-gradient(100deg, color-mix(in srgb, var(--a) 9%, transparent),
+                            rgba(255,255,255,.022) 55%); overflow: hidden; transition: border-color .17s; }
+        .cabp:hover { border-color: color-mix(in srgb, var(--a) 50%, transparent); }
+        .ex-head { position: relative; width: 100%; display: flex; align-items: center; gap: 12px;
+                   padding: 11px 15px; cursor: pointer; color: inherit; text-align: left;
+                   border: 0; background: none; font: inherit; }
+        .ex-head::before { content: ""; position: absolute; left: 0; top: 11px; bottom: 11px; width: 2px;
+                           border-radius: 2px; background: var(--a); box-shadow: 0 0 12px var(--a); }
+        .ex-ic { width: 34px; height: 34px; flex: none; display: grid; place-items: center; }
+        .ex-ic svg, .ex-ic img { width: 100%; height: 100%; object-fit: contain; display: block; }
+        .ex-tx { flex: 1; min-width: 0; }
+        .ex-tx b { display: block; color: #f8fbff; font-size: .82rem; font-weight: 800; }
+        .ex-tx i { display: block; margin-top: 2px; font-style: normal; color: #8e9ab0; font-size: .63rem; }
+        .ex-ar { flex: none; color: var(--a); font-size: 1rem; opacity: .75; transition: transform .25s; }
+        .ex-head[aria-expanded="true"] .ex-ar { transform: rotate(180deg); }
+
+        /* плитки-замок: сцепляются ступенькой, как детали в пазу */
+        .zrow { display: flex; }
+        .z { --a: #2de2ff; --s: 38px; position: relative; flex: 1 1 0; min-width: 0; min-height: 104px;
+             display: flex; flex-direction: column; color: inherit; text-decoration: none;
+             margin-left: calc(var(--s) * -1 + 5px); cursor: pointer; border: 0; font: inherit;
+             padding: 0; text-align: left; transition: filter .18s;
+             background: linear-gradient(150deg, color-mix(in srgb, var(--a) 30%, #0b1020),
+                         color-mix(in srgb, var(--a) 7%, #0b1020));
+             clip-path: polygon(var(--s) 0, 100% 0, 100% 46%, calc(100% - var(--s)) 56%,
+                        calc(100% - var(--s)) 100%, 0 100%, 0 56%, var(--s) 46%); }
+        .z:first-child { margin-left: 0;
+             clip-path: polygon(0 0, 100% 0, 100% 46%, calc(100% - var(--s)) 56%,
+                        calc(100% - var(--s)) 100%, 0 100%); }
+        .z:last-child {
+             clip-path: polygon(var(--s) 0, 100% 0, 100% 100%, 0 100%, 0 56%, var(--s) 46%); }
+        .z:hover { filter: brightness(1.35) saturate(1.1); }
+        .z .ztop { flex: 0 0 50%; display: flex; align-items: center; gap: 9px;
+                   padding: 0 11px 0 calc(var(--s) + 11px); }
+        .z:first-child .ztop { padding-left: 11px; }
+        .z-ic { width: 26px; height: 26px; flex: none; display: grid; place-items: center; }
+        .z-ic svg, .z-ic img { width: 100%; height: 100%; object-fit: contain; display: block; }
+        .z .ztop b { color: #f8fbff; font-size: .76rem; font-weight: 800; line-height: 1.2; }
+        .z .zbot { flex: 1; display: flex; align-items: center; justify-content: space-between; gap: 8px;
+                   padding: 0 calc(var(--s) + 11px) 0 11px; }
+        .z:last-child .zbot { padding-right: 11px; }
+        .z .zbot i { font-style: normal; color: #9fadc2; font-size: .63rem; line-height: 1.25; }
+        .z .zbot em { font-style: normal; flex: none; color: var(--a); font-size: .82rem; opacity: .8;
+                      transition: transform .25s; }
+        .z[aria-expanded="true"] .zbot em { transform: rotate(180deg); }
+
+        /* тело панели, которая живёт в ряду плиток */
+        .zbody { border: 1px solid rgba(255,255,255,.1); border-radius: 11px;
+                 background: rgba(255,255,255,.025); }
+        .zbody > .panel-body { padding: 14px 16px; }
+
+        @media (max-width: 620px) {
+          .cab { grid-template-columns: repeat(2, 1fr); gap: 9px; }
+          .c4, .c2 { grid-column: span 2; }
+          .zrow { flex-wrap: wrap; gap: 9px 0; }
+          .z { --s: 28px; flex: 1 1 calc(50% - 1px); min-height: 96px; }
+          .z:nth-child(3) { margin-left: 0;
+             clip-path: polygon(0 0, 100% 0, 100% 46%, calc(100% - var(--s)) 56%,
+                        calc(100% - var(--s)) 100%, 0 100%); }
+          .z:nth-child(3) .ztop { padding-left: 9px; }
+          .z:nth-child(2) {
+             clip-path: polygon(var(--s) 0, 100% 0, 100% 100%, 0 100%, 0 56%, var(--s) 46%); }
+          .z:nth-child(2) .zbot { padding-right: 9px; }
+          .z .ztop { padding: 0 9px 0 calc(var(--s) + 9px); gap: 7px; }
+          .z .zbot { padding: 0 calc(var(--s) + 9px) 0 9px; }
+          .z-ic { width: 23px; height: 23px; }
+          .z .ztop b { font-size: .7rem; } .z .zbot i { font-size: .57rem; }
+          .ex-head { padding: 10px 13px; gap: 10px; }
+          .ex-ic { width: 30px; height: 30px; }
+          .ex-tx b { font-size: .76rem; } .ex-tx i { font-size: .59rem; }
+        }
         .panel-body { padding: 0 18px 16px; }
         /* Резервная копия */
         .bk-note { margin: 0 0 12px; color: #8f99ab; font-size: .78rem; line-height: 1.6; }
@@ -4220,217 +4279,196 @@ def cabinet():
             <div class="metrics-grid" id="metrics-grid"><p class="widget-empty">Загрузка…</p></div>
           </section>
 
-          <!-- NetBird — логотип слева -->
-          <section class="panel" style="--accent:#ff7026">
-            <button id="netbird-toggle" class="panel-head" type="button" aria-expanded="false" aria-controls="netbird-devices">
-              <span class="panel-logo"><img src="/static/netbird-official.png" alt=""></span>
-              <span class="panel-text">
-                <span class="panel-title">NetBird</span>
-                <span class="panel-sub">8 устройств</span>
-              </span>
-              <span class="panel-arrow" aria-hidden="true">⌄</span>
-            </button>
-            <div id="netbird-devices" hidden>
-              <ul class="device-list">{{DEVICE_ITEMS}}</ul>
-            </div>
-          </section>
+          <!-- Сервисы. Разворачивающиеся — прямоугольником, открывающиеся
+               страницей — плитками-замком, сцепленными ступенькой. -->
+          <div class="cab">
 
-          <!-- Личный дроп — логотип справа -->
-          <a class="panel panel--right" href="/drop" style="--accent:#f5c344">
-            <span class="panel-head">
-              <span class="panel-logo">
-                <svg viewBox="0 0 48 40" aria-hidden="true">
-                  <defs>
-                    <linearGradient id="fold-back" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0" stop-color="#ffd772"/><stop offset="1" stop-color="#e8a521"/>
-                    </linearGradient>
-                    <linearGradient id="fold-front" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0" stop-color="#ffe9a8"/><stop offset="1" stop-color="#f5bb3c"/>
-                    </linearGradient>
-                  </defs>
-                  <path d="M2 8a4 4 0 0 1 4-4h11.2a3 3 0 0 1 2.3 1.1L23 9h19a4 4 0 0 1 4 4v19a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8Z" fill="url(#fold-back)"/>
-                  <path d="M2 15h44v17a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V15Z" fill="url(#fold-front)"/>
-                  <path d="M2 15h44" stroke="#fff" stroke-opacity=".45" stroke-width="1.4"/>
-                </svg>
-              </span>
-              <span class="panel-text">
-                <span class="panel-title">Личный дроп</span>
-                <span class="panel-sub">файлы и текст между устройствами</span>
-              </span>
-              <span class="panel-arrow panel-arrow--go" aria-hidden="true">⟶</span>
-            </span>
-          </a>
-
-          <!-- Блокнот — логотип слева. Ставим сразу после дропа; следом идёт
-               «Музыка» справа, так что чередование ниже не сбивается. -->
-          <a class="panel" href="/notebook" style="--accent:#0067c0">
-            <span class="panel-head">
-              <span class="panel-logo">
-                <svg viewBox="0 0 48 40" aria-hidden="true">
-                  <rect x="6" y="4" width="36" height="32" rx="4" fill="#eaf1fb" stroke="#0067c0" stroke-width="2"/>
-                  <rect x="6" y="4" width="9" height="32" rx="4" fill="#0067c0" fill-opacity=".14"/>
-                  <path d="M20 13h16M20 20h16M20 27h11" stroke="#0067c0" stroke-width="2.2" stroke-linecap="round"/>
-                  <path d="M15 2v6M23 2v6" stroke="#0067c0" stroke-width="2.4" stroke-linecap="round"/>
-                </svg>
-              </span>
-              <span class="panel-text">
-                <span class="panel-title">Блокнот</span>
-                <span class="panel-sub">заметки, ссылки и файлы по вкладкам</span>
-              </span>
-              <span class="panel-arrow panel-arrow--go" aria-hidden="true">⟶</span>
-            </span>
-          </a>
-
-          <!-- Музыка — логотип справа. Ведёт в фонотеку, где кнопка «плеер в
-               окне» открывает плеер, играющий, пока окно не закроют. -->
-          <a class="panel panel--right" href="/music" style="--accent:#35e0f0">
-            <span class="panel-head">
-              <span class="panel-logo">
-                <svg viewBox="0 0 48 40" aria-hidden="true">
-                  <path d="M18 8l20-4v22" fill="none" stroke="#35e0f0" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-                  <circle cx="13" cy="30" r="6" fill="#35e0f0" fill-opacity=".2" stroke="#35e0f0" stroke-width="3"/>
-                  <circle cx="33" cy="26" r="6" fill="#35e0f0" fill-opacity=".2" stroke="#35e0f0" stroke-width="3"/>
-                </svg>
-              </span>
-              <span class="panel-text">
-                <span class="panel-title">Музыка</span>
-                <span class="panel-sub">фонотека и плеер в отдельном окне</span>
-              </span>
-              <span class="panel-arrow panel-arrow--go" aria-hidden="true">⟶</span>
-            </span>
-          </a>
-
-
-          <!-- Нейронки — логотип слева. Одна дверь в два чата: DeepSeek
-               (сине-фиолетовый, в облаке) и Claude (оранжевый, на домашней
-               машине). Внутри переключаются вкладками, как в браузере. -->
-          <a class="panel" href="/neuro" style="--accent:#7b6bff">
-            <span class="panel-head">
-              <span class="panel-logo">
-                <svg viewBox="0 0 48 40" aria-hidden="true">
-                  <path d="M22 7c-6 0-9 3.4-9 7.6 0 1.4.4 2.6 1.1 3.7-1.9 1-3.1 2.8-3.1 5 0 3.5 3 6.2 7 6.2"
-                        fill="none" stroke="#4d6bfe" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
-                  <path d="M26 7c6 0 9 3.4 9 7.6 0 1.4-.4 2.6-1.1 3.7 1.9 1 3.1 2.8 3.1 5 0 3.5-3 6.2-7 6.2"
-                        fill="none" stroke="#d97757" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
-                  <path d="M24 8v24" stroke="#8b7bff" stroke-width="2" stroke-opacity=".5"/>
-                  <circle cx="15" cy="14" r="1.8" fill="#8b7bff"/>
-                  <circle cx="33" cy="14" r="1.8" fill="#f0a184"/>
-                  <circle cx="15" cy="26" r="1.8" fill="#4d6bfe"/>
-                  <circle cx="33" cy="26" r="1.8" fill="#d97757"/>
-                </svg>
-              </span>
-              <span class="panel-text">
-                <span class="panel-title">Нейронки</span>
-                <span class="panel-sub">два чата на выбор: DeepSeek и Claude</span>
-              </span>
-              <span class="panel-arrow panel-arrow--go" aria-hidden="true">⟶</span>
-            </span>
-          </a>
-
-          <!-- Журнал входов — логотип справа -->
-          <section class="panel panel--right" style="--accent:#2de2ff">
-            <button class="panel-head" id="loginlog-toggle" type="button" aria-expanded="false" aria-controls="loginlog-body">
-              <span class="panel-logo">
-                <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
-                  <circle cx="24" cy="24" r="17" stroke="#2de2ff" stroke-width="2.6" stroke-opacity=".55"/>
-                  <path d="M24 13v11l7.5 4.5" stroke="#7fe9ff" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>
-                  <path d="M7 24a17 17 0 0 1 5-12" stroke="#2de2ff" stroke-width="2.6" stroke-linecap="round"/>
-                  <circle cx="24" cy="24" r="2.6" fill="#7fe9ff"/>
-                </svg>
-              </span>
-              <span class="panel-text">
-                <span class="panel-title">Журнал входов</span>
-                <span class="panel-sub">история за две недели</span>
-              </span>
-              <span class="panel-arrow" aria-hidden="true">⌄</span>
-            </button>
-            <div id="loginlog-body" hidden class="panel-body">
-              <div id="loginlog-list"><p class="widget-empty">Загрузка…</p></div>
-            </div>
-          </section>
-
-          <!-- Запомненные устройства — логотип слева -->
-          <section class="panel" style="--accent:#63f5ad">
-            <button class="panel-head" id="devices-toggle" type="button" aria-expanded="false" aria-controls="devices-body">
-              <span class="panel-logo">
-                <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
-                  <rect x="4" y="10" width="28" height="19" rx="2.5" stroke="#63f5ad" stroke-width="2.6"/>
-                  <path d="M2 33h32" stroke="#63f5ad" stroke-width="2.6" stroke-linecap="round"/>
-                  <rect x="30" y="20" width="14" height="22" rx="2.5" fill="#0d1321" stroke="#a8ffd6" stroke-width="2.6"/>
-                  <path d="M35 38h4" stroke="#a8ffd6" stroke-width="2.2" stroke-linecap="round"/>
-                </svg>
-              </span>
-              <span class="panel-text">
-                <span class="panel-title">Запомнить устройства</span>
-                <span class="panel-sub">вход без пароля на своих</span>
-              </span>
-              <span class="panel-arrow" aria-hidden="true">⌄</span>
-            </button>
-            <div id="devices-body" hidden class="panel-body">
-              <label class="dev-remember">
-                <input type="checkbox" id="dev-remember-cb">
-                <span>Запомнить это устройство</span>
-              </label>
-              <p class="dev-hint" id="dev-hint">Вход в кабинет без пароля на 90 дней. Снять галку — устройство забудется.</p>
-              <div class="dev-confirm" id="dev-confirm" hidden>
-                <input type="password" id="dev-daily" placeholder="Суточный пароль" autocomplete="off">
-                <button class="dev-confirm-btn" id="dev-confirm-btn" type="button">Подтвердить</button>
+            <!-- NetBird: разворачивается прямо здесь -->
+            <section class="cabp c4" style="--a:#ff7026">
+              <button id="netbird-toggle" class="ex-head panel-head" type="button"
+                      aria-expanded="false" aria-controls="netbird-devices">
+                <span class="ex-ic"><img src="/static/netbird-official.png" alt=""></span>
+                <span class="ex-tx"><b>NetBird</b><i>домашняя сеть · 8 устройств</i></span>
+                <span class="ex-ar" aria-hidden="true">⌄</span>
+              </button>
+              <div id="netbird-devices" hidden>
+                <ul class="device-list">{{DEVICE_ITEMS}}</ul>
               </div>
-              <p class="dev-error" id="dev-error"></p>
-              <div id="devices-list"><p class="widget-empty">Загрузка…</p></div>
+            </section>
+
+            <!-- Четыре двери наружу: сцеплены замком -->
+            <div class="zrow c4">
+              <a class="z" href="/drop" style="--a:#f5c344">
+                <span class="ztop">
+                  <span class="z-ic">
+                    <svg viewBox="0 0 48 40" aria-hidden="true">
+                      <defs>
+                        <linearGradient id="fold-back" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0" stop-color="#ffd772"/><stop offset="1" stop-color="#e8a521"/>
+                        </linearGradient>
+                        <linearGradient id="fold-front" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0" stop-color="#ffe9a8"/><stop offset="1" stop-color="#f5bb3c"/>
+                        </linearGradient>
+                      </defs>
+                      <path d="M2 8a4 4 0 0 1 4-4h11.2a3 3 0 0 1 2.3 1.1L23 9h19a4 4 0 0 1 4 4v19a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8Z" fill="url(#fold-back)"/>
+                      <path d="M2 15h44v17a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V15Z" fill="url(#fold-front)"/>
+                      <path d="M2 15h44" stroke="#fff" stroke-opacity=".45" stroke-width="1.4"/>
+                    </svg>
+                  </span>
+                  <b>Личный дроп</b>
+                </span>
+                <span class="zbot"><i>файлы и обмен</i><em aria-hidden="true">⟶</em></span>
+              </a>
+
+              <a class="z" href="/neuro" style="--a:#7b6bff">
+                <span class="ztop">
+                  <span class="z-ic">
+                    <svg viewBox="0 0 48 40" aria-hidden="true">
+                      <path d="M22 7c-6 0-9 3.4-9 7.6 0 1.4.4 2.6 1.1 3.7-1.9 1-3.1 2.8-3.1 5 0 3.5 3 6.2 7 6.2"
+                            fill="none" stroke="#4d6bfe" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+                      <path d="M26 7c6 0 9 3.4 9 7.6 0 1.4-.4 2.6-1.1 3.7 1.9 1 3.1 2.8 3.1 5 0 3.5-3 6.2-7 6.2"
+                            fill="none" stroke="#d97757" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+                      <path d="M24 8v24" stroke="#8b7bff" stroke-width="2" stroke-opacity=".5"/>
+                      <circle cx="15" cy="14" r="1.8" fill="#8b7bff"/>
+                      <circle cx="33" cy="14" r="1.8" fill="#f0a184"/>
+                      <circle cx="15" cy="26" r="1.8" fill="#4d6bfe"/>
+                      <circle cx="33" cy="26" r="1.8" fill="#d97757"/>
+                    </svg>
+                  </span>
+                  <b>Нейронки</b>
+                </span>
+                <span class="zbot"><i>DeepSeek и Claude</i><em aria-hidden="true">⟶</em></span>
+              </a>
+
+              <a class="z" href="/notebook" style="--a:#0a7ce0">
+                <span class="ztop">
+                  <span class="z-ic">
+                    <svg viewBox="0 0 48 40" aria-hidden="true">
+                      <rect x="6" y="4" width="36" height="32" rx="4" fill="#eaf1fb" stroke="#0067c0" stroke-width="2"/>
+                      <rect x="6" y="4" width="9" height="32" rx="4" fill="#0067c0" fill-opacity=".14"/>
+                      <path d="M20 13h16M20 20h16M20 27h11" stroke="#0067c0" stroke-width="2.2" stroke-linecap="round"/>
+                      <path d="M15 2v6M23 2v6" stroke="#0067c0" stroke-width="2.4" stroke-linecap="round"/>
+                    </svg>
+                  </span>
+                  <b>Блокнот</b>
+                </span>
+                <span class="zbot"><i>ссылки и тексты</i><em aria-hidden="true">⟶</em></span>
+              </a>
+
+              <a class="z" href="/music" style="--a:#35e0f0">
+                <span class="ztop">
+                  <span class="z-ic">
+                    <svg viewBox="0 0 48 40" aria-hidden="true">
+                      <path d="M18 8l20-4v22" fill="none" stroke="#35e0f0" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+                      <circle cx="13" cy="30" r="6" fill="#35e0f0" fill-opacity=".2" stroke="#35e0f0" stroke-width="3"/>
+                      <circle cx="33" cy="26" r="6" fill="#35e0f0" fill-opacity=".2" stroke="#35e0f0" stroke-width="3"/>
+                    </svg>
+                  </span>
+                  <b>Музыка</b>
+                </span>
+                <span class="zbot"><i>фонотека и плеер</i><em aria-hidden="true">⟶</em></span>
+              </a>
             </div>
-          </section>
 
-          <!-- Тестовые темы: витрина оформления -->
-          <a class="panel panel--right" href="/themes" style="--accent:#ff3fa4; margin-bottom:32px">
-            <span class="panel-head">
-              <span class="panel-logo">
-                <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
-                  <path d="M24 6c8 0 13 5.5 13 13v7c0 3.5-2 5.5-4.5 6.5L31 38H17l-1.5-5.5C13 31.5 11 29.5 11 26v-7C11 11.5 16 6 24 6Z" stroke="#ff3fa4" stroke-width="2.4"/>
-                  <path d="M24 14v18M17 20h14M18 27h12" stroke="#2de2ff" stroke-width="1.8" stroke-linecap="round"/>
-                  <circle cx="24" cy="14" r="2.6" fill="#2de2ff"/>
-                  <path d="M17 41h14" stroke="#ff3fa4" stroke-width="2.4" stroke-linecap="round"/>
-                </svg>
-              </span>
-              <span class="panel-text">
-                <span class="panel-title">Тестовые темы</span>
-                <span class="panel-sub">разделы как импланты · киберпанк</span>
-              </span>
-              <span class="panel-arrow panel-arrow--go" aria-hidden="true">⟶</span>
-            </span>
-          </a>
-
-          <!-- Резервная копия — в самом низу: сюда заходят редко и по делу -->
-          <section class="panel" style="--accent:#63f5ad; margin-bottom:32px">
-            <button class="panel-head" id="backup-toggle" type="button"
-                    aria-expanded="false" aria-controls="backup-body">
-              <span class="panel-logo">
-                <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
-                  <path d="M8 14c0-3.3 7.2-6 16-6s16 2.7 16 6-7.2 6-16 6-16-2.7-16-6Z" stroke="#63f5ad" stroke-width="2.4"/>
-                  <path d="M8 14v10c0 3.3 7.2 6 16 6s16-2.7 16-6V14" stroke="#63f5ad" stroke-width="2.4"/>
-                  <path d="M8 24v10c0 3.3 7.2 6 16 6s16-2.7 16-6V24" stroke="#2de2ff" stroke-width="2.4"/>
-                </svg>
-              </span>
-              <span class="panel-text">
-                <span class="panel-title">Резервная копия</span>
-                <span class="panel-sub">скачать всё и вернуть обратно</span>
-              </span>
-              <span class="panel-arrow" aria-hidden="true">⌄</span>
-            </button>
-            <div id="backup-body" hidden class="panel-body">
-              <p class="bk-note" id="bk-size">считаю, сколько всего накопилось…</p>
-              <div class="bk-keys">
-                <a class="btn-line" id="bk-light" href="/api/backup/export?kind=light">
-                  Скачать записи</a>
-                <a class="btn-line" id="bk-full" href="/api/backup/export?kind=full">
-                  Скачать всё целиком</a>
-                <button class="btn-line warn" id="bk-restore" type="button">Загрузить копию</button>
-                <input type="file" id="bk-file" accept=".zip,application/zip" hidden>
+            <!-- Две разворачивающиеся в строку -->
+            <section class="cabp c2" style="--a:#63f5ad">
+              <button class="ex-head panel-head" id="devices-toggle" type="button"
+                      aria-expanded="false" aria-controls="devices-body">
+                <span class="ex-ic">
+                  <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
+                    <rect x="4" y="10" width="28" height="19" rx="2.5" stroke="#63f5ad" stroke-width="2.6"/>
+                    <path d="M2 33h32" stroke="#63f5ad" stroke-width="2.6" stroke-linecap="round"/>
+                    <rect x="30" y="20" width="14" height="22" rx="2.5" fill="#0d1321" stroke="#a8ffd6" stroke-width="2.6"/>
+                    <path d="M35 38h4" stroke="#a8ffd6" stroke-width="2.2" stroke-linecap="round"/>
+                  </svg>
+                </span>
+                <span class="ex-tx"><b>Запомнить устройства</b><i>вход без пароля</i></span>
+                <span class="ex-ar" aria-hidden="true">⌄</span>
+              </button>
+              <div id="devices-body" hidden class="panel-body">
+                <label class="dev-remember">
+                  <input type="checkbox" id="dev-remember-cb">
+                  <span>Запомнить это устройство</span>
+                </label>
+                <p class="dev-hint" id="dev-hint">Вход в кабинет без пароля на 90 дней. Снять галку — устройство забудется.</p>
+                <div class="dev-confirm" id="dev-confirm" hidden>
+                  <input type="password" id="dev-daily" placeholder="Суточный пароль" autocomplete="off">
+                  <button class="dev-confirm-btn" id="dev-confirm-btn" type="button">Подтвердить</button>
+                </div>
+                <p class="dev-error" id="dev-error"></p>
+                <div id="devices-list"><p class="widget-empty">Загрузка…</p></div>
               </div>
-              <p class="bk-note" id="bk-msg"></p>
-              <p class="bk-note dim" id="bk-robot"></p>
+            </section>
+
+            <section class="cabp c2" style="--a:#2de2ff">
+              <button class="ex-head panel-head" id="loginlog-toggle" type="button"
+                      aria-expanded="false" aria-controls="loginlog-body">
+                <span class="ex-ic">
+                  <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
+                    <circle cx="24" cy="24" r="17" stroke="#2de2ff" stroke-width="2.6" stroke-opacity=".55"/>
+                    <path d="M24 13v11l7.5 4.5" stroke="#7fe9ff" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M7 24a17 17 0 0 1 5-12" stroke="#2de2ff" stroke-width="2.6" stroke-linecap="round"/>
+                    <circle cx="24" cy="24" r="2.6" fill="#7fe9ff"/>
+                  </svg>
+                </span>
+                <span class="ex-tx"><b>Журнал входов</b><i>кто и когда</i></span>
+                <span class="ex-ar" aria-hidden="true">⌄</span>
+              </button>
+              <div id="loginlog-body" hidden class="panel-body">
+                <div id="loginlog-list"><p class="widget-empty">Загрузка…</p></div>
+              </div>
+            </section>
+
+            <!-- Внизу: темы открываются страницей, копия разворачивается тут -->
+            <div class="zrow c4">
+              <a class="z" href="/themes" style="--a:#ff3fa4">
+                <span class="ztop">
+                  <span class="z-ic">
+                    <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
+                      <path d="M24 6c8 0 13 5.5 13 13v7c0 3.5-2 5.5-4.5 6.5L31 38H17l-1.5-5.5C13 31.5 11 29.5 11 26v-7C11 11.5 16 6 24 6Z" stroke="#ff3fa4" stroke-width="2.4"/>
+                      <path d="M24 14v18M17 20h14M18 27h12" stroke="#2de2ff" stroke-width="1.8" stroke-linecap="round"/>
+                      <circle cx="24" cy="14" r="2.6" fill="#2de2ff"/>
+                      <path d="M17 41h14" stroke="#ff3fa4" stroke-width="2.4" stroke-linecap="round"/>
+                    </svg>
+                  </span>
+                  <b>Тестовые темы</b>
+                </span>
+                <span class="zbot"><i>оформление сайта</i><em aria-hidden="true">⟶</em></span>
+              </a>
+
+              <button class="z panel-head" id="backup-toggle" type="button"
+                      aria-expanded="false" aria-controls="backup-body" style="--a:#63f5ad">
+                <span class="ztop">
+                  <span class="z-ic">
+                    <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
+                      <path d="M8 14c0-3.3 7.2-6 16-6s16 2.7 16 6-7.2 6-16 6-16-2.7-16-6Z" stroke="#63f5ad" stroke-width="2.4"/>
+                      <path d="M8 14v10c0 3.3 7.2 6 16 6s16-2.7 16-6V14" stroke="#63f5ad" stroke-width="2.4"/>
+                      <path d="M8 24v10c0 3.3 7.2 6 16 6s16-2.7 16-6V24" stroke="#2de2ff" stroke-width="2.4"/>
+                    </svg>
+                  </span>
+                  <b>Резервная копия</b>
+                </span>
+                <span class="zbot"><i>скачать и вернуть</i><em aria-hidden="true">⌄</em></span>
+              </button>
             </div>
-          </section>
+
+            <div class="zbody c4" id="backup-body" hidden style="margin-bottom:32px">
+              <div class="panel-body">
+                <p class="bk-note" id="bk-size">считаю, сколько всего накопилось…</p>
+                <div class="bk-keys">
+                  <a class="btn-line" id="bk-light" href="/api/backup/export?kind=light">
+                    Скачать записи</a>
+                  <a class="btn-line" id="bk-full" href="/api/backup/export?kind=full">
+                    Скачать всё целиком</a>
+                  <button class="btn-line warn" id="bk-restore" type="button">Загрузить копию</button>
+                  <input type="file" id="bk-file" accept=".zip,application/zip" hidden>
+                </div>
+                <p class="bk-note" id="bk-msg"></p>
+                <p class="bk-note dim" id="bk-robot"></p>
+              </div>
+            </div>
+
+          </div>
 
         </div>
 
