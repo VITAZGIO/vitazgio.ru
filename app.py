@@ -3911,7 +3911,7 @@ def cabinet():
       <style>
         * { box-sizing: border-box; }
         body { margin: 0; min-height: 100svh; color: #e9fbff; font-family: "Cascadia Code", Consolas, monospace; background: radial-gradient(circle at top left, #192a44, #0d1321 55%); }
-        .cabinet { min-height: 100svh; padding: clamp(24px, 4vw, 54px); background: linear-gradient(135deg, rgba(10,18,32,.25), transparent 60%); }
+        .cabinet { min-height: 100svh; padding: clamp(24px, 4vw, 54px); background: linear-gradient(135deg, rgba(10,18,32,.25), transparent 60%); display: flex; flex-direction: column; }
         .cabinet-header { display: flex; align-items: center; gap: 20px; }
         h1 { margin: 0; font-size: clamp(1.7rem, 3.6vw, 2.6rem); font-weight: 700; letter-spacing: -.02em;
              color: #eaf6ff; text-shadow: 0 0 22px rgba(45,226,255,.35); }
@@ -4033,11 +4033,12 @@ def cabinet():
 
         /* Колонка фиксированного размера: не тянется за левой стороной,
            сколько бы панелей там ни развернули. */
-        .cabinet-cols { display: flex; align-items: stretch; gap: 20px; max-width: 1900px; }
+        .cabinet-cols { display: flex; align-items: stretch; gap: 20px; max-width: 1900px; flex: 1 1 auto; min-height: 0; }
         .rail { width: 268px; flex: none; display: flex; flex-direction: column; gap: 12px;
                 margin-top: clamp(22px, 3.5vw, 40px); }
         /* плеер добирает высоту до низа левой колонки */
-        .rail .player { flex: 1 1 auto; min-height: 320px; }
+        .rail .player { flex: 1 1 auto; min-height: 320px; display: flex;
+                        flex-direction: column; }
         /* Узкий экран или половина окна — правой колонки просто нет. */
         @media (max-width: 1220px) { .rail { display: none; } }
 
@@ -4086,10 +4087,11 @@ def cabinet():
         .pl-play:hover { color: #061018; background: linear-gradient(90deg, #7fe9ff, #2de2ff); }
         .pl-vol { flex: 1; min-width: 0; height: 3px; accent-color: #ff3fa4; cursor: pointer; }
         .player.over { border-color: #2de2ff; }
-        .pl-list { margin-top: 11px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,.08); }
+        .pl-list { margin-top: 11px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,.08);
+                    flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
         .pl-list-head { display: flex; justify-content: space-between; color: #55607a; font-size: .64rem; letter-spacing: .1em; text-transform: uppercase; }
         /* Высота списка постоянная — колонка не «дышит» вслед за левой стороной. */
-        #pl-tracks { height: 232px; margin-top: 4px; overflow-y: auto; scrollbar-width: thin;
+        #pl-tracks { flex: 1 1 auto; min-height: 0; margin-top: 4px; overflow-y: auto; scrollbar-width: thin;
                      scrollbar-color: rgba(45,226,255,.35) transparent; overscroll-behavior: contain; }
         #pl-tracks::-webkit-scrollbar { width: 6px; }
         #pl-tracks::-webkit-scrollbar-thumb { background: rgba(45,226,255,.3); }
