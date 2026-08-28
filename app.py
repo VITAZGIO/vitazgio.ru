@@ -4217,27 +4217,25 @@ def cabinet():
         }
 
 
-        /* Раскрытая карточка «горит», как свеча: чуть увеличена, ярче
-           заливка и цветной ореол по контуру, дышит вдох-выдох. */
-        .z[aria-expanded="true"] { transform: scale(1.02); z-index: 3;
-                                   animation: cab-glow 3.4s ease-in-out infinite; }
+        /* Раскрытая карточка ничего не меняет в себе. Только по периметру,
+           за пределами карточки, зажигается ровный розовый ореол — как будто
+           за плиткой поставили свечу. Ореол чуть дышит: то тусклее, то ярче. */
+        .z[aria-expanded="true"] { z-index: 3;
+                                   animation: cab-halo 3.6s ease-in-out infinite; }
         .cabp:has(.ex-head[aria-expanded="true"]) {
-                                   transform: scale(1.012); z-index: 3;
-                                   border-color: color-mix(in srgb, var(--a) 70%, transparent);
-                                   animation: cab-glow-box 3.4s ease-in-out infinite; }
-        @keyframes cab-glow {
-          0%, 100% { filter: brightness(1.32) saturate(1.15)
-                      drop-shadow(0 0 12px color-mix(in srgb, var(--a) 70%, transparent)); }
-          50%      { filter: brightness(1.44) saturate(1.22)
-                      drop-shadow(0 0 22px color-mix(in srgb, var(--a) 85%, transparent))
-                      drop-shadow(0 0 34px color-mix(in srgb, var(--a) 45%, transparent)); }
+                                   z-index: 3; border-color: rgba(255,63,164,.55);
+                                   animation: cab-halo-box 3.6s ease-in-out infinite; }
+        @keyframes cab-halo {
+          0%, 100% { filter: drop-shadow(0 0 10px rgba(255,63,164,.45))
+                             drop-shadow(0 0 20px rgba(255,63,164,.18)); }
+          50%      { filter: drop-shadow(0 0 18px rgba(255,63,164,.72))
+                             drop-shadow(0 0 34px rgba(255,63,164,.32)); }
         }
-        @keyframes cab-glow-box {
-          0%, 100% { box-shadow: 0 0 16px color-mix(in srgb, var(--a) 22%, transparent),
-                      inset 0 0 22px color-mix(in srgb, var(--a) 12%, transparent); }
-          50%      { box-shadow: 0 0 28px color-mix(in srgb, var(--a) 40%, transparent),
-                      0 0 52px color-mix(in srgb, var(--a) 20%, transparent),
-                      inset 0 0 28px color-mix(in srgb, var(--a) 18%, transparent); }
+        @keyframes cab-halo-box {
+          0%, 100% { box-shadow: 0 0 14px rgba(255,63,164,.35),
+                                 0 0 30px rgba(255,63,164,.14); }
+          50%      { box-shadow: 0 0 24px rgba(255,63,164,.6),
+                                 0 0 48px rgba(255,63,164,.28); }
         }
         @media (prefers-reduced-motion: reduce) {
           .z[aria-expanded="true"],
@@ -5909,11 +5907,26 @@ def cabinet():
         }
 
         // ── Раскрытие виджетов ──
+        // Открыл вторую панель — первая сама закрывается: держим открытой
+        // только одну зараз, чтобы страница не «переезжала» между кликами.
+        const _cabToggles = new Map();
         document.querySelectorAll(".panel-head[aria-controls]").forEach(btn => {
           const target = document.getElementById(btn.getAttribute("aria-controls"));
           if (!target) return;
+          const inCab = !!btn.closest(".cab");
+          if (inCab) _cabToggles.set(btn, target);
           btn.addEventListener("click", () => {
             const opened = btn.getAttribute("aria-expanded") !== "true";
+            if (opened && inCab) {
+              _cabToggles.forEach((other, otherBtn) => {
+                if (otherBtn === btn) return;
+                if (otherBtn.getAttribute("aria-expanded") === "true") {
+                  otherBtn.setAttribute("aria-expanded", "false");
+                  other.hidden = true;
+                  otherBtn.dispatchEvent(new CustomEvent("widget-open", { detail: false, bubbles: false }));
+                }
+              });
+            }
             btn.setAttribute("aria-expanded", String(opened));
             target.hidden = !opened;
             btn.dispatchEvent(new CustomEvent("widget-open", { detail: opened, bubbles: false }));
