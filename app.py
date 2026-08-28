@@ -4216,6 +4216,34 @@ def cabinet():
           .ex-tx b { font-size: 1.36rem; } .ex-tx i { font-size: 1rem; }
         }
 
+
+        /* Раскрытая карточка «горит», как свеча: чуть увеличена, ярче
+           заливка и цветной ореол по контуру, дышит вдох-выдох. */
+        .z[aria-expanded="true"] { transform: scale(1.02); z-index: 3;
+                                   animation: cab-glow 3.4s ease-in-out infinite; }
+        .cabp:has(.ex-head[aria-expanded="true"]) {
+                                   transform: scale(1.012); z-index: 3;
+                                   border-color: color-mix(in srgb, var(--a) 70%, transparent);
+                                   animation: cab-glow-box 3.4s ease-in-out infinite; }
+        @keyframes cab-glow {
+          0%, 100% { filter: brightness(1.32) saturate(1.15)
+                      drop-shadow(0 0 12px color-mix(in srgb, var(--a) 70%, transparent)); }
+          50%      { filter: brightness(1.44) saturate(1.22)
+                      drop-shadow(0 0 22px color-mix(in srgb, var(--a) 85%, transparent))
+                      drop-shadow(0 0 34px color-mix(in srgb, var(--a) 45%, transparent)); }
+        }
+        @keyframes cab-glow-box {
+          0%, 100% { box-shadow: 0 0 16px color-mix(in srgb, var(--a) 22%, transparent),
+                      inset 0 0 22px color-mix(in srgb, var(--a) 12%, transparent); }
+          50%      { box-shadow: 0 0 28px color-mix(in srgb, var(--a) 40%, transparent),
+                      0 0 52px color-mix(in srgb, var(--a) 20%, transparent),
+                      inset 0 0 28px color-mix(in srgb, var(--a) 18%, transparent); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .z[aria-expanded="true"],
+          .cabp:has(.ex-head[aria-expanded="true"]) { animation: none; }
+        }
+
         @media (max-width: 620px) {
           .cab { grid-template-columns: repeat(2, 1fr); gap: 9px; }
           .c4, .c2 { grid-column: span 2; }
