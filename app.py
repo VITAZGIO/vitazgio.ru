@@ -5478,11 +5478,10 @@ def cabinet():
               return (n / 1073741824).toFixed(2) + " ГБ";
             };
             let asked = false;
-            head.addEventListener("click", async () => {
-              const open = body.hidden;
-              body.hidden = !open;
-              head.setAttribute("aria-expanded", open ? "true" : "false");
-              if (!open || asked) return;
+            // Показ/скрытие делает общий обработчик .panel-head[aria-controls];
+            // нам остаётся один раз подгрузить размеры при первом раскрытии.
+            head.addEventListener("widget-open", async (ev) => {
+              if (!ev.detail || asked) return;
               asked = true;
               try {
                 const r = await fetch("/api/backup/state", { credentials: "same-origin" });
