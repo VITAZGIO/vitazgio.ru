@@ -4301,57 +4301,34 @@ def cabinet():
           </a>
 
 
-          <!-- Claude — логотип слева. Разговор с Claude Code, который живёт на
-               домашней машине: сайт только показывает её экран. -->
-          <a class="panel" href="/claude" style="--accent:#d97757">
+          <!-- Нейронки — логотип слева. Одна дверь в два чата: DeepSeek
+               (сине-фиолетовый, в облаке) и Claude (оранжевый, на домашней
+               машине). Внутри переключаются вкладками, как в браузере. -->
+          <a class="panel" href="/neuro" style="--accent:#7b6bff">
             <span class="panel-head">
               <span class="panel-logo">
                 <svg viewBox="0 0 48 40" aria-hidden="true">
-                  <rect x="4" y="6" width="40" height="28" rx="5" fill="#1a1210"
-                        stroke="#d97757" stroke-width="2.4"/>
-                  <path d="M4 13h40" stroke="#d97757" stroke-width="1.8" stroke-opacity=".5"/>
-                  <circle cx="9.5" cy="9.5" r="1.4" fill="#d97757" fill-opacity=".8"/>
-                  <circle cx="14" cy="9.5" r="1.4" fill="#d97757" fill-opacity=".45"/>
-                  <path d="m12 20 5 4-5 4" fill="none" stroke="#f0a184" stroke-width="2.6"
-                        stroke-linecap="round" stroke-linejoin="round"/>
-                  <rect x="21" y="25.6" width="11" height="2.8" rx="1.4" fill="#f0a184"/>
-                </svg>
-              </span>
-              <span class="panel-text">
-                <span class="panel-title">Claude</span>
-                <span class="panel-sub">разговор с Claude Code на домашней машине</span>
-              </span>
-              <span class="panel-arrow panel-arrow--go" aria-hidden="true">⟶</span>
-            </span>
-          </a>
-
-          <!-- Нейросеть — логотип справа. Чат с DeepSeek через OpenRouter:
-               модель в облаке, история разговоров хранится на самом сайте. -->
-          <a class="panel panel--right" href="/ai" style="--accent:#4d6bfe">
-            <span class="panel-head">
-              <span class="panel-logo">
-                <svg viewBox="0 0 48 40" aria-hidden="true">
-                  <path d="M24 6c-6 0-9 3.6-9 8 0 1.4.4 2.7 1.1 3.8-1.9 1-3.1 2.9-3.1 5.2 0 3.6 3 6.4 7 6.4h.5"
+                  <path d="M22 7c-6 0-9 3.4-9 7.6 0 1.4.4 2.6 1.1 3.7-1.9 1-3.1 2.8-3.1 5 0 3.5 3 6.2 7 6.2"
                         fill="none" stroke="#4d6bfe" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
-                  <path d="M24 6c6 0 9 3.6 9 8 0 1.4-.4 2.7-1.1 3.8 1.9 1 3.1 2.9 3.1 5.2 0 3.6-3 6.4-7 6.4H27"
-                        fill="none" stroke="#8b7bff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
-                  <path d="M24 9v24" stroke="#4d6bfe" stroke-width="2.2" stroke-opacity=".55"/>
-                  <circle cx="16" cy="15" r="1.8" fill="#8b7bff"/>
-                  <circle cx="32" cy="15" r="1.8" fill="#4d6bfe"/>
-                  <circle cx="18" cy="24" r="1.8" fill="#4d6bfe"/>
-                  <circle cx="30" cy="24" r="1.8" fill="#8b7bff"/>
+                  <path d="M26 7c6 0 9 3.4 9 7.6 0 1.4-.4 2.6-1.1 3.7 1.9 1 3.1 2.8 3.1 5 0 3.5-3 6.2-7 6.2"
+                        fill="none" stroke="#d97757" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M24 8v24" stroke="#8b7bff" stroke-width="2" stroke-opacity=".5"/>
+                  <circle cx="15" cy="14" r="1.8" fill="#8b7bff"/>
+                  <circle cx="33" cy="14" r="1.8" fill="#f0a184"/>
+                  <circle cx="15" cy="26" r="1.8" fill="#4d6bfe"/>
+                  <circle cx="33" cy="26" r="1.8" fill="#d97757"/>
                 </svg>
               </span>
               <span class="panel-text">
-                <span class="panel-title">Нейросеть</span>
-                <span class="panel-sub">чат с DeepSeek, история хранится на сайте</span>
+                <span class="panel-title">Нейронки</span>
+                <span class="panel-sub">два чата на выбор: DeepSeek и Claude</span>
               </span>
               <span class="panel-arrow panel-arrow--go" aria-hidden="true">⟶</span>
             </span>
           </a>
 
-          <!-- Журнал входов — логотип слева -->
-          <section class="panel" style="--accent:#2de2ff">
+          <!-- Журнал входов — логотип справа -->
+          <section class="panel panel--right" style="--accent:#2de2ff">
             <button class="panel-head" id="loginlog-toggle" type="button" aria-expanded="false" aria-controls="loginlog-body">
               <span class="panel-logo">
                 <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
@@ -4373,7 +4350,7 @@ def cabinet():
           </section>
 
           <!-- Запомненные устройства — логотип слева -->
-          <section class="panel panel--right" style="--accent:#63f5ad">
+          <section class="panel" style="--accent:#63f5ad">
             <button class="panel-head" id="devices-toggle" type="button" aria-expanded="false" aria-controls="devices-body">
               <span class="panel-logo">
                 <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
@@ -4405,7 +4382,7 @@ def cabinet():
           </section>
 
           <!-- Тестовые темы: витрина оформления -->
-          <a class="panel" href="/themes" style="--accent:#ff3fa4; margin-bottom:32px">
+          <a class="panel panel--right" href="/themes" style="--accent:#ff3fa4; margin-bottom:32px">
             <span class="panel-head">
               <span class="panel-logo">
                 <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
@@ -4424,7 +4401,7 @@ def cabinet():
           </a>
 
           <!-- Резервная копия — в самом низу: сюда заходят редко и по делу -->
-          <section class="panel panel--right" style="--accent:#63f5ad; margin-bottom:32px">
+          <section class="panel" style="--accent:#63f5ad; margin-bottom:32px">
             <button class="panel-head" id="backup-toggle" type="button"
                     aria-expanded="false" aria-controls="backup-body">
               <span class="panel-logo">
@@ -11682,10 +11659,12 @@ def claude_page():
     Страница ничего сама не решает: она рисует вкладки и терминал, а всё
     остальное происходит на домашней машине. Закрыл вкладку браузера — разговор
     остался висеть в tmux и ждёт возвращения."""
+    g.frameable = True
     html = """<!doctype html>
     <html lang="ru">
     <head>
       <meta charset="utf-8">
+      <script>try{if(window.top!==window.self)document.documentElement.classList.add("embed");}catch(e){document.documentElement.classList.add("embed");}</script>
       <meta name="viewport" content="width=device-width, initial-scale=1">
       <meta name="theme-color" content="#0d1321">
       <meta name="robots" content="noindex">
@@ -11733,6 +11712,7 @@ def claude_page():
                 background: rgba(45,226,255,.07); transition: .18s; }
         .back svg { width: 19px; height: 19px; }
         .back:hover { color: #fff; border-color: var(--pc); background: rgba(45,226,255,.18); }
+        html.embed .back { display: none; }   /* встроена во вкладку «Нейронки» */
         .eyebrow { display: inline-flex; align-items: center; gap: 10px; color: #cdd2df;
                    font-size: .72rem; font-weight: 700; letter-spacing: .16em;
                    text-transform: uppercase; text-decoration: none; }
@@ -14090,15 +14070,140 @@ def ai_chat_send(chat_id):
                              "X-Accel-Buffering": "no"})
 
 
+@app.get("/neuro")
+@login_required
+def neuro_page():
+    """«Нейронки» — одна страница с двумя вкладками, как в браузере: DeepSeek
+    (сине-фиолетовая) и Claude (оранжевая). Сами чаты — уже готовые страницы
+    /ai и /claude; тут только верхние вкладки, которые их показывают в iframe.
+    Каждая несёт свою тему, так что переключение меняет и цвет шапки."""
+    html = r"""<!doctype html>
+    <html lang="ru" data-tab="ds">
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <meta name="theme-color" content="#0b1020">
+      <meta name="robots" content="noindex">
+      __ICONLINKS__
+      <link rel="manifest" href="/manifest.webmanifest">
+      <title>Нейронки · vitazgio.ru</title>
+      <style>
+        :root { color-scheme:dark; --line:rgba(255,255,255,.1);
+                --ds1:#4d6bfe; --ds2:#8b7bff; --cl1:#d97757; --cl2:#f0a184;
+                --ac:var(--ds1); --ac2:var(--ds2); }
+        html[data-tab="cl"] { --ac:var(--cl1); --ac2:var(--cl2); }
+        * { box-sizing:border-box; }
+        html, body { height:100%; margin:0; }
+        body { display:flex; flex-direction:column; overflow:hidden; color:#eef2fb;
+               font-family:"Cascadia Code", Consolas, monospace;
+               background:#0b1020; }
+
+        /* Полоса вкладок — как шапка браузера: вкладки «стоят» на контенте. */
+        .tabbar { flex:none; display:flex; align-items:flex-end; gap:6px;
+                  padding:8px clamp(8px,2vw,16px) 0; border-bottom:1px solid var(--line);
+                  background:linear-gradient(180deg,
+                    color-mix(in srgb, var(--ac) 14%, #0b1020), #0b1020);
+                  transition:background .25s; }
+        .home { width:38px; height:38px; margin:0 4px 7px 0; flex:none; display:grid;
+                place-items:center; color:#aeb8cf; text-decoration:none; border-radius:10px;
+                border:1px solid var(--line); background:rgba(255,255,255,.04); transition:.16s; }
+        .home:hover { color:#fff; border-color:color-mix(in srgb, var(--ac) 55%, transparent);
+                      background:color-mix(in srgb, var(--ac) 14%, transparent); }
+        .home svg { width:18px; height:18px; }
+
+        .tab { position:relative; top:1px; display:flex; align-items:center; gap:9px; cursor:pointer;
+               padding:10px 16px; max-width:210px; color:#9fa9bf; font:600 .84rem inherit;
+               border:1px solid transparent; border-bottom:none;
+               border-radius:12px 12px 0 0; background:transparent; transition:color .16s, background .16s; }
+        .tab:hover { color:#e6ecf8; background:rgba(255,255,255,.04); }
+        .tab i { width:9px; height:9px; flex:none; border-radius:50%; }
+        .tab.ds i { background:linear-gradient(160deg,var(--ds1),var(--ds2)); box-shadow:0 0 10px var(--ds1); }
+        .tab.cl i { background:linear-gradient(160deg,var(--cl1),var(--cl2)); box-shadow:0 0 10px var(--cl1); }
+        .tab b { font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .tab.on { color:#fff; background:#0b1020; border-color:var(--line);
+                  box-shadow:0 -3px 18px color-mix(in srgb, var(--ac) 22%, transparent); }
+        /* язычок, «сливающий» активную вкладку с полем ниже */
+        .tab.on::after { content:""; position:absolute; left:0; right:0; bottom:-1px; height:2px; background:#0b1020; }
+        .tab.on::before { content:""; position:absolute; left:0; right:0; top:0; height:3px;
+                          border-radius:12px 12px 0 0;
+                          background:linear-gradient(90deg, var(--ac), var(--ac2)); }
+
+        .stage { flex:1; min-height:0; position:relative; background:#0b1020; }
+        .stage iframe { position:absolute; inset:0; width:100%; height:100%; border:0; display:none; }
+        .stage iframe.on { display:block; }
+        .stage .spin { position:absolute; inset:0; display:grid; place-items:center;
+                       color:#7c8ba0; font-size:.8rem; }
+
+        @media (max-width:560px) {
+          .tab { padding:9px 12px; font-size:.8rem; }
+          .tab b { max-width:96px; }
+        }
+      </style>
+    </head>
+    <body>
+      <div class="tabbar">
+        <a class="home" href="/cabinet" title="В кабинет" aria-label="В кабинет"><svg viewBox="0 0 24 24" fill="none"><path d="M19 12H5m0 0 6-6m-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
+        <button class="tab ds on" type="button" data-tab="ds"><i></i><b>DeepSeek</b></button>
+        <button class="tab cl" type="button" data-tab="cl"><i></i><b>Claude</b></button>
+      </div>
+      <div class="stage">
+        <div class="spin" id="spin">открываю…</div>
+        <iframe id="fr-ds" class="on" title="DeepSeek" src="/ai" loading="eager"></iframe>
+        <iframe id="fr-cl" title="Claude" data-src="/claude" loading="lazy"></iframe>
+      </div>
+
+      <script>
+      (() => {
+        "use strict";
+        const root = document.documentElement;
+        const tabs = Array.from(document.querySelectorAll(".tab"));
+        const frames = { ds: document.getElementById("fr-ds"), cl: document.getElementById("fr-cl") };
+        const spin = document.getElementById("spin");
+        const loaded = { ds: true, cl: false };
+
+        frames.ds.addEventListener("load", () => { if (root.getAttribute("data-tab") === "ds") spin.style.display = "none"; });
+        frames.cl.addEventListener("load", () => { loaded.cl = true; if (root.getAttribute("data-tab") === "cl") spin.style.display = "none"; });
+
+        const show = (id) => {
+          root.setAttribute("data-tab", id);
+          tabs.forEach((t) => t.classList.toggle("on", t.dataset.tab === id));
+          Object.keys(frames).forEach((k) => frames[k].classList.toggle("on", k === id));
+          // ленивое подключение второй вкладки при первом заходе
+          if (!loaded[id] && frames[id].dataset.src) {
+            spin.style.display = "grid";
+            frames[id].src = frames[id].dataset.src;
+          } else {
+            spin.style.display = "none";
+          }
+          try { localStorage.setItem("neuroTab", id); } catch (e) {}
+        };
+
+        tabs.forEach((t) => t.addEventListener("click", () => show(t.dataset.tab)));
+
+        let start = "ds";
+        try { const s = localStorage.getItem("neuroTab"); if (s === "cl" || s === "ds") start = s; } catch (e) {}
+        show(start);
+      })();
+      </script>
+    </body>
+    </html>
+    """
+    return html.replace("__ICONLINKS__", ICON_LINKS)
+
+
 @app.get("/ai")
 @login_required
 def ai_page():
     """Чат с нейросетью (DeepSeek через OpenRouter). Личная страница хозяина:
-    история чатов хранится на сайте под паролем кабинета, поэтому за замком."""
+    история чатов хранится на сайте под паролем кабинета, поэтому за замком.
+    Разрешаем встраивание в свой же iframe — страница «Нейронки» показывает её
+    вкладкой рядом с Claude."""
+    g.frameable = True
     html = r"""<!doctype html>
     <html lang="ru">
     <head>
       <meta charset="utf-8">
+      <script>try{if(window.top!==window.self)document.documentElement.classList.add("embed");}catch(e){document.documentElement.classList.add("embed");}</script>
       <meta name="viewport" content="width=device-width, initial-scale=1">
       <meta name="theme-color" content="#0b1020">
       <meta name="description" content="Чат с нейросетью — vitazgio.ru">
@@ -14125,6 +14230,7 @@ def ai_page():
         .back:hover, .burger:hover { color:#fff; border-color:var(--ac); background:rgba(77,107,254,.2); }
         .back svg, .burger svg { width:19px; height:19px; }
         .burger { display:none; }
+        html.embed .back { display:none; }   /* встроена во вкладку «Нейронки» */
         .brand { flex:1; min-width:0; }
         .brand b { display:block; font-size:1.06rem; letter-spacing:-.01em; }
         .brand span { display:block; margin-top:2px; color:var(--muted); font-size:.68rem;
