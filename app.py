@@ -4427,7 +4427,7 @@ def cabinet():
                   </span>
                   <b>Нейронки</b>
                 </span>
-                <span class="zbot"><i>два чата: DeepSeek в облаке, Claude дома</i><em aria-hidden="true">⟶</em></span>
+                <span class="zbot"><i>MiniMax, NVIDIA в облаке, Claude дома</i><em aria-hidden="true">⟶</em></span>
               </a>
 
               <a class="z" href="/notebook" style="--a:#0a7ce0">
