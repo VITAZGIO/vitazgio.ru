@@ -1,5 +1,6 @@
 import base64
 import codecs
+import gzip
 import hashlib
 import hmac
 import io
@@ -1226,6 +1227,77 @@ def diag_api():
     probe("код для ссылок", lambda: bool(__import__("segno")))
     probe("дворецкий", lambda: bool(SEBASTIAN_HOST))
     return jsonify(out)
+
+
+# ---- Скорость: сжатие и кэш статики ---------------------------------------
+# Страницы сайта — это HTML со встроенными CSS и JS, кабинет тянет 142 КБ.
+# Текст жмётся вчетверо, поэтому дешевле всего просто отдавать его сжатым:
+# 142 КБ → 31 КБ, а на стороне сервера это 3-4 мс на страницу. Уровень 6 —
+# золотая середина: девятка выигрывает 0.2 КБ, а стоит втрое дороже.
+GZIP_LEVEL = 6
+GZIP_MIN_BYTES = 1024          # мелочь жать смысла нет, накладные съедят выигрыш
+GZIP_FILE_MAX = 512 * 1024     # файл с диска ради сжатия читаем только мелкий
+GZIP_TYPES = {
+    "text/html", "text/css", "text/plain", "text/javascript",
+    "application/javascript", "application/json", "application/manifest+json",
+    "image/svg+xml", "application/xml", "text/xml",
+}
+# Статика (иконки, логотипы) менялась последний раз в прошлой жизни, но
+# отдавалась с no-cache — браузер переспрашивал каждую при каждом заходе.
+# Сутки, как у уже настроенных /icon-*.png.
+STATIC_MAX_AGE = 86400
+
+
+@app.after_request
+def compress_response(response):
+    """Жмёт текстовые ответы и разрешает кэшировать статику.
+
+    Осторожно обходим всё, что жать нельзя:
+    — потоковые ответы (SSE-чат нейронки: сжатие копило бы буфер, и живая
+      печать превратилась бы в один рывок в конце);
+    — send_file (музыка, видео, PDF): там direct_passthrough и Range-запросы,
+      сжатие сломало бы перемотку;
+    — 206 Partial Content и 304 Not Modified;
+    — уже сжатое (картинки, аудио, архивы) — второй проход только раздувает.
+    """
+    # Flask сам проставляет статике no-cache, поэтому именно перезаписываем:
+    # setdefault тут молча ничего бы не сделал.
+    if request.path.startswith("/static/") and response.status_code == 200:
+        response.headers["Cache-Control"] = f"public, max-age={STATIC_MAX_AGE}"
+
+    # is_streamed True и у SSE-генератора, и у файла с диска, поэтому одного
+    # флага мало. Различаем по direct_passthrough: он поднят только у файлов.
+    # Настоящий поток (генератор SSE) — is_streamed без passthrough: его не
+    # трогаем, иначе живая печать в чате скопится в один рывок.
+    if (response.status_code != 200
+            or (response.is_streamed and not response.direct_passthrough)
+            or "Content-Encoding" in response.headers
+            or (response.mimetype or "") not in GZIP_TYPES):
+        return response
+
+    accepted = request.headers.get("Accept-Encoding", "")
+    if "gzip" not in accepted.lower():
+        return response
+
+    # send_file отдаёт файл потоком (direct_passthrough) — чтобы сжать, его
+    # придётся втянуть в память. Для svg и offline.html это копейки, но для
+    # музыки и видео было бы дико: их спасает и проверка типа выше, и лимит.
+    if response.direct_passthrough:
+        if (response.content_length or 0) > GZIP_FILE_MAX:
+            return response
+        response.direct_passthrough = False
+
+    data = response.get_data()
+    if len(data) < GZIP_MIN_BYTES:
+        return response
+
+    response.set_data(gzip.compress(data, GZIP_LEVEL))
+    response.headers["Content-Encoding"] = "gzip"
+    response.headers["Content-Length"] = str(len(response.get_data()))
+    # Кэш обязан различать сжатый и несжатый ответ, иначе прокси однажды
+    # отдаст gzip тому, кто его не просил.
+    response.headers.add("Vary", "Accept-Encoding")
+    return response
 
 
 @app.after_request
@@ -4775,23 +4847,61 @@ def cabinet():
       <!-- Библиотеки лежат в static/vendor, а не на CDN: когда jsdelivr
            недоступен, консоль и RDP переставали открываться вообще без
            объяснений. Адрес CDN оставлен запасным на случай, если файл
-           почему-то не отдался. -->
+           почему-то не отдался.
+
+           Грузим их ПО ТРЕБОВАНИЮ, а не при открытии кабинета: xterm тянет
+           277 КБ, guacamole ещё 73 КБ, и раньше они приезжали на каждый заход,
+           хотя нужны только когда реально открываешь консоль или удалённый
+           рабочий стол. Кабинет из-за них весил втрое больше нужного. -->
       <script>
-        // Догружает библиотеку с CDN, если своя копия почему-то не отдалась.
-        function vendorFallback(el, url) {
-          el.onerror = null;
-          var script = document.createElement("script");
-          script.src = url;
-          document.head.appendChild(script);
-        }
+        window.vendorReady = (() => {
+          const PARTS = {
+            xterm: {
+              css: "/static/vendor/xterm.css",
+              js: [
+                ["/static/vendor/xterm.js",
+                 "https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"],
+                ["/static/vendor/xterm-addon-fit.js",
+                 "https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"],
+              ],
+            },
+            guac: {
+              js: [
+                ["/static/vendor/guacamole-common.min.js",
+                 "https://cdn.jsdelivr.net/npm/guacamole-common-js@1.5.0/dist/cjs/guacamole-common.min.js"],
+              ],
+            },
+          };
+          // Своя копия, при осечке — CDN. Порядок внутри набора важен:
+          // аддон xterm ждёт, пока определится сам Terminal.
+          const one = (local, cdn) => new Promise((ok, fail) => {
+            const add = (src, last) => {
+              const s = document.createElement("script");
+              s.src = src;
+              s.onload = ok;
+              s.onerror = () => last ? fail(new Error(src)) : add(cdn, true);
+              document.head.appendChild(s);
+            };
+            add(local, false);
+          });
+          const done = {};                 // грузим один раз, дальше — из кэша
+          return (name) => {
+            if (done[name]) return done[name];
+            const part = PARTS[name];
+            if (!part) return Promise.resolve();
+            if (part.css) {
+              const link = document.createElement("link");
+              link.rel = "stylesheet";
+              link.href = part.css;
+              document.head.appendChild(link);
+            }
+            done[name] = part.js.reduce(
+              (chain, [local, cdn]) => chain.then(() => one(local, cdn)),
+              Promise.resolve());
+            return done[name];
+          };
+        })();
       </script>
-      <link rel="stylesheet" href="/static/vendor/xterm.css">
-      <script defer src="/static/vendor/xterm.js"
-              onerror="vendorFallback(this, 'https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js')"></script>
-      <script defer src="/static/vendor/xterm-addon-fit.js"
-              onerror="vendorFallback(this, 'https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js')"></script>
-      <script defer src="/static/vendor/guacamole-common.min.js"
-              onerror="vendorFallback(this, 'https://cdn.jsdelivr.net/npm/guacamole-common-js@1.5.0/dist/cjs/guacamole-common.min.js')"></script>
       <script>
         (() => {
           // Раскрытием занимается общий обработчик .panel-head[aria-controls]
@@ -5092,7 +5202,9 @@ def cabinet():
           };
           rdpCloseBtn.addEventListener("click", closeRdp);
 
-          const openRdp = (ip, name, username, password, protocol = "rdp", quality = "medium") => {
+          const openRdp = async (ip, name, username, password, protocol = "rdp", quality = "medium") => {
+            // guacamole тоже приезжает только сейчас — на кабинет он не влияет.
+            try { await window.vendorReady("guac"); } catch (e) {}
             if (typeof Guacamole === "undefined") {
               alert("Не удалось загрузить guacamole-common-js — проверьте сеть/CDN.");
               return;
@@ -5480,9 +5592,13 @@ def cabinet():
             termToast(lines > 1 ? `Вставлено строк: ${lines}` : "Вставлено");
           });
 
-          const openTerminal = (ip, name, username, password) => {
+          const openTerminal = async (ip, name, username, password) => {
             termTitle.textContent = name + " — " + ip;
             termOverlay.hidden = false;
+            // xterm приезжает только сейчас, при первом открытии консоли.
+            termBody.textContent = "Загружаю терминал…";
+            try { await window.vendorReady("xterm"); } catch (e) {}
+            termBody.textContent = "";
             if (typeof Terminal === "undefined" || typeof FitAddon === "undefined") {
               termBody.textContent = "Не удалось загрузить библиотеку терминала (xterm.js) — проверьте сеть/CDN.";
               return;
