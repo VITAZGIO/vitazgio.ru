@@ -2256,11 +2256,14 @@ def music_list_api():
                                key=lambda x: (x[1]["artist"].lower(), x[1]["title"].lower()))
         ]
         folders = [
-            {"id": k, "name": v["name"], "parent": v.get("parent", "")}
+            {"id": k, "name": v["name"], "parent": v.get("parent", ""),
+             "fav": bool(v.get("fav"))}
             for k, v in sorted(music_folders.items(), key=lambda x: x[1]["name"].lower())
         ]
+        fav_folder = next((k for k, v in music_folders.items() if v.get("fav")), "")
     return jsonify(tracks=tracks, folders=folders, used=used, quota=MUSIC_QUOTA,
-                   limit=MUSIC_MAX_SIZE, can_edit=bool(session.get("authenticated")))
+                   limit=MUSIC_MAX_SIZE, fav_folder=fav_folder,
+                   can_edit=bool(session.get("authenticated")))
 
 
 @app.post("/api/music")
@@ -2413,8 +2416,19 @@ def music_folder_patch_api(folder_id):
             if parent in _music_subtree(folder_id):
                 return jsonify(error="Папку нельзя вложить в саму себя."), 400
             folder["parent"] = parent
+        if "fav" in payload:
+            # Избранная папка одна на всю фонотеку: ставим звезду этой,
+            # снимаем со всех остальных. Она открывается при заходе и она же
+            # играет в мини-плеере кабинета.
+            if payload.get("fav"):
+                for f in music_folders.values():
+                    f["fav"] = False
+                folder["fav"] = True
+            else:
+                folder["fav"] = False
         _music_write_index()
-        return jsonify(ok=True, name=folder["name"], parent=folder.get("parent", ""))
+        return jsonify(ok=True, name=folder["name"], parent=folder.get("parent", ""),
+                       fav=bool(folder.get("fav")))
 
 
 @app.delete("/api/music/folder/<folder_id>")
@@ -5759,9 +5773,24 @@ def cabinet():
               try {
                 const r = await fetch("/api/music", { credentials: "same-origin" });
                 const data = await r.json();
-                tracks = shuffle(data.tracks);
+                let list = data.tracks || [];
+                // Если хозяин отметил папку звездой — мини-плеер играет только
+                // её (с подпапками). Собираем поддерево избранной папки.
+                const fav = data.fav_folder;
+                if (fav) {
+                  const fset = new Set([fav]);
+                  let grew = true;
+                  while (grew) {
+                    grew = false;
+                    (data.folders || []).forEach((f) => {
+                      if (fset.has(f.parent) && !fset.has(f.id)) { fset.add(f.id); grew = true; }
+                    });
+                  }
+                  list = list.filter((t) => fset.has(t.folder));
+                }
+                tracks = shuffle(list);
                 const mb = (data.used / 1048576).toFixed(0);
-                el("pl-used").textContent = data.tracks.length ? mb + " МБ" : "";
+                el("pl-used").textContent = list.length ? mb + " МБ" : "";
                 if (index >= tracks.length) index = -1;
                 showNow();
                 if (autoplay && tracks.length) play(0);
@@ -7616,16 +7645,18 @@ def drop_page():
                       overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .trash-meta { margin-top: 3px; color: #6b7c8f; font-size: .68rem; }
         .trash-acts { flex: none; display: flex; gap: 6px; }
-        .trash-acts .btn { height: 30px; padding: 0 11px; font-size: .72rem; }
+        .trash-acts .btn { height: 30px; padding: 0 11px; font-size: .72rem;
+                           display: inline-flex; align-items: center; justify-content: center; line-height: 1; }
         .btn.bad { color: #ff9aa6; border-color: rgba(255,90,110,.35); }
         .btn.bad:hover { color: #fff; border-color: #ff5a6e; background: rgba(255,90,110,.14); }
         .trash-empty { padding: 26px 0; color: #6b7c8f; text-align: center; font-size: .82rem; }
         /* «Очистить всё» слева, «Закрыть» справа: разные по весу действия
            не должны стоять вплотную, чтобы не промахнуться. */
         .trash-keys { display: flex; justify-content: space-between; gap: 10px; }
-        .trash-keys .btn { height: 34px; }
-        #trash-all i { font-style: normal; margin-left: 2px; padding: 1px 6px;
-                       font-size: .68rem; border-radius: 999px;
+        .trash-keys .btn { height: 34px; display: inline-flex; align-items: center;
+                           justify-content: center; gap: 6px; line-height: 1; }
+        #trash-all i { font-style: normal; margin-left: 0; padding: 1px 6px;
+                       font-size: .68rem; line-height: 1.4; border-radius: 999px;
                        color: #ffd0d6; background: rgba(255,90,110,.18); }
 
         /* Окно ввода пароля от корзины */
@@ -11290,16 +11321,25 @@ def player_tracks():
     with music_lock:
         _music_scan()
         folder_name = {k: v["name"] for k, v in music_folders.items()}
+        # Если хозяин отметил папку звездой — мини-плеер и виджет играют
+        # только её (с подпапками). Нет избранной — вся фонотека, как раньше.
+        fav_id = next((k for k, v in music_folders.items() if v.get("fav")), "")
+        allowed = _music_subtree(fav_id) if fav_id else None
         for k, v in sorted(music_items.items(),
                            key=lambda x: (str(x[1].get("artist", "")).lower(),
                                           str(x[1].get("title", "")).lower())):
+            if allowed is not None and v.get("folder", "") not in allowed:
+                continue
             tracks.append({
                 "id": "m_" + k, "title": v["title"], "artist": v["artist"],
                 "folder": folder_name.get(v.get("folder", ""), ""),
                 "url": "/api/music/file/" + k,
             })
-    with drop_lock:
-        tracks.extend(_drop_musik_tracks())
+    # Папку MUSIK из дропа добавляем только когда избранного нет: со звездой
+    # список должен быть ровно тем, что лежит в избранной папке.
+    if allowed is None:
+        with drop_lock:
+            tracks.extend(_drop_musik_tracks())
     return jsonify(tracks=tracks)
 
 
@@ -11714,10 +11754,10 @@ def vg_player_js():
                  background:rgba(190,40,60,.92); transform:translate(-50%, 0) scale(1.06); }
   .vgp-bin svg { width:17px; height:17px; }
 
-  /* «убрать плеер» — рядом со свёрткой, но видна только в плавающем окне:
-     там перетащить в корзину некуда, само окошко — уже отдельная сущность. */
-  .vgp [data-remove] { display:none; }
-  .vgp.vgp-pip [data-remove] { display:grid; }
+  /* «убрать плеер» — крестик всегда под рукой в развёрнутом виде: чтобы
+     выбросить плеер, не надо зажимать и тащить в корзину. В плавающем окне
+     тем более — там тащить некуда. */
+  .vgp [data-remove]:hover { color:#ff8f9b; }
   .vgp.vgp-pip [data-pip] { display:none; }
   /* в самом плавающем окне виджет — это весь его вьюпорт, без плавания */
   .vgp.vgp-pip { position:static; inset:auto; right:auto; bottom:auto; left:auto; top:auto;
@@ -12608,9 +12648,14 @@ def diy_page():
                   box-shadow: 0 0 14px color-mix(in srgb, var(--th) 45%, transparent); }
         .rail[hidden] { display: none; }
 
-        /* 3 · кладка: колонки разной высоты, картинки во весь рост */
-        .grid.m-mosaic { column-count: 3; column-gap: 16px; }
-        .grid.m-mosaic .work { break-inside: avoid; margin-bottom: 16px; display: inline-flex; width: 100%; }
+        /* 3 · кладка: настоящий masonry на JS. Каждую карточку кладём в самую
+           короткую колонку, поэтому в одной может быть 3, а в другой 5 —
+           заполняем по фактической высоте, а не поровну. CSS-колонки
+           (column-count) с высокими карточками и break-inside:avoid
+           сваливали всё в первый столбец, поэтому раскладку делает скрипт. */
+        .grid.m-mosaic { display: flex; align-items: flex-start; gap: 16px; }
+        .grid.m-mosaic .mcol { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
+        .grid.m-mosaic .work { width: 100%; display: flex; }
         /* Здесь обложка живёт своей высотой — из-за этого кладка и получается */
         .grid.m-mosaic .shot { aspect-ratio: auto; }
         .grid.m-mosaic .shot img { height: auto; max-height: 520px; object-fit: cover; }
@@ -12618,8 +12663,6 @@ def diy_page():
         .grid.m-mosaic .shot.none { aspect-ratio: 16 / 11; }
         .grid.m-mosaic .work:nth-child(3n+2) .shot.none { aspect-ratio: 4 / 5; }
         .grid.m-mosaic .work:nth-child(3n+3) .shot.none { aspect-ratio: 16 / 8; }
-        @media (max-width: 980px) { .grid.m-mosaic { column-count: 2; } }
-        @media (max-width: 640px) { .grid.m-mosaic { column-count: 1; } }
 
         /* 4 · веер: боковые карточки уходят в перспективу */
         .grid.m-fan { display: flex; gap: 26px; overflow-x: auto; scroll-snap-type: x mandatory;
@@ -13151,7 +13194,9 @@ def diy_page():
         let eye = null;
         const reveal = (grid) => {
           if (eye) { eye.disconnect(); eye = null; }
-          const cards = [...grid.children];
+          // В кладке карточки лежат внутри колонок, поэтому берём их не как
+          // прямых детей, а как потомков .work/.hex.
+          const cards = [...grid.querySelectorAll(".work, .hex")];
           const slow = matchMedia("(prefers-reduced-motion: reduce)").matches;
           if (slow || !("IntersectionObserver" in window) || mode === 2 || mode === 4) return;
           cards.forEach((el) => el.classList.add("up"));
@@ -13165,6 +13210,39 @@ def diy_page():
           }, { threshold: .12, rootMargin: "0px 0px -40px" });
           cards.forEach((el) => eye.observe(el));
         };
+
+        /* Кладка (masonry): раскладываем карточки по колонкам, каждую — в самую
+           короткую на данный момент. Так столбцы получаются разной длины, но
+           одинаковой высоты — заполняем по фактическому размеру карточек. */
+        const mosaicColumns = () => {
+          const w = window.innerWidth;
+          return w <= 640 ? 1 : w <= 980 ? 2 : 3;
+        };
+        let mosaicCards = [];
+        const layoutMosaic = (grid) => {
+          if (!mosaicCards.length) return;
+          const n = mosaicColumns();
+          grid.innerHTML = "";
+          const cols = [];
+          for (let i = 0; i < n; i++) {
+            const c = document.createElement("div");
+            c.className = "mcol";
+            grid.appendChild(c);
+            cols.push(c);
+          }
+          mosaicCards.forEach((card) => {
+            let best = cols[0];
+            for (const c of cols) if (c.offsetHeight < best.offsetHeight) best = c;
+            best.appendChild(card);
+          });
+        };
+        let mosaicRaf = 0;
+        const relayoutMosaic = () => {
+          if (mode !== 3) return;
+          cancelAnimationFrame(mosaicRaf);
+          mosaicRaf = requestAnimationFrame(() => layoutMosaic($("grid")));
+        };
+        window.addEventListener("resize", relayoutMosaic);
 
         const drawGrid = () => {
           const grid = $("grid");
@@ -13241,6 +13319,18 @@ def diy_page():
               '<div class="open-row"><button class="btn" data-open="' + w.id + '">Открыть статью →</button></div>' +
               tools + "</div></article>";
           }).join("");
+
+          // Кладка: собираем карточки и раскладываем masonry-скриптом. Если
+          // на карточках есть картинки, их высота узнаётся только после
+          // загрузки — тогда перекладываем ещё раз.
+          mosaicCards = [];
+          if (mode === 3) {
+            mosaicCards = [...grid.querySelectorAll(".work")];
+            layoutMosaic(grid);
+            grid.querySelectorAll(".work img").forEach((img) => {
+              if (!img.complete) img.addEventListener("load", relayoutMosaic, { once: true });
+            });
+          }
 
           // Барабану и вееру нужна раскладка после отрисовки
           grid.onscroll = null;
@@ -16732,6 +16822,13 @@ def music_page():
                        white-space: nowrap; }
         .folder-num { margin-left: auto; color: var(--muted); font-weight: 500;
                       font-size: .8rem; }
+        .folder-star { flex: none; display: grid; place-items: center; width: 26px; height: 26px;
+                       margin: -4px -4px -4px 0; border-radius: 8px; cursor: pointer;
+                       color: #6b7385; opacity: .6; transition: .16s; }
+        .folder-star:hover { opacity: 1; color: var(--warm); background: rgba(255,216,74,.12); }
+        .folder-star svg { width: 16px !important; height: 16px !important; color: inherit !important; }
+        .folder-star.on { opacity: 1; color: var(--warm); }
+        .folder.fav { border-color: rgba(255,216,74,.5); }
         .folder.picked { border-color: var(--pc); background: rgba(45,226,255,.12); }
 
         .mlist { display: flex; flex-direction: column;
@@ -16965,6 +17062,8 @@ def music_page():
           paste: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><path d="M9 4h6v3H9z"/><path d="M15 5h3v15H6V5h3"/></svg>',
           del: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V5h6v2m-8 0 1 13h8l1-13"/></svg>',
           pen: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="m4 20 4-1 11-11-3-3L5 16z"/></svg>',
+          star: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="m12 3 2.6 5.6 6 .7-4.4 4.1 1.2 6L12 16.9 6.6 19.5l1.2-6L3.4 9.3l6-.7z"/></svg>',
+          starFill: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="m12 3 2.6 5.6 6 .7-4.4 4.1 1.2 6L12 16.9 6.6 19.5l1.2-6L3.4 9.3l6-.7z"/></svg>',
         };
 
         const $ = (id) => document.getElementById(id);
@@ -16978,6 +17077,7 @@ def music_page():
         let canEdit = false;
         let locked = true;        // фонотека вся под паролем, и слушать тоже
         let here = "";            // в какой папке смотрим
+        let openedFav = false;    // избранную папку открываем только раз, при заходе
         let quota = { used: 0, all: 0 };
 
         // ── что сейчас играет ───────────────────────────────────────────
@@ -17031,6 +17131,13 @@ def music_page():
           canEdit = !!data.can_edit;
           quota = { used: data.used || 0, all: data.quota || 0 };
           if (here && !folders.some((f) => f.id === here)) here = "";
+          // При первом открытии сразу заходим в избранную папку (со звездой) —
+          // иначе корень пустой, вся музыка разложена по папкам.
+          if (!openedFav) {
+            openedFav = true;
+            const fav = data.fav_folder || (folders.find((f) => f.fav) || {}).id;
+            if (fav && !here) here = fav;
+          }
           draw();
         };
 
@@ -17084,10 +17191,20 @@ def music_page():
 
         const drawFolders = () => {
           const list = kids(here);
-          $("folders").innerHTML = list.map((f) =>
-            '<button class="folder" data-dir="' + f.id + '">' + SVG.folder +
-            '<span class="folder-name">' + esc(f.name) + '</span>' +
-            '<span class="folder-num">' + deepCount(f.id) + '</span></button>').join("");
+          $("folders").innerHTML = list.map((f) => {
+            // Звезда: у хозяина — кнопка (отметить/снять избранную), у гостя
+            // просто значок на избранной. Избранная папка открывается при
+            // заходе и играет в мини-плеере кабинета.
+            const star = f.fav
+              ? '<span class="folder-star on"' + (canEdit ? ' data-fav="' + f.id + '"' : '') +
+                ' title="Избранная папка">' + SVG.starFill + '</span>'
+              : (canEdit
+                  ? '<span class="folder-star" data-fav="' + f.id + '" title="Сделать избранной">' + SVG.star + '</span>'
+                  : '');
+            return '<button class="folder' + (f.fav ? ' fav' : '') + '" data-dir="' + f.id + '">' + SVG.folder +
+              '<span class="folder-name">' + esc(f.name) + '</span>' +
+              '<span class="folder-num">' + deepCount(f.id) + '</span>' + star + '</button>';
+          }).join("");
         };
 
         const drawTracks = () => {
@@ -17374,7 +17491,23 @@ def music_page():
           paint();
         });
 
-        $("folders").addEventListener("click", (e) => {
+        $("folders").addEventListener("click", async (e) => {
+          // Звезда на плитке: отметить/снять избранную папку — не заходя в неё.
+          const fav = e.target.closest("[data-fav]");
+          if (fav) {
+            e.stopPropagation();
+            const id = fav.dataset.fav;
+            const f = folders.find((x) => x.id === id);
+            const on = !(f && f.fav);
+            folders.forEach((x) => { x.fav = false; });
+            if (f) f.fav = on;
+            drawFolders();
+            try {
+              await fetch("/api/music/folder/" + id, { method: "PATCH", credentials: "same-origin",
+                headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fav: on }) });
+            } catch (err) {}
+            return;
+          }
           const key = e.target.closest("[data-dir]");
           if (!key) return;
           here = key.dataset.dir;
@@ -18300,6 +18433,15 @@ def home():
               <div class="service-copy"><h2>Nginx Proxy</h2><p>Управление доменами и прокси</p><span class="domain">npm.vitazgio.ru</span></div>
             </a>
 
+            <a class="service service--github" href="https://github.com/VITAZGIO"
+               aria-label="Открыть GitHub">
+              <div class="service-top">
+                <span class="logo" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg></span>
+                <span class="arrow" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M7 17 17 7m0 0H8m9 0v9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+              </div>
+              <div class="service-copy"><h2>GitHub</h2><p>Исходники проектов и история правок</p><span class="domain">github.com</span></div>
+            </a>
+
             <a class="service service--qb" href="https://qb.vitazgio.ru" aria-label="Открыть qBittorrent">
               <div class="service-top">
                 <span class="logo" aria-hidden="true">
@@ -18315,15 +18457,6 @@ def home():
                 <span class="arrow" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M7 17 17 7m0 0H8m9 0v9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
               </div>
               <div class="service-copy"><h2>qBittorrent</h2><p>Веб-интерфейс торрент-клиента</p><span class="domain">qb.vitazgio.ru</span></div>
-            </a>
-
-            <a class="service service--github" href="https://github.com/VITAZGIO"
-               aria-label="Открыть GitHub">
-              <div class="service-top">
-                <span class="logo" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg></span>
-                <span class="arrow" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M7 17 17 7m0 0H8m9 0v9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
-              </div>
-              <div class="service-copy"><h2>GitHub</h2><p>Исходники проектов и история правок</p><span class="domain">github.com</span></div>
             </a>
 
             <a class="service service--gitea" href="https://git.vitazgio.ru"
