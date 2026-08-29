@@ -9428,18 +9428,16 @@ DIY_LINK_LIMIT = 6
 
 # Тематики. Раньше у записи был «вид» — программа, поделка, чертёж; полки из
 # этого не выходило, всё лежало одной кучей. Теперь запись живёт в своей
-# тематике, и у каждой свой цвет, свой значок и свой вид листания по
-# умолчанию: программы удобно смотреть кладкой, платы — сотами, сервера —
-# барабаном. Хозяин всё равно может переключить вид руками, выбор запомнится
-# для каждой тематики отдельно.
+# тематике, и у каждой свой цвет и свой значок. Листание — кладкой (masonry),
+# один способ на все полки, переключателя между видами больше нет.
 DIY_THEMES = (
-    {"id": "программы",  "name": "Программы",  "color": "#2de2ff", "view": 3,
+    {"id": "программы",  "name": "Программы",  "color": "#2de2ff",
      "hint": "код, приложения и всё, что запускается"},
-    {"id": "устройства", "name": "Устройства", "color": "#ffd84a", "view": 5,
+    {"id": "устройства", "name": "Устройства", "color": "#ffd84a",
      "hint": "ESP, платы, паяльник и провода"},
-    {"id": "сервера",    "name": "Сервера",    "color": "#63f5ad", "view": 2,
+    {"id": "сервера",    "name": "Сервера",    "color": "#63f5ad",
      "hint": "машины, сети и то, что крутится круглосуточно"},
-    {"id": "разное",     "name": "Разное",     "color": "#b57cff", "view": 1,
+    {"id": "разное",     "name": "Разное",     "color": "#b57cff",
      "hint": "всё остальное"},
 )
 DIY_KINDS = tuple(t["id"] for t in DIY_THEMES)
@@ -11480,6 +11478,7 @@ def vg_player_js():
   const KEY = "vgPlayerState";
   const POS = "vgPlayerBox";
   const headless = !!window.VGP_HEADLESS;       // движок без своего оверлея
+  const popup = !!window.VGP_POPUP;             // это /player/pop — отдельное окно
   const lift = +(window.VGP_OFFSET || 0);       // поднять над нижней панелью
 
   /* ── состояние ─────────────────────────────────────────────────── */
@@ -11600,11 +11599,8 @@ def vg_player_js():
     },
     hide() {
       try { localStorage.setItem("vgPlayerOn", "0"); } catch (e) { /* и ладно */ }
-      if (pipWin) {
-        try { pipWin.removeEventListener("pagehide", closePip); } catch (e) {}
-        try { pipWin.close(); } catch (e) {}
-        pipWin = null;
-      }
+      if (popWin && !popWin.closed) { try { popWin.close(); } catch (e) {} }
+      popWin = null;
       if (box) { box.remove(); box = null; }
     },
     reload: () => fetchList(true),
@@ -11628,9 +11624,14 @@ def vg_player_js():
     } catch (e) { /* не поддержали — не беда */ }
   };
 
+  /* Пока «вынос» в отдельное окно передаёт эстафету (см. popOut ниже),
+     событие pause от нашей же audio.pause() иначе перезаписало бы
+     localStorage обратно на playing:false — оно приходит асинхронно,
+     позже, чем наша ручная запись playing:true для нового окна. */
+  let handingOff = false;
   audio.addEventListener("ended", () => api.next());
   audio.addEventListener("play", () => { shout("play"); fire(); save(); });
-  audio.addEventListener("pause", () => { fire(); save(); });
+  audio.addEventListener("pause", () => { fire(); if (!handingOff) save(); });
   audio.addEventListener("timeupdate", () => { paint(); });
   audio.addEventListener("loadedmetadata", () => fire());
   setInterval(() => { if (!audio.paused) save(); }, 3000);
@@ -11696,34 +11697,29 @@ def vg_player_js():
   };
 
   /* ── виджет ────────────────────────────────────────────────────── */
-  let box = null, folded = true, bin = null, pipWin = null;
+  let box = null, folded = true, bin = null, popWin = null;
   const paintFns = [];
 
-  /* Плавающее окно поверх экрана (Document Picture-in-Picture): сам виджет
-     физически переезжает в отдельное окно — тот же <audio>, тот же JS,
-     звук не прерывается. Управлять можно и из окна, и с сайта (это тот же
-     код), просто пока окно открыто, виджет физически живёт в нём одном. */
-  const openPip = async () => {
-    if (pipWin) { try { pipWin.focus(); } catch (e) {} return; }
-    if (!box) return;
+  /* «Вынести»: настоящее отдельное окно браузера (window.open), а не
+     Document Picture-in-Picture — то плавает красиво, но живёт вместе со
+     вкладкой-открывашкой: сайт многостраничный, и любой переход на другую
+     его страницу заново грузит вкладку, а с ней гаснет и такое окно, и
+     звук. Тут же — эстафета: останавливаем звук в этой вкладке (это же
+     запоминает точную секунду через save()) и открываем /player/pop —
+     тот же движок, отдельным окном, подхватывает ровно с этого места и
+     дальше живёт сам по себе, что бы в браузере ни делали. */
+  const popOut = () => {
+    if (popWin && !popWin.closed) { try { popWin.focus(); } catch (e) {} return; }
+    const wasPlaying = !audio.paused;
+    handingOff = true;
+    audio.pause();
     try {
-      pipWin = await documentPictureInPicture.requestWindow({ width: 340, height: 300 });
-    } catch (e) { pipWin = null; return; }
-    const style = document.createElement("style");
-    style.textContent = CSS;
-    pipWin.document.head.appendChild(style);
-    pipWin.document.body.style.margin = "0";
-    pipWin.document.body.style.background = "#0b0f18";
-    setFolded(false);
-    box.classList.add("vgp-pip");
-    pipWin.document.body.appendChild(box);
-    pipWin.addEventListener("pagehide", closePip, { once: true });
-  };
-  const closePip = () => {
-    pipWin = null;
-    if (!box) return;
-    box.classList.remove("vgp-pip");
-    document.body.appendChild(box);
+      const s = JSON.parse(localStorage.getItem(KEY) || "null");
+      if (s) { s.playing = wasPlaying; localStorage.setItem(KEY, JSON.stringify(s)); }
+    } catch (e) {}
+    popWin = window.open("/player/pop", "vgplayer",
+      "width=340,height=440,menubar=no,toolbar=no,location=no,status=no,resizable=yes");
+    setTimeout(() => { handingOff = false; }, 300);
   };
 
   /* Корзина, в которую можно выбросить сам плеер. Появляется только когда
@@ -11871,11 +11867,12 @@ def vg_player_js():
   .vgp-bin svg { width:17px; height:17px; }
 
   /* «убрать плеер» — крестик всегда под рукой в развёрнутом виде: чтобы
-     выбросить плеер, не надо зажимать и тащить в корзину. В плавающем окне
+     выбросить плеер, не надо зажимать и тащить в корзину. В вынесенном окне
      тем более — там тащить некуда. */
   .vgp [data-remove]:hover { color:#ff8f9b; }
   .vgp.vgp-pip [data-pip] { display:none; }
-  /* в самом плавающем окне виджет — это весь его вьюпорт, без плавания */
+  /* в самом вынесенном окне (/player/pop) виджет — это весь его вьюпорт,
+     без плавания и перетаскивания */
   .vgp.vgp-pip { position:static; inset:auto; right:auto; bottom:auto; left:auto; top:auto;
                  width:100%; height:100%; border-radius:0; box-shadow:none; }
   .vgp.vgp-pip .vgp-head { cursor:default; }
@@ -11912,7 +11909,10 @@ def vg_player_js():
     document.head.appendChild(style);
 
     box = document.createElement("div");
-    box.className = "vgp vgp-folded";
+    // В вынесенном окне (/player/pop) виджет сразу разворачивается и
+    // занимает весь вьюпорт — сворачивать в кружок там некуда и незачем.
+    box.className = popup ? "vgp vgp-pip" : "vgp vgp-folded";
+    if (popup) folded = false;
     if (lift) box.style.bottom = (22 + lift) + "px";
     box.innerHTML =
       '<div class="vgp-head">' +
@@ -11923,7 +11923,7 @@ def vg_player_js():
             '<path d="M9 18V6l10-2v12"/><circle cx="6.5" cy="18" r="2.8"/><circle cx="16.5" cy="16" r="2.8"/></svg>' +
           '<div class="vgp-eq"><i></i><i></i><i></i><i></i></div></div>' +
         '<div class="vgp-meta"><div class="vgp-t">Фонотека</div><div class="vgp-a">ничего не играет</div></div>' +
-        '<button class="vgp-x" data-pip title="Открыть поверх экрана">' + I.pip + '</button>' +
+        '<button class="vgp-x" data-pip title="Вынести в отдельное окно">' + I.pip + '</button>' +
         '<button class="vgp-x" data-remove title="Убрать плеер">' + I.remove + '</button>' +
         '<button class="vgp-x" data-fold title="Свернуть">' + I.fold + '</button>' +
       '</div>' +
@@ -12052,12 +12052,10 @@ def vg_player_js():
       else api.volume(volBeforeMute || 0.7);
     });
 
-    q("[data-remove]").addEventListener("click", () => api.hide());
-    if ("documentPictureInPicture" in window) {
-      q("[data-pip]").addEventListener("click", openPip);
-    } else {
-      q("[data-pip]").remove();
-    }
+    // В вынесенном окне крестик закрывает само это окно, а не прячет
+    // виджет на сайте (виджет там вообще не при чём — окно отдельное).
+    q("[data-remove]").addEventListener("click", () => popup ? window.close() : api.hide());
+    q("[data-pip]").addEventListener("click", popOut);
 
     const drawRows = () => {
       if (!rows.classList.contains("open")) return;
@@ -12102,8 +12100,10 @@ def vg_player_js():
   const start = () => {
     // Показываемся только если плеер включали кнопкой. Звук при этом живёт
     // всегда: трек, начатый на музыке, продолжается и без виджета.
-    let on = false;
-    try { on = localStorage.getItem("vgPlayerOn") === "1"; } catch (e) { on = false; }
+    // /player/pop — исключение: там виджет и есть смысл окна, показываем
+    // его всегда, независимо от того, включали ли где-то кнопку.
+    let on = popup;
+    if (!popup) { try { on = localStorage.getItem("vgPlayerOn") === "1"; } catch (e) { on = false; } }
     if (!headless && on) build();
     resume();
   };
@@ -12117,6 +12117,34 @@ def vg_player_js():
     return response
 
 
+@app.get("/player/pop")
+@login_required
+def player_pop_page():
+    """Плеер в настоящем отдельном окне браузера — «вынести» из виджета.
+
+    Раньше «вынести поверх экрана» значило Document Picture-in-Picture:
+    красиво, но окно живёт вместе со вкладкой-открывашкой и закрывается
+    (а с ним и звук), стоит там перейти на другую страницу сайта — обычная
+    многостраничная навигация именно так и работает. Здесь — обычное
+    window.open на отдельный адрес: это настоящее отдельное окно, вкладка
+    его не касается, что бы там дальше ни открывали. Тот же движок
+    (vg-player.js), просто с флагом VGP_POPUP — сам разворачивается на весь
+    вьюпорт окна и всегда виден, без сворачивания в кружок."""
+    html = """<!doctype html>
+<html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Плеер · vitazgio.ru</title>
+<link rel="icon" href="/icon-32.png">
+<style>
+  html, body { margin: 0; height: 100%; background: #0b0f18; overflow: hidden; }
+</style>
+</head>
+<body>
+<script>window.VGP_POPUP = true;</script>
+<script src="/vg-player.js"></script>
+</body>
+</html>"""
+    return Response(html, mimetype="text/html; charset=utf-8")
 
 
 @app.get("/claude")
@@ -12679,8 +12707,8 @@ def diy_page():
            Выбранный вид запоминается для каждой полки отдельно. */
         .shelfrow { display: flex; align-items: center; gap: 8px; margin: 26px 0 0; min-width: 0; }
         .shelf { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
-        .shelf .lbl, .modes .lbl { color: var(--muted); font-size: .68rem; letter-spacing: .14em;
-                                   text-transform: uppercase; margin-right: 4px; }
+        .shelf .lbl { color: var(--muted); font-size: .68rem; letter-spacing: .14em;
+                     text-transform: uppercase; margin-right: 4px; }
         .shelf button { --tc: var(--pc); display: inline-flex; align-items: center; gap: 8px;
                         height: 36px; padding: 0 14px; cursor: pointer; color: #b9c6d8;
                         font: 600 .84rem inherit; border-radius: 11px;
@@ -12707,22 +12735,6 @@ def diy_page():
           .shelf button { flex: none; }
         }
 
-        .modes { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 14px 0 4px; }
-        .modes button { width: 34px; height: 34px; display: grid; place-items: center; cursor: pointer;
-                        color: #9fb0c6; font: 700 .8rem "Cascadia Code", Consolas, monospace;
-                        border: 1px solid var(--line); border-radius: 10px;
-                        background: rgba(255,255,255,.04); transition: .16s; }
-        .modes button:hover { color: #fff;
-                              border-color: color-mix(in srgb, var(--th) 55%, transparent);
-                              background: color-mix(in srgb, var(--th) 12%, transparent); }
-        .modes button.on { color: #04121c; border-color: var(--th);
-                           background: linear-gradient(160deg,
-                             color-mix(in srgb, var(--th) 70%, #ffffff), var(--th)); }
-        .modes .name { margin-left: 6px; color: #cfe0f0; font-size: .78rem; }
-        .modes .name b { color: var(--th); }
-        .navs { display: flex; gap: 8px; margin-left: auto; }
-        .navs button { width: 34px; height: 34px; }
-
         /* Своя прокрутка на каждой полке: ползунок красится цветом тематики. */
         .grid { margin: 18px 0 0; scrollbar-width: thin;
                 scrollbar-color: color-mix(in srgb, var(--th) 60%, transparent) transparent; }
@@ -12733,38 +12745,11 @@ def diy_page():
                             color-mix(in srgb, var(--th) 35%, transparent)); }
 
         /* Карточки выплывают по очереди, когда до них доходит прокрутка. */
-        .work.up, .hex.up { opacity: 0; transform: translateY(18px); }
-        .work.up.seen, .hex.up.seen { opacity: 1; transform: none;
-                                      transition: opacity .5s ease, transform .5s cubic-bezier(.22,1,.36,1); }
+        .work.up { opacity: 0; transform: translateY(18px); }
+        .work.up.seen { opacity: 1; transform: none;
+                        transition: opacity .5s ease, transform .5s cubic-bezier(.22,1,.36,1); }
 
-        /* 1 · сетка */
-        .grid.m-grid { display: grid; gap: 18px;
-                       grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
-        /* Закреплённая запись занимает две клетки — витрина начинается с неё. */
-        @media (min-width: 900px) {
-          .grid.m-grid .work.wide { grid-column: span 2; }
-          .grid.m-grid .work.wide .shot { aspect-ratio: 21 / 9; }
-        }
-
-        /* 2 · барабан: горизонтальная лента с прилипанием и полосой хода */
-        .grid.m-drum { display: flex; gap: 16px; overflow-x: auto; scroll-snap-type: x mandatory;
-                       padding: 6px 2px 18px; cursor: grab; }
-        .grid.m-drum.hauling { cursor: grabbing; scroll-snap-type: none; }
-        .grid.m-drum.hauling .work { pointer-events: none; }
-        .grid.m-drum .work { flex: none; width: min(340px, 78vw); scroll-snap-align: center;
-                             transition: transform .3s ease, opacity .3s ease, border-color .2s; }
-        .grid.m-drum .work.mid { transform: translateY(-6px) scale(1.03);
-                                 border-color: color-mix(in srgb, var(--ac) 55%, transparent); }
-        .grid.m-drum .work.far { opacity: .68; }
-        .rail { position: relative; height: 4px; margin: 2px 2px 0; border-radius: 999px;
-                background: rgba(255,255,255,.07); overflow: hidden; }
-        .rail i { position: absolute; top: 0; bottom: 0; left: 0; border-radius: 999px;
-                  background: linear-gradient(90deg, var(--th),
-                              color-mix(in srgb, var(--th) 40%, transparent));
-                  box-shadow: 0 0 14px color-mix(in srgb, var(--th) 45%, transparent); }
-        .rail[hidden] { display: none; }
-
-        /* 3 · кладка: настоящий masonry на JS. Каждую карточку кладём в самую
+        /* Кладка: настоящий masonry на JS. Каждую карточку кладём в самую
            короткую колонку, поэтому в одной может быть 3, а в другой 5 —
            заполняем по фактической высоте, а не поровну. CSS-колонки
            (column-count) с высокими карточками и break-inside:avoid
@@ -12779,55 +12764,6 @@ def diy_page():
         .grid.m-mosaic .shot.none { aspect-ratio: 16 / 11; }
         .grid.m-mosaic .work:nth-child(3n+2) .shot.none { aspect-ratio: 4 / 5; }
         .grid.m-mosaic .work:nth-child(3n+3) .shot.none { aspect-ratio: 16 / 8; }
-
-        /* 4 · веер: боковые карточки уходят в перспективу */
-        .grid.m-fan { display: flex; gap: 26px; overflow-x: auto; scroll-snap-type: x mandatory;
-                      padding: 34px calc(50% - min(320px, 72vw) / 2) 40px;
-                      perspective: 1200px; scrollbar-width: none; cursor: grab; }
-        .grid.m-fan::-webkit-scrollbar { display: none; }
-        .grid.m-fan.hauling { cursor: grabbing; scroll-snap-type: none; }
-        .grid.m-fan.hauling .work { pointer-events: none; }
-        .grid.m-fan .work { flex: none; width: min(320px, 72vw); scroll-snap-align: center;
-                            background: linear-gradient(160deg, #141d2e, #0a1019);
-                            transition: transform .25s ease, opacity .25s ease; will-change: transform; }
-        /* Тень под веером: карточка в середине стоит на «полу» */
-        .grid.m-fan .work::after { content: ""; position: absolute; left: 10%; right: 10%; bottom: -26px;
-                                   height: 26px; border-radius: 50%; pointer-events: none;
-                                   background: radial-gradient(50% 100% at 50% 0%,
-                                     rgba(0,0,0,.55), transparent 70%); }
-
-        /* 5 · соты: ряды сцеплены между собой, как настоящие */
-        .grid.m-hex { display: flex; flex-wrap: wrap; gap: 10px 8px; justify-content: center;
-                      padding: 16px 0 40px; }
-        .grid.m-hex .hex { position: relative; width: 210px; height: 240px; cursor: pointer;
-                           margin-bottom: -58px;
-                           clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
-                           background: linear-gradient(160deg, rgba(25,32,48,.95), rgba(10,15,26,.95));
-                           display: grid; place-items: center; text-align: center; padding: 30px 20px;
-                           transition: transform .22s, filter .22s; }
-        .grid.m-hex .hex:nth-child(even) { margin-top: 62px; }
-        .grid.m-hex .hex:hover { transform: translateY(-6px) scale(1.04); z-index: 3; }
-        .grid.m-hex .hex .fill { position: absolute; inset: 0; background: center/cover no-repeat;
-                                 opacity: .3; filter: saturate(1.1); transition: opacity .22s; }
-        .grid.m-hex .hex:hover .fill { opacity: .5; }
-        .grid.m-hex .hex .glow { position: absolute; inset: 0;
-                                 background: radial-gradient(70% 60% at 50% 0%, var(--ac), transparent 70%);
-                                 opacity: .22; }
-        .grid.m-hex .hex .rim { position: absolute; inset: 0; z-index: 3; pointer-events: none;
-                                clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%,
-                                                   50% 0%, 50% 2%, 3% 26.2%, 3% 73.8%, 50% 98%,
-                                                   97% 73.8%, 97% 26.2%, 50% 2%);
-                                background: color-mix(in srgb, var(--ac) 55%, transparent); }
-        .grid.m-hex .hex .in { position: relative; z-index: 2; }
-        .grid.m-hex .hex b { display: block; font-size: .96rem; color: #f2f8ff; }
-        .grid.m-hex .hex span { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
-                                overflow: hidden; margin-top: 6px; color: #93a3b8;
-                                font-size: .68rem; line-height: 1.5; transition: -webkit-line-clamp .2s; }
-        .grid.m-hex .hex:hover span { -webkit-line-clamp: 5; color: #b9c8da; }
-        @media (max-width: 520px) {
-          .grid.m-hex .hex { width: 172px; height: 198px; padding: 24px 16px; margin-bottom: -46px; }
-          .grid.m-hex .hex:nth-child(even) { margin-top: 50px; }
-        }
         /* Цвет карточки задаётся в шапке кода строкой «цвет:», отсюда --ac. */
         .work { --ac: var(--pc); position: relative; display: flex; flex-direction: column;
                 overflow: hidden; background: rgba(25,32,48,.82);
@@ -13010,9 +12946,7 @@ def diy_page():
         <div class="shelfrow"><span class="lbl">полка</span>
           <div class="shelf" id="shelf"></div></div>
         <p class="shelf-hint" id="shelfhint"></p>
-        <div class="modes" id="modes"></div>
-        <section class="grid m-grid" id="grid"></section>
-        <div class="rail" id="rail" hidden><i></i></div>
+        <section class="grid m-mosaic" id="grid"></section>
         <p class="empty" id="empty" hidden>Пока пусто</p>
       </main>
 
@@ -13064,7 +12998,6 @@ def diy_page():
 
         const admin = () => canEdit && !asGuest;
 
-        let firstLoad = true;
         const load = async () => {
           const r = await fetch("/api/diy", { credentials: "same-origin" });
           const d = await r.json();
@@ -13074,7 +13007,6 @@ def diy_page():
           canEdit = !!d.can_edit;
           // Полка могла исчезнуть между заходами — тогда возвращаемся ко «всему»
           if (theme && !themes.some((t) => t.id === theme)) theme = "";
-          if (firstLoad) { mode = viewOf(theme); firstLoad = false; }
           draw();
         };
 
@@ -13164,35 +13096,16 @@ def diy_page():
            Сначала выбирается тематика, потом — как её листать. Разметка
            карточки общая, меняется раскладка и — у барабана, веера и сот —
            ещё и поведение. Для каждой полки свой запомненный вид. */
-        const MODES = [
-          ["Сетка", "m-grid"], ["Барабан", "m-drum"], ["Кладка", "m-mosaic"],
-          ["Веер", "m-fan"], ["Соты", "m-hex"],
-        ];
-        const ALL = { id: "", name: "Всё", color: "#2de2ff", view: 1,
+        /* Раньше тут было пять способов листать полку (сетка/барабан/
+           кладка/веер/соты) — оставили только кладку (настоящий masonry),
+           остальные виды и переключатель между ними убраны. */
+        const ALL = { id: "", name: "Всё", color: "#2de2ff",
                       hint: "все творения подряд, от свежих к старым" };
         let themes = [ALL];
         let theme = "";
-        let mode = 1;
-
-        /* Что выбрано, помним по полкам: {"": 1, "программы": 3, …} */
-        const VIEWS = "vgDiyViews";
-        let views = {};
-        try { views = JSON.parse(localStorage.getItem(VIEWS) || "{}") || {}; }
-        catch (e) { views = {}; }
         try { theme = localStorage.getItem("vgDiyShelf") || ""; } catch (e) { theme = ""; }
 
         const themeOf = (id) => themes.find((t) => t.id === id) || ALL;
-
-        /* Вид для полки: свой запомненный, иначе тот, что ей идёт. */
-        const viewOf = (id) => {
-          const saved = +views[id];
-          return saved >= 1 && saved <= MODES.length ? saved : themeOf(id).view;
-        };
-
-        const rememberView = () => {
-          views[theme] = mode;
-          try { localStorage.setItem(VIEWS, JSON.stringify(views)); } catch (e) { /* и ладно */ }
-        };
 
         const shotSrc = (w) => w.shot
           ? "/diy/asset/" + w.id + "/" + encodeURIComponent(w.shot)
@@ -13220,101 +13133,16 @@ def diy_page():
           if (on && on.scrollIntoView) on.scrollIntoView({ block: "nearest", inline: "nearest" });
         };
 
-        const drawModes = () => {
-          const nav = (mode === 2 || mode === 4)
-            ? '<span class="navs"><button data-step="-1" title="Назад">‹</button>' +
-              '<button data-step="1" title="Вперёд">›</button></span>'
-            : "";
-          $("modes").innerHTML = '<span class="lbl">вид</span>' +
-            MODES.map((m, i) =>
-              '<button data-mode="' + (i + 1) + '"' + (mode === i + 1 ? ' class="on"' : "") +
-              ' title="' + esc(m[0]) + '">' + (i + 1) + "</button>").join("") +
-            '<span class="name"><b>' + MODES[mode - 1][0] + "</b></span>" + nav;
-        };
-
-        /* Веер: чем дальше карточка от середины, тем сильнее повёрнута. */
-        const layFan = () => {
-          const grid = $("grid");
-          const mid = grid.scrollLeft + grid.clientWidth / 2;
-          grid.querySelectorAll(".work").forEach((el) => {
-            const c = el.offsetLeft + el.offsetWidth / 2;
-            const k = Math.max(-1.6, Math.min(1.6, (c - mid) / (el.offsetWidth * 1.15)));
-            el.style.transform = "rotateY(" + (-k * 34) + "deg) scale(" + (1 - Math.abs(k) * .16) + ")" +
-              " translateZ(" + (-Math.abs(k) * 90) + "px)";
-            el.style.opacity = String(1 - Math.abs(k) * .35);
-            // Средняя карточка стоит прямо и по ней можно кликать; боковые
-            // повёрнуты, и попасть в кнопку на них всё равно не выходит.
-            el.style.pointerEvents = Math.abs(k) < .4 ? "auto" : "none";
-          });
-        };
-
-        /* Барабан: подсвечиваем ту карточку, что сейчас в середине, и ведём
-           полосу хода под лентой. */
-        const layDrum = () => {
-          const grid = $("grid"), rail = $("rail");
-          const mid = grid.scrollLeft + grid.clientWidth / 2;
-          grid.querySelectorAll(".work").forEach((el) => {
-            const d = Math.abs(el.offsetLeft + el.offsetWidth / 2 - mid) / el.offsetWidth;
-            el.classList.toggle("mid", d < .5);
-            el.classList.toggle("far", d > 1.4);
-          });
-          const room = grid.scrollWidth - grid.clientWidth;
-          rail.firstElementChild.style.width =
-            (room > 4 ? 12 + (grid.scrollLeft / room) * 88 : 100) + "%";
-        };
-
-        const relay = () => { if (mode === 2) layDrum(); if (mode === 4) layFan(); };
-
-        const step = (dir) => {
-          const grid = $("grid");
-          const card = grid.querySelector(".work");
-          if (card) grid.scrollBy({ left: dir * (card.offsetWidth + 22), behavior: "smooth" });
-        };
-
-        /* Тянуть ленту мышью — на компьютере это удобнее, чем ловить полосу
-           прокрутки. Пока тянем, прилипание выключено, иначе лента дёргается. */
-        let haul = null;
-        const hauling = (grid) => {
-          grid.addEventListener("pointerdown", (e) => {
-            if (e.pointerType !== "mouse" || e.button !== 0) return;
-            haul = { x: e.clientX, at: grid.scrollLeft, moved: false };
-          });
-          grid.addEventListener("pointermove", (e) => {
-            if (!haul) return;
-            const by = e.clientX - haul.x;
-            if (!haul.moved && Math.abs(by) < 5) return;
-            haul.moved = true;
-            grid.classList.add("hauling");
-            grid.scrollLeft = haul.at - by;
-            relay();
-          });
-          const stop = () => {
-            if (!haul) return;
-            haul = null;
-            grid.classList.remove("hauling");
-          };
-          grid.addEventListener("pointerup", stop);
-          grid.addEventListener("pointerleave", stop);
-          grid.addEventListener("pointercancel", stop);
-          // Обычное колесо мыши крутит ленту вбок: вертикального хода у неё нет.
-          grid.addEventListener("wheel", (e) => {
-            if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
-            e.preventDefault();
-            grid.scrollLeft += e.deltaY;
-            relay();
-          }, { passive: false });
-        };
-
         /* Появление карточек по мере прокрутки. Наблюдатель заводится заново
            на каждую перерисовку — старые карточки к тому времени уже выкинуты. */
         let eye = null;
         const reveal = (grid) => {
           if (eye) { eye.disconnect(); eye = null; }
-          // В кладке карточки лежат внутри колонок, поэтому берём их не как
-          // прямых детей, а как потомков .work/.hex.
-          const cards = [...grid.querySelectorAll(".work, .hex")];
+          // Карточки лежат внутри колонок кладки, поэтому берём их не как
+          // прямых детей, а как потомков .work.
+          const cards = [...grid.querySelectorAll(".work")];
           const slow = matchMedia("(prefers-reduced-motion: reduce)").matches;
-          if (slow || !("IntersectionObserver" in window) || mode === 2 || mode === 4) return;
+          if (slow || !("IntersectionObserver" in window)) return;
           cards.forEach((el) => el.classList.add("up"));
           eye = new IntersectionObserver((rows) => {
             rows.forEach((r) => {
@@ -13354,7 +13182,6 @@ def diy_page():
         };
         let mosaicRaf = 0;
         const relayoutMosaic = () => {
-          if (mode !== 3) return;
           cancelAnimationFrame(mosaicRaf);
           mosaicRaf = requestAnimationFrame(() => layoutMosaic($("grid")));
         };
@@ -13368,27 +13195,9 @@ def diy_page():
             ? (theme ? "На этой полке пусто. Нажми «Добавить»."
                      : "Пока пусто. Нажми «Добавить» — и появится первая запись.")
             : (theme ? "На этой полке пока пусто" : "Пока пусто");
-          grid.className = "grid " + MODES[mode - 1][1];
-          $("rail").hidden = mode !== 2;
           drawShelf();
-          drawModes();
 
-          /* Соты: шестиугольники с названием и парой слов. */
-          if (mode === 5) {
-            grid.innerHTML = list.map((w) => {
-              const src = shotSrc(w);
-              return '<div class="hex" data-open="' + w.id + '"' +
-                (w.accent ? ' style="--ac:' + esc(w.accent) + '"' : "") + '>' +
-                (src ? '<div class="fill" style="background-image:url(' + src + ')"></div>' : "") +
-                '<div class="glow"></div><div class="rim"></div>' +
-                '<div class="in"><b>' + esc(w.title) + "</b>" +
-                "<span>" + esc(w.summary || "") + "</span></div></div>";
-            }).join("");
-            reveal(grid);
-            return;
-          }
-
-          grid.innerHTML = list.map((w, i) => {
+          grid.innerHTML = list.map((w) => {
             // Обложка: сперва картинка, названная в шапке кода, потом старая
             // загруженная обложка, и только если нет ни той ни другой — заглушка.
             const src = shotSrc(w);
@@ -13401,8 +13210,7 @@ def diy_page():
                   '<img src="' + src + '" alt="" loading="lazy">' +
                 '</div>'
               // Нет картинки — рисуем свою: градиент из цвета записи, косая
-              // штриховка и монограмма. Пустая плашка «без фото» смотрелась
-              // дырой, особенно в сотах.
+              // штриховка и монограмма.
               : '<div class="shot none" data-open="' + w.id + '">' +
                   '<span class="mono">' + esc((w.title || "?").trim().slice(0, 2)) + "</span>" +
                 "</div>";
@@ -13422,9 +13230,7 @@ def diy_page():
             const shelfColor = themeOf(w.kind).color;
             const style = ' style="--kc:' + esc(shelfColor) +
               (w.accent ? ";--ac:" + esc(w.accent) : "") + '"';
-            // В сетке первая закреплённая запись занимает две клетки
-            const wide = (mode === 1 && i === 0 && w.pinned) ? " wide" : "";
-            return '<article class="work' + (w.hidden ? " draft" : "") + wide + '"' + style + '>' + shot +
+            return '<article class="work' + (w.hidden ? " draft" : "") + '"' + style + '>' + shot +
               '<div class="body">' +
               (flags.length ? '<div class="flags">' + flags.join("") + "</div>" : "") +
               '<span class="kind">' + esc(w.kind) + "</span>" +
@@ -13436,59 +13242,26 @@ def diy_page():
               tools + "</div></article>";
           }).join("");
 
-          // Кладка: собираем карточки и раскладываем masonry-скриптом. Если
-          // на карточках есть картинки, их высота узнаётся только после
+          // Собираем карточки и раскладываем masonry-скриптом. Если на
+          // карточках есть картинки, их высота узнаётся только после
           // загрузки — тогда перекладываем ещё раз.
-          mosaicCards = [];
-          if (mode === 3) {
-            mosaicCards = [...grid.querySelectorAll(".work")];
-            layoutMosaic(grid);
-            grid.querySelectorAll(".work img").forEach((img) => {
-              if (!img.complete) img.addEventListener("load", relayoutMosaic, { once: true });
-            });
-          }
+          mosaicCards = [...grid.querySelectorAll(".work")];
+          layoutMosaic(grid);
+          grid.querySelectorAll(".work img").forEach((img) => {
+            if (!img.complete) img.addEventListener("load", relayoutMosaic, { once: true });
+          });
 
-          // Барабану и вееру нужна раскладка после отрисовки
-          grid.onscroll = null;
-          if (mode === 2 || mode === 4) {
-            grid.onscroll = relay;
-            requestAnimationFrame(relay);
-          }
           reveal(grid);
         };
 
-        // Тянуть мышью умеют обе горизонтальные ленты; вешаем один раз.
-        hauling($("grid"));
-
-        /* Переключение полки, вида и стрелки листания */
+        /* Переключение полки */
         $("shelf").addEventListener("click", (e) => {
           const b = e.target.closest("[data-shelf]");
           if (!b) return;
           theme = b.dataset.shelf;
           try { localStorage.setItem("vgDiyShelf", theme); } catch (err) { /* и ладно */ }
-          mode = viewOf(theme);
-          $("grid").scrollLeft = 0;
           drawGrid();
         });
-        $("modes").addEventListener("click", (e) => {
-          const m = e.target.closest("[data-mode]");
-          if (m) {
-            mode = +m.dataset.mode;
-            rememberView();
-            $("grid").scrollLeft = 0;
-            drawGrid();
-            return;
-          }
-          const s = e.target.closest("[data-step]");
-          if (s) step(+s.dataset.step);
-        });
-        addEventListener("keydown", (e) => {
-          if (e.target.matches("input, textarea, select")) return;
-          if (mode !== 2 && mode !== 4) return;
-          if (e.key === "ArrowRight") step(1);
-          if (e.key === "ArrowLeft") step(-1);
-        });
-        addEventListener("resize", relay);
         const draw = () => { drawBar(); drawGrid(); };
 
         /* ── окно правки ───────────────────────────────────────────── */
