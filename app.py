@@ -4410,18 +4410,23 @@ def cabinet():
                 <span class="zbot"><i>перебросить файлы и текст между машинами</i><em aria-hidden="true">⟶</em></span>
               </a>
 
-              <a class="z" href="/neuro" style="--a:#7b6bff">
+              <a class="z" href="/neuro" style="--a:#9aa3c9">
                 <span class="ztop">
                   <span class="z-ic">
                     <svg viewBox="0 0 48 40" aria-hidden="true">
+                      <defs>
+                        <linearGradient id="neuro-cloud" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0" stop-color="#ff3d9a"/><stop offset="1" stop-color="#76c900"/>
+                        </linearGradient>
+                      </defs>
                       <path d="M22 7c-6 0-9 3.4-9 7.6 0 1.4.4 2.6 1.1 3.7-1.9 1-3.1 2.8-3.1 5 0 3.5 3 6.2 7 6.2"
-                            fill="none" stroke="#4d6bfe" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+                            fill="none" stroke="url(#neuro-cloud)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
                       <path d="M26 7c6 0 9 3.4 9 7.6 0 1.4-.4 2.6-1.1 3.7 1.9 1 3.1 2.8 3.1 5 0 3.5-3 6.2-7 6.2"
                             fill="none" stroke="#d97757" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
-                      <path d="M24 8v24" stroke="#8b7bff" stroke-width="2" stroke-opacity=".5"/>
-                      <circle cx="15" cy="14" r="1.8" fill="#8b7bff"/>
+                      <path d="M24 8v24" stroke="#cdd6ee" stroke-width="2" stroke-opacity=".4"/>
+                      <circle cx="15" cy="14" r="1.8" fill="#ff3d9a"/>
                       <circle cx="33" cy="14" r="1.8" fill="#f0a184"/>
-                      <circle cx="15" cy="26" r="1.8" fill="#4d6bfe"/>
+                      <circle cx="15" cy="26" r="1.8" fill="#76c900"/>
                       <circle cx="33" cy="26" r="1.8" fill="#d97757"/>
                     </svg>
                   </span>
@@ -14041,6 +14046,8 @@ AI_MSGS_MAX = 600          # столько реплик на чат
 AI_REPLY_TOKENS = 1400
 AI_TIMEOUT = 120
 AI_IMG_MAX = 4 * 1024 * 1024
+AI_PDF_MAX = 8 * 1024 * 1024        # исходный файл
+AI_PDF_TEXT_MAX = 6000              # столько текста из PDF отдаём модели
 AI_SYS_PROMPT = ("Ты дружелюбный и толковый собеседник на личном сайте. "
                  "Отвечай по-русски, живо и по делу. Просят код — давай рабочий "
                  "и с коротким пояснением.")
@@ -14091,7 +14098,49 @@ def _ai_find(chat_id):
 def _ai_card(c):
     return {"id": c["id"], "title": c.get("title") or "Новый чат",
             "updated": c.get("updated", 0), "count": len(c.get("messages", [])),
-            "model": c.get("model", OPENROUTER_MODEL), "folder": c.get("folder", "")}
+            "model": c.get("model", OPENROUTER_MODEL), "folder": c.get("folder", ""),
+            "pinned": bool(c.get("pinned"))}
+
+
+def _ai_smart_title(text):
+    """Короткий заголовок из первой реплики: без markdown-мусора, обрезан по
+    границе слова, а не насрединеслова."""
+    t = re.sub(r"[`*_#>\[\]]", "", (text or "")).strip()
+    t = re.sub(r"\s+", " ", t)
+    if not t:
+        return ""
+    if len(t) <= 60:
+        return t
+    cut = t[:60]
+    sp = cut.rfind(" ")
+    if sp > 30:
+        cut = cut[:sp]
+    return cut.strip() + "…"
+
+
+def _ai_pdf_extract(raw):
+    """Вытаскивает текст из PDF для моделей без своего PDF-чтения. Ограничено
+    по длине — иначе один документ съест весь контекст разговора."""
+    try:
+        from pypdf import PdfReader
+        reader = PdfReader(io.BytesIO(raw))
+        parts, total = [], 0
+        for page in reader.pages:
+            try:
+                t = page.extract_text() or ""
+            except Exception:
+                t = ""
+            if t:
+                parts.append(t)
+                total += len(t)
+            if total >= AI_PDF_TEXT_MAX:
+                break
+        text = "\n".join(parts).strip()
+        if len(text) > AI_PDF_TEXT_MAX:
+            text = text[:AI_PDF_TEXT_MAX].rstrip() + "…[обрезано]"
+        return text
+    except Exception:
+        return ""
 
 
 def _ai_find_folder(fid):
@@ -14153,7 +14202,8 @@ def ai_chat_get(chat_id):
         if not c:
             return jsonify(error="Чат не найден."), 404
         msgs = [{"role": m.get("role"), "text": m.get("text", ""),
-                 "img": m.get("img") or "", "ts": m.get("ts", 0)}
+                 "img": m.get("img") or "", "model": m.get("model") or "",
+                 "pdf_name": m.get("pdf_name") or "", "ts": m.get("ts", 0)}
                 for m in c.get("messages", [])]
         title = c.get("title") or "Новый чат"
     return jsonify(id=chat_id, title=title, messages=msgs)
@@ -14165,7 +14215,7 @@ def ai_chat_new():
     cid = uuid.uuid4().hex[:12]
     now = time.time()
     chat = {"id": cid, "title": "", "model": OPENROUTER_MODEL, "folder": "",
-            "created": now, "updated": now, "messages": []}
+            "pinned": False, "created": now, "updated": now, "messages": []}
     with ai_lock:
         ai_data["chats"].insert(0, chat)
         if len(ai_data["chats"]) > AI_CHATS_MAX:
@@ -14192,8 +14242,11 @@ def ai_chat_rename(chat_id):
             if fid and not _ai_find_folder(fid):
                 return jsonify(error="Папка не найдена."), 404
             c["folder"] = fid
+        if "pinned" in payload:
+            c["pinned"] = bool(payload.get("pinned"))
         _ai_write()
-    return jsonify(ok=True, title=c.get("title") or "Новый чат", folder=c.get("folder", ""))
+    return jsonify(ok=True, title=c.get("title") or "Новый чат",
+                   folder=c.get("folder", ""), pinned=bool(c.get("pinned")))
 
 
 @app.get("/api/ai/folder")
@@ -14277,67 +14330,14 @@ def ai_img_api(img_id):
     return send_file(path, mimetype="image/jpeg")
 
 
-@app.post("/api/ai/chat/<chat_id>/send")
-@login_required
-def ai_chat_send(chat_id):
-    """Принимает реплику (текст + необязательное фото), шлёт разговор в
-    OpenRouter и отдаёт ответ потоком (SSE). Пользовательскую реплику
-    сохраняем СРАЗУ: даже если модель сегодня молчит из-за лимита, написанное
-    не пропадёт и текст продолжит работать в следующий раз."""
-    if not _ai_ready():
-        return jsonify(error="Ключ OpenRouter на сервере не задан."), 503
+def _ai_run_stream(chat_id, ctx, use_vision, img_b64, requested_model, model):
+    """Строит сообщения для OpenRouter и возвращает функцию-генератор SSE.
+    Общий код для отправки нового сообщения и для «Перегенерировать».
 
-    payload = request.get_json(silent=True) or {}
-    text = (payload.get("text") or "").strip()[:AI_TEXT_MAX]
-    image_data = payload.get("image") or ""
-    if not text and not image_data:
-        return jsonify(error="Пустое сообщение."), 400
-
-    use_vision = bool(image_data) and bool(OPENROUTER_VISION_MODEL)
-    img_id, img_b64 = None, None
-    if image_data:
-        m = re.match(r"^data:image/(?:png|jpe?g|webp);base64,(.+)$",
-                     image_data, re.I)
-        if m:
-            try:
-                raw = base64.b64decode(m.group(1), validate=True)
-            except Exception:
-                raw = b""
-            if raw and len(raw) <= AI_IMG_MAX:
-                img_id = uuid.uuid4().hex[:16] + ".jpg"
-                try:
-                    with open(_ai_img_path(img_id), "wb") as fh:
-                        fh.write(raw)
-                    img_b64 = base64.b64encode(raw).decode("ascii")
-                except OSError:
-                    img_id, img_b64 = None, None
-
-    with ai_lock:
-        c = _ai_find(chat_id)
-        if not c:
-            return jsonify(error="Чат не найден."), 404
-        umsg = {"role": "user", "text": text, "ts": time.time()}
-        if img_id:
-            umsg["img"] = img_id
-        c.setdefault("messages", []).append(umsg)
-        if not c.get("title"):
-            c["title"] = text[:60] or "Фото"
-        c["updated"] = time.time()
-        if len(c["messages"]) > AI_MSGS_MAX:
-            for old in c["messages"][:-AI_MSGS_MAX]:
-                if old.get("img"):
-                    try:
-                        os.remove(_ai_img_path(old["img"]))
-                    except OSError:
-                        pass
-            c["messages"] = c["messages"][-AI_MSGS_MAX:]
-        _ai_write()
-        ctx = list(c["messages"][-AI_CTX_MSGS:])
-    requested_model = (payload.get("model") or "").strip()
-    model = OPENROUTER_VISION_MODEL if use_vision else (requested_model or OPENROUTER_MODEL)
-
-    # Собираем разговор в формате OpenAI. Картинку прикрепляем только к самой
-    # последней реплике и только когда есть vision-модель.
+    Если клиент оборвал соединение (кнопка «Стоп»), генератор получает
+    GeneratorExit прямо на текущем yield — ловим это в finally и всё равно
+    сохраняем то, что успели получить: иначе после «Стоп» история чата
+    разъезжалась бы с тем, что человек реально увидел на экране."""
     api_msgs = [{"role": "system", "content": AI_SYS_PROMPT}]
     last = ctx[-1] if ctx else None
     for msg in ctx:
@@ -14350,6 +14350,12 @@ def ai_chat_send(chat_id):
             api_msgs.append({"role": "user", "content": content})
         else:
             body = msg.get("text", "")
+            if msg.get("pdf_text"):
+                # PDF когда-то приложили к этой реплике — модель без своего
+                # чтения PDF получает вытащенный текст прямо в сообщении,
+                # так разговор про документ продолжается и на следующих ходах.
+                body = (f"[Файл: {msg.get('pdf_name') or 'документ.pdf'}]\n"
+                        f"{msg['pdf_text']}\n\n{body}").strip()
             if not body and msg.get("img"):
                 body = "[фото]"
             api_msgs.append({"role": msg.get("role", "user"), "content": body})
@@ -14361,12 +14367,12 @@ def ai_chat_send(chat_id):
         "max_tokens": AI_REPLY_TOKENS,
     }).encode("utf-8")
 
-    def save_reply(full):
+    def save_reply(full, used_model):
         with ai_lock:
             cc = _ai_find(chat_id)
             if cc is not None:
                 cc.setdefault("messages", []).append(
-                    {"role": "assistant", "text": full, "ts": time.time()})
+                    {"role": "assistant", "text": full, "model": used_model, "ts": time.time()})
                 cc["updated"] = time.time()
                 _ai_write()
 
@@ -14411,10 +14417,10 @@ def ai_chat_send(chat_id):
                 # в лимит: пробуем следующую из списка, пока они есть.
                 if e.code in (400, 402, 404, 429) and candidate != candidates[-1]:
                     continue
-                msg = _ai_http_error(e.code) + f" (модель {candidate})"
+                msg_txt = _ai_http_error(e.code) + f" (модель {candidate})"
                 if detail:
-                    msg += " — " + detail[:200]
-                yield _sse({"error": msg})
+                    msg_txt += " — " + detail[:200]
+                yield _sse({"error": msg_txt})
                 return
             except urlerror.URLError:
                 yield _sse({"error": "OpenRouter не отвечает. Попробуйте позже."})
@@ -14427,7 +14433,18 @@ def ai_chat_send(chat_id):
                 with _ai_active_lock:
                     _ai_active_model = chosen
             yield _sse({"model": chosen})
+
         acc = []
+        saved = {"done": False}
+
+        def save_once():
+            if saved["done"]:
+                return
+            full = "".join(acc).strip()
+            if full:
+                saved["done"] = True
+                save_reply(full, chosen)
+
         try:
             for rawline in resp:
                 line = rawline.decode("utf-8", "replace").strip()
@@ -14452,13 +14469,146 @@ def ai_chat_send(chat_id):
                 resp.close()
             except Exception:
                 pass
+            save_once()   # доходит и через «Стоп» (GeneratorExit), и штатно
+
         full = "".join(acc).strip()
         if full:
-            save_reply(full)
             yield _sse({"done": True, "text": full})
         else:
             yield _sse({"error": "Модель промолчала — попробуйте ещё раз."})
 
+    return gen
+
+
+@app.post("/api/ai/chat/<chat_id>/send")
+@login_required
+def ai_chat_send(chat_id):
+    """Принимает реплику (текст + необязательное фото или PDF), шлёт разговор
+    в OpenRouter и отдаёт ответ потоком (SSE). Пользовательскую реплику
+    сохраняем СРАЗУ: даже если модель сегодня молчит из-за лимита, написанное
+    не пропадёт и текст продолжит работать в следующий раз."""
+    if not _ai_ready():
+        return jsonify(error="Ключ OpenRouter на сервере не задан."), 503
+
+    payload = request.get_json(silent=True) or {}
+    text = (payload.get("text") or "").strip()[:AI_TEXT_MAX]
+    image_data = payload.get("image") or ""
+    pdf_data = payload.get("pdf") or ""
+    pdf_name = (payload.get("pdf_name") or "").strip()[:120]
+    if not text and not image_data and not pdf_data:
+        return jsonify(error="Пустое сообщение."), 400
+
+    use_vision = bool(image_data) and bool(OPENROUTER_VISION_MODEL)
+    img_id, img_b64 = None, None
+    if image_data:
+        m = re.match(r"^data:image/(?:png|jpe?g|webp);base64,(.+)$",
+                     image_data, re.I)
+        if m:
+            try:
+                raw = base64.b64decode(m.group(1), validate=True)
+            except Exception:
+                raw = b""
+            if raw and len(raw) <= AI_IMG_MAX:
+                img_id = uuid.uuid4().hex[:16] + ".jpg"
+                try:
+                    with open(_ai_img_path(img_id), "wb") as fh:
+                        fh.write(raw)
+                    img_b64 = base64.b64encode(raw).decode("ascii")
+                except OSError:
+                    img_id, img_b64 = None, None
+
+    pdf_text = ""
+    if pdf_data:
+        m = re.match(r"^data:application/pdf;base64,(.+)$", pdf_data, re.I)
+        if m:
+            try:
+                raw = base64.b64decode(m.group(1), validate=True)
+            except Exception:
+                raw = b""
+            if raw and len(raw) <= AI_PDF_MAX:
+                pdf_text = _ai_pdf_extract(raw)
+        if not pdf_text:
+            return jsonify(error="Не удалось прочитать текст из PDF."), 400
+
+    with ai_lock:
+        c = _ai_find(chat_id)
+        if not c:
+            return jsonify(error="Чат не найден."), 404
+        umsg = {"role": "user", "text": text, "ts": time.time()}
+        if img_id:
+            umsg["img"] = img_id
+        if pdf_text:
+            umsg["pdf_name"] = pdf_name or "документ.pdf"
+            umsg["pdf_text"] = pdf_text
+        c.setdefault("messages", []).append(umsg)
+        if not c.get("title"):
+            c["title"] = (_ai_smart_title(text)
+                          or (("PDF: " + pdf_name) if pdf_name else "")
+                          or "Фото")
+        c["updated"] = time.time()
+        if len(c["messages"]) > AI_MSGS_MAX:
+            for old in c["messages"][:-AI_MSGS_MAX]:
+                if old.get("img"):
+                    try:
+                        os.remove(_ai_img_path(old["img"]))
+                    except OSError:
+                        pass
+            c["messages"] = c["messages"][-AI_MSGS_MAX:]
+        _ai_write()
+        ctx = list(c["messages"][-AI_CTX_MSGS:])
+        chat_title = c.get("title") or "Новый чат"
+
+    requested_model = (payload.get("model") or "").strip()
+    model = OPENROUTER_VISION_MODEL if use_vision else (requested_model or OPENROUTER_MODEL)
+    gen = _ai_run_stream(chat_id, ctx, use_vision, img_b64, requested_model, model)
+
+    def with_title():
+        # Заголовок чата на первой реплике вычисляется здесь же, на сервере
+        # (автогенерация из текста) — отдаём его первым кадром, чтобы список
+        # слева в браузере обновился сразу, а не только после перезагрузки.
+        yield _sse({"title": chat_title})
+        yield from gen()
+
+    return Response(with_title(), mimetype="text/event-stream",
+                    headers={"Cache-Control": "no-store",
+                             "X-Accel-Buffering": "no"})
+
+
+@app.post("/api/ai/chat/<chat_id>/regenerate")
+@login_required
+def ai_chat_regenerate(chat_id):
+    """Стирает последний ответ нейронки и просит его заново — тем же вопросом
+    (тем же текстом/фото/PDF, что уже лежат в истории)."""
+    if not _ai_ready():
+        return jsonify(error="Ключ OpenRouter на сервере не задан."), 503
+    payload = request.get_json(silent=True) or {}
+    requested_model = (payload.get("model") or "").strip()
+
+    with ai_lock:
+        c = _ai_find(chat_id)
+        if not c:
+            return jsonify(error="Чат не найден."), 404
+        msgs = c.get("messages", [])
+        if msgs and msgs[-1].get("role") == "assistant":
+            msgs.pop()
+            c["updated"] = time.time()
+            _ai_write()
+        if not msgs or msgs[-1].get("role") != "user":
+            return jsonify(error="Нечего перегенерировать — нет вопроса."), 400
+        ctx = list(msgs[-AI_CTX_MSGS:])
+        last_img = ctx[-1].get("img") if ctx else None
+
+    img_b64 = None
+    use_vision = bool(last_img) and bool(OPENROUTER_VISION_MODEL)
+    if use_vision:
+        try:
+            with open(_ai_img_path(last_img), "rb") as fh:
+                img_b64 = base64.b64encode(fh.read()).decode("ascii")
+        except OSError:
+            use_vision, img_b64 = False, None
+
+    model = OPENROUTER_VISION_MODEL if use_vision else (requested_model or OPENROUTER_MODEL)
+    gen = _ai_run_stream(chat_id, ctx, use_vision, img_b64, requested_model, model)
     return Response(gen(), mimetype="text/event-stream",
                     headers={"Cache-Control": "no-store",
                              "X-Accel-Buffering": "no"})
@@ -14483,7 +14633,7 @@ def neuro_page():
       <title>Нейронки · vitazgio.ru</title>
       <style>
         :root { color-scheme:dark; --line:rgba(255,255,255,.1);
-                --mm1:#ff3d9a; --mm2:#b44dff;   /* MiniMax: малиново-фиолетовый */
+                --mm1:#ff3d9a; --mm2:#ff8fc4;   /* MiniMax: розовый */
                 --nv1:#76c900; --nv2:#39ff14;   /* NVIDIA: зелёный */
                 --cl1:#d97757; --cl2:#f0a184;   /* Claude: оранжевый */
                 --ac:var(--mm1); --ac2:var(--mm2); }
@@ -14623,7 +14773,7 @@ def ai_page():
                 --ac:#4d6bfe; --ac2:#8b7bff; --ok:#63f5ad; --warm:#ffd84a;
                 --panel:rgba(12,17,32,.72); }
         /* Каждая нейронка со своим цветом — как вкладки сверху */
-        html[data-net="minimax"] { --ac:#ff3d9a; --ac2:#b44dff; }
+        html[data-net="minimax"] { --ac:#ff3d9a; --ac2:#ff8fc4; }
         html[data-net="nvidia"]  { --ac:#76c900; --ac2:#39ff14; }
         * { box-sizing:border-box; }
         html, body { height:100%; margin:0; }
@@ -14651,10 +14801,35 @@ def ai_page():
         .dot.on { background:var(--ok); box-shadow:0 0 9px var(--ok); }
         .dot.off { background:var(--warm); }
 
-        .wrap { flex:1; min-height:0; display:grid; grid-template-columns:264px 1fr; }
-        .aside { border-right:1px solid var(--line); background:var(--panel);
-                 display:flex; flex-direction:column; min-height:0; }
+        .wrap { flex:1; min-height:0; display:flex; }
+        .aside { width:317px; flex:none; border-right:1px solid var(--line); background:var(--panel);
+                 display:flex; flex-direction:column; min-height:0;
+                 transition:width .18s ease, opacity .18s ease; }
+        .wrap.collapsed .aside { width:0; opacity:0; overflow:hidden; border-right:0; pointer-events:none; }
+        .sidebtn { width:40px; height:40px; flex:none; display:grid; place-items:center;
+                   color:var(--muted); cursor:pointer; border:1px solid var(--line); border-radius:11px;
+                   background:rgba(255,255,255,.03); transition:.16s; }
+        .sidebtn:hover { color:#fff; border-color:rgba(255,255,255,.25); background:rgba(255,255,255,.08); }
+        .sidebtn svg { width:18px; height:18px; }
+        @media (max-width:760px) { .sidebtn { display:none; } }
         .newrow { display:flex; gap:7px; margin:12px; }
+        .search-row { margin:0 12px 10px; position:relative; }
+        .search-row input { width:100%; height:36px; padding:0 32px 0 11px; color:#f4f7ff;
+                            font:400 .78rem inherit; border:1px solid var(--line); border-radius:10px;
+                            outline:none; background:rgba(4,9,20,.55); }
+        .search-row input:focus { border-color:var(--ac); }
+        .search-row input::placeholder { color:#5c6780; }
+        .search-row .sic { position:absolute; right:9px; top:50%; transform:translateY(-50%);
+                           color:var(--muted); pointer-events:none; }
+        .search-row .sic svg { width:15px; height:15px; display:block; }
+        .search-row .sclear { position:absolute; right:6px; top:50%; transform:translateY(-50%);
+                              width:22px; height:22px; display:none; place-items:center; cursor:pointer;
+                              color:var(--muted); border-radius:6px; }
+        .search-row.filled .sic { display:none; }
+        .search-row.filled .sclear { display:grid; }
+        .search-row .sclear:hover { color:#fff; background:rgba(255,255,255,.1); }
+        .pin-sect { padding:2px 10px 4px; color:var(--muted); font-size:.63rem;
+                    letter-spacing:.08em; text-transform:uppercase; }
         .newbtn { flex:1; height:44px; display:flex; align-items:center;
                   justify-content:center; gap:9px; cursor:pointer; color:#eaf0ff;
                   font:700 .82rem inherit; border:1px solid rgba(77,107,254,.4);
@@ -14714,6 +14889,8 @@ def ai_page():
         .row .ic:hover { color:#fff; background:rgba(255,255,255,.1); }
         .row .ic.x:hover { color:#ff8a8a; background:rgba(255,90,90,.12); }
         .row .ic svg { width:13px; height:13px; display:block; }
+        .row .ic.pin.on { color:var(--warm); opacity:1; }
+        .row.pinned .ic.pin { opacity:1; color:var(--warm); }
         .empty-list { color:var(--muted); font-size:.72rem; text-align:center; padding:24px 14px; line-height:1.6; }
 
         .fmenu { position:absolute; z-index:30; min-width:168px; padding:6px; color:#eaf0ff;
@@ -14750,12 +14927,28 @@ def ai_page():
         .msg .tools { display:flex; gap:5px; margin-top:4px; opacity:0; transition:.15s; }
         .msg:hover .tools, .msg .tools.stay { opacity:1; }
         .msg.me .tools { justify-content:flex-end; }
-        .copy-btn { flex:none; display:flex; align-items:center; gap:5px; height:24px; padding:0 8px;
+        .copy-btn, .note-btn { flex:none; display:flex; align-items:center; gap:5px; height:24px; padding:0 8px;
                     cursor:pointer; color:var(--muted); font:600 .64rem inherit; letter-spacing:.02em;
                     border:1px solid var(--line); border-radius:7px; background:rgba(255,255,255,.03); }
-        .copy-btn:hover { color:#fff; border-color:rgba(255,255,255,.28); background:rgba(255,255,255,.08); }
+        .copy-btn:hover, .note-btn:hover { color:#fff; border-color:rgba(255,255,255,.28); background:rgba(255,255,255,.08); }
         .copy-btn.done { color:var(--ok); border-color:rgba(99,245,173,.4); }
-        .copy-btn svg { width:12px; height:12px; }
+        .copy-btn svg, .note-btn svg { width:12px; height:12px; }
+        .regen-btn { flex:none; display:flex; align-items:center; gap:5px; height:24px; padding:0 8px;
+                    cursor:pointer; color:var(--muted); font:600 .64rem inherit; letter-spacing:.02em;
+                    border:1px solid var(--line); border-radius:7px; background:rgba(255,255,255,.03); }
+        .regen-btn:hover { color:#fff; border-color:rgba(255,255,255,.28); background:rgba(255,255,255,.08); }
+        .regen-btn svg { width:12px; height:12px; }
+        .pdf-chip { display:flex; align-items:center; gap:8px; padding:8px 10px; margin:0 0 8px;
+                    border-radius:9px; font-size:.76rem; color:#cfd8ee;
+                    border:1px solid var(--line); background:rgba(255,255,255,.04); }
+        .pdf-chip svg { flex:none; width:17px; height:17px; color:var(--ac); }
+        .pdf-chip span { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        .pdf-chip button { flex:none; cursor:pointer; color:var(--muted); background:none; border:0; font-size:1rem; }
+        .pdf-chip button:hover { color:#ff8a8a; }
+        .msg .pdf-tag { display:inline-flex; align-items:center; gap:6px; margin:0 0 8px; padding:5px 9px;
+                        border-radius:8px; font-size:.72rem; color:#b9c6dc;
+                        border:1px solid var(--line); background:rgba(255,255,255,.04); }
+        .msg .pdf-tag svg { width:13px; height:13px; flex:none; }
         .msg .txt p:first-child { margin-top:0; } .msg .txt p:last-child { margin-bottom:0; }
         .txt pre { margin:9px 0; padding:11px 13px; overflow-x:auto; border-radius:10px;
                    background:rgba(3,7,18,.7); border:1px solid var(--line);
@@ -14805,6 +14998,7 @@ def ai_page():
                 background:linear-gradient(160deg,#8fa4ff,#4d6bfe); transition:.15s; }
         .send:hover { filter:brightness(1.08); } .send:disabled { opacity:.4; cursor:not-allowed; }
         .send svg { width:20px; height:20px; }
+        .send.stopmode { background:linear-gradient(160deg,#ff9b9b,#ff4d4d); }
         .note { max-width:820px; margin:8px auto 0; color:#5c6780; font-size:.66rem; text-align:center; line-height:1.5; }
 
         .scrim { display:none; }
@@ -14826,6 +15020,9 @@ def ai_page():
         <a class="back" href="/cabinet" title="В кабинет" aria-label="В кабинет"><svg viewBox="0 0 24 24" fill="none"><path d="M19 12H5m0 0 6-6m-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
         <button class="burger" id="burger" type="button" aria-label="Список чатов"><svg viewBox="0 0 24 24" fill="none"><path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
         <div class="brand"><b id="brand-name">Нейросеть</b><span id="brand-sub"><i class="dot"></i>проверяю связь…</span></div>
+        <button class="sidebtn" id="sidebtn" type="button" title="Свернуть список чатов" aria-label="Свернуть список чатов">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9 4v16"/></svg>
+        </button>
       </div>
 
       <div class="wrap" id="wrap">
@@ -14840,6 +15037,11 @@ def ai_page():
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/><path d="M12 12v5M9.5 14.5h5"/></svg>
             </button>
           </div>
+          <div class="search-row" id="search-row">
+            <input type="text" id="search" placeholder="Поиск по чатам…" autocomplete="off">
+            <span class="sic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg></span>
+            <span class="sclear" id="search-clear" title="Очистить">✕</span>
+          </div>
           <div class="list" id="list"></div>
         </aside>
 
@@ -14851,6 +15053,10 @@ def ai_page():
               <label class="attach" id="attach" title="Прикрепить фото" hidden>
                 <svg viewBox="0 0 24 24" fill="none"><path d="M21 12.5 12.5 21a5 5 0 0 1-7-7l8-8a3.5 3.5 0 0 1 5 5l-8 8a2 2 0 0 1-3-3l7.5-7.5" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>
                 <input type="file" id="file" accept="image/*" hidden>
+              </label>
+              <label class="attach" id="attach-pdf" title="Прикрепить PDF">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/></svg>
+                <input type="file" id="filepdf" accept="application/pdf" hidden>
               </label>
               <textarea id="text" rows="1" placeholder="Напишите сообщение…" aria-label="Сообщение"></textarea>
               <button class="send" id="send" type="submit" title="Отправить" aria-label="Отправить">
@@ -14869,15 +15075,21 @@ def ai_page():
         const $ = (id) => document.getElementById(id);
         const chat = $("chat"), list = $("list"), wrap = $("wrap");
         const PRESET = window.__PRESET__ || "";
-        // Две буквы для аватарки собеседника: по названию модели
-        const AVA = /minimax/i.test(PRESET) ? "MM"
-                  : /nvidia|nemotron/i.test(PRESET) ? "NV"
-                  : /qwen/i.test(PRESET) ? "QW"
-                  : /gemma|google/i.test(PRESET) ? "GM"
-                  : /llama|meta/i.test(PRESET) ? "LL"
-                  : /deepseek/i.test(PRESET) ? "DS" : "AI";
+        // Две буквы для аватарки собеседника: по названию МОДЕЛИ, ОТВЕТИВШЕЙ
+        // именно на это сообщение (а не по текущей вкладке) — иначе при
+        // переключении вкладок аватарки старых сообщений скакали бы.
+        const avaFor = (m) => {
+          const s = m || PRESET;
+          return /minimax/i.test(s) ? "MM"
+               : /nvidia|nemotron/i.test(s) ? "NV"
+               : /qwen/i.test(s) ? "QW"
+               : /gemma|google/i.test(s) ? "GM"
+               : /llama|meta/i.test(s) ? "LL"
+               : /deepseek/i.test(s) ? "DS" : "AI";
+        };
         let chats = [], folders = [], curId = null, busy = false, ready = false, vision = false, modelName = PRESET;
-        let pendImg = null;
+        let pendImg = null, pendPdf = null, pendPdfName = "";
+        let curAbort = null, searchQ = "";
         let foldedSet = new Set();
         try { foldedSet = new Set(JSON.parse(localStorage.getItem("aiFolded") || "[]")); } catch (e) {}
         const saveFolded = () => { try { localStorage.setItem("aiFolded", JSON.stringify([...foldedSet])); } catch (e) {} };
@@ -14885,6 +15097,12 @@ def ai_page():
         const ICON_COPY = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>';
         const ICON_CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
         const ICON_MOVE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>';
+        const ICON_PIN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v6.5M8 8.5h8l1.5 5H6.5l1.5-5ZM12 13.5V22"/></svg>';
+        const ICON_REGEN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 4v5h-5"/></svg>';
+        const ICON_NOTE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v4a1 1 0 0 0 1 1h4"/><path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2Z"/><path d="M9 13h6M9 17h6"/></svg>';
+        const ICON_STOP = '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>';
+        const ICON_SEND = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12h15m0 0-6-6m6 6-6 6"/></svg>';
+        const ICON_PDF = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/><path d="M9.5 13.2h1.1c.7 0 1.2.5 1.2 1.2s-.5 1.2-1.2 1.2H9.5v2M13.8 17.6v-4.4h1c1 0 1.7.9 1.7 2.2s-.7 2.2-1.7 2.2h-1ZM17.5 17.6v-4.4h2M17.5 15.4h1.6"/></svg>';
 
         const copyMsg = async (btn, text) => {
           if (!text) return;
@@ -14937,14 +15155,27 @@ def ai_page():
 
         const scrollDown = () => { chat.scrollTop = chat.scrollHeight; };
 
-        const bubble = (role, html, cls, raw) => {
+        // Кнопка «Перегенерировать» имеет смысл только на самом последнем
+        // ответе — регенерация на бэке всегда стирает последнюю реплику
+        // ассистента. Держим ссылку на неё, чтобы прятать со старой при
+        // появлении новой.
+        let lastRegenBtn = null;
+
+        const bubble = (role, html, cls, raw, opts) => {
+          opts = opts || {};
           const el = document.createElement("div");
           el.className = "msg " + (role === "me" ? "me" : "bot") + (cls ? " " + cls : "");
           const av = document.createElement("span");
           av.className = "av";
-          av.textContent = role === "me" ? "Я" : AVA;
+          av.textContent = role === "me" ? "Я" : avaFor(opts.model);
           const bd = document.createElement("div");
           bd.className = "bd";
+          if (opts.pdfName) {
+            const tag = document.createElement("div");
+            tag.className = "pdf-tag";
+            tag.innerHTML = ICON_PDF + "<span>" + esc(opts.pdfName) + "</span>";
+            bd.appendChild(tag);
+          }
           const tx = document.createElement("div");
           tx.className = "txt";
           if (html === null) tx.innerHTML = '<span class="dots"><span></span><span></span><span></span></span>';
@@ -14959,12 +15190,41 @@ def ai_page():
             cp.innerHTML = ICON_COPY + "<span>Копировать</span>";
             cp.addEventListener("click", () => copyMsg(cp, tx.dataset.raw));
             tools.appendChild(cp);
+            if (role !== "me") {
+              const nb = document.createElement("button");
+              nb.type = "button"; nb.className = "note-btn";
+              nb.innerHTML = ICON_NOTE + "<span>В блокнот</span>";
+              nb.addEventListener("click", () => saveToNotebook(tx.dataset.raw));
+              tools.appendChild(nb);
+              if (opts.regen) {
+                const rb = document.createElement("button");
+                rb.type = "button"; rb.className = "regen-btn";
+                rb.innerHTML = ICON_REGEN + "<span>Заново</span>";
+                rb.addEventListener("click", () => regenerate(el));
+                tools.appendChild(rb);
+                if (lastRegenBtn) lastRegenBtn.remove();
+                lastRegenBtn = rb;
+              }
+            }
             bd.appendChild(tools);
           }
           el.append(av, bd);
           chat.appendChild(el);
           scrollDown();
           return tx;
+        };
+
+        const saveToNotebook = async (text) => {
+          if (!text) return;
+          const title = (window.prompt("Название записи в блокноте:") || "").trim().slice(0, 160);
+          if (!title) return;
+          try {
+            const r = await fetch("/api/notebook/entry", { method: "POST", credentials: "same-origin",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ type: "text", title: title, text: text }) });
+            if (!r.ok) { alert("Не удалось сохранить в блокнот."); return; }
+            alert("Сохранено в блокнот.");
+          } catch (e) { alert("Не удалось сохранить в блокнот."); }
         };
 
         const showHello = () => {
@@ -15010,6 +15270,15 @@ def ai_page():
           try {
             await fetch("/api/ai/chat/" + c.id, { method: "PATCH", credentials: "same-origin",
               headers: { "Content-Type": "application/json" }, body: JSON.stringify({ folder: fid }) });
+          } catch (e) {}
+        };
+
+        const togglePin = async (c) => {
+          c.pinned = !c.pinned;
+          renderList();
+          try {
+            await fetch("/api/ai/chat/" + c.id, { method: "PATCH", credentials: "same-origin",
+              headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pinned: c.pinned }) });
           } catch (e) {}
         };
 
@@ -15110,25 +15379,27 @@ def ai_page():
         const makeRow = (c) => {
           const row = document.createElement("div");
           row.className = "row" + (c.id === curId ? " on" : "");
+          if (c.pinned) row.classList.add("pinned");
           row.innerHTML = '<span class="ico"></span><span class="meta">' +
             '<span class="ttl">' + esc(c.title) + '</span>' +
             '<span class="sub">' + c.count + ' сообщ. · ' + ago(c.updated) + '</span></span>' +
             '<span class="acts">' +
+              '<span class="ic pin' + (c.pinned ? " on" : "") + '" title="' + (c.pinned ? "Открепить" : "Закрепить") + '">' + ICON_PIN + '</span>' +
               '<span class="ic ren" title="Переименовать">✎</span>' +
               '<span class="ic mov" title="Переложить в папку">' + ICON_MOVE + '</span>' +
               '<span class="ic x" title="Удалить">✕</span>' +
             '</span>';
           row.querySelector(".meta").addEventListener("click", () => openChat(c.id));
+          row.querySelector(".pin").addEventListener("click", (e) => { e.stopPropagation(); togglePin(c); });
           row.querySelector(".ren").addEventListener("click", (e) => { e.stopPropagation(); startRename(row, c); });
           row.querySelector(".mov").addEventListener("click", (e) => { e.stopPropagation(); openFolderMenu(e.currentTarget, c); });
           row.querySelector(".x").addEventListener("click", (e) => { e.stopPropagation(); delChat(c.id); });
           return row;
         };
 
-        const folderBlock = (f) => {
+        const folderBlock = (f, mine) => {
           const wrap = document.createElement("div");
           wrap.className = "folder" + (foldedSet.has(f.id) ? " collapsed" : "");
-          const mine = chats.filter((c) => c.folder === f.id);
           const head = document.createElement("div");
           head.className = "folder-head";
           head.innerHTML = '<svg class="car" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>' +
@@ -15153,12 +15424,31 @@ def ai_page():
 
         const renderList = () => {
           list.innerHTML = "";
-          const rest = chats.filter((c) => !c.folder || !folders.some((f) => f.id === c.folder));
           if (!chats.length && !folders.length) {
             list.innerHTML = '<div class="empty-list">Пока пусто.<br>Нажмите «Новый чат».</div>';
             return;
           }
-          folders.forEach((f) => list.appendChild(folderBlock(f)));
+          const q = searchQ.trim().toLowerCase();
+          const visible = q ? chats.filter((c) => c.title.toLowerCase().includes(q)) : chats;
+          if (q && !visible.length) {
+            list.innerHTML = '<div class="empty-list">Ничего не нашлось.</div>';
+            return;
+          }
+          const pinned = visible.filter((c) => c.pinned);
+          const rest0 = visible.filter((c) => !c.pinned);
+          if (pinned.length) {
+            const ph = document.createElement("div");
+            ph.className = "pin-sect";
+            ph.textContent = "Закреплённые";
+            list.appendChild(ph);
+            pinned.forEach((c) => list.appendChild(makeRow(c)));
+          }
+          const rest = rest0.filter((c) => !c.folder || !folders.some((f) => f.id === c.folder));
+          folders.forEach((f) => {
+            const mine = rest0.filter((c) => c.folder === f.id);
+            if (q && !mine.length) return;
+            list.appendChild(folderBlock(f, mine));
+          });
           if (folders.length && rest.length) {
             const head = document.createElement("div");
             head.className = "folder-head";
@@ -15216,18 +15506,21 @@ def ai_page():
           curId = id;
           renderList();
           closeDrawer();
+          lastRegenBtn = null;
           chat.innerHTML = '<div class="hello"><p>Загружаю…</p></div>';
           try {
             const r = await fetch("/api/ai/chat/" + id, { credentials: "same-origin" });
             const d = await r.json();
             chat.innerHTML = "";
             if (!d.messages || !d.messages.length) { showHello(); return; }
-            d.messages.forEach((m) => {
+            d.messages.forEach((m, idx) => {
               const isMe = m.role === "user";
               let html = "";
               if (m.img) html += '<img src="/api/ai/img/' + encodeURIComponent(m.img) + '" alt="фото">';
               html += isMe ? esc(m.text).replace(/\n/g, "<br>") : md(m.text);
-              bubble(isMe ? "me" : "bot", html, undefined, m.text || "");
+              const isLastBot = !isMe && idx === d.messages.length - 1;
+              bubble(isMe ? "me" : "bot", html, undefined, m.text || "",
+                     { model: m.model, pdfName: isMe ? m.pdf_name : "", regen: isLastBot });
             });
           } catch (e) {
             chat.innerHTML = "";
@@ -15254,43 +15547,38 @@ def ai_page():
           renderList();
         };
 
-        const submit = async () => {
-          if (busy || !ready) return;
-          const ta = $("text");
-          const text = ta.value.trim();
-          const img = pendImg;
-          if (!text && !img) return;
-          if (!curId) { await newChat(); }
-          if (!curId) return;
+        // Стоп/отправить — одна и та же кнопка, меняем только вид и обработку.
+        const setBusy = (b) => {
+          busy = b;
+          const btn = $("send");
+          btn.classList.toggle("stopmode", b);
+          btn.title = b ? "Остановить" : "Отправить";
+          btn.setAttribute("aria-label", b ? "Остановить" : "Отправить");
+          btn.innerHTML = b ? ICON_STOP : ICON_SEND;
+        };
+        const stopGen = () => { if (curAbort) curAbort.abort(); };
 
-          // если открыт экран-приветствие — очищаем его перед первой репликой
-          if (chat.querySelector(".hello")) chat.innerHTML = "";
-
-          busy = true; $("send").disabled = true;
-          let meHtml = "";
-          if (img) meHtml += '<img src="' + img + '" alt="фото">';
-          if (text) meHtml += esc(text).replace(/\n/g, "<br>");
-          bubble("me", meHtml, undefined, text);
-          ta.value = ""; grow(); clearImg();
-          bumpCard();
-          const out = bubble("bot", null, undefined, "");
-
-          let acc = "";
+        // Общий стрим-цикл для отправки нового сообщения и «Перегенерировать»:
+        // читает SSE, копит текст, ловит «Стоп» через AbortController — то,
+        // что успело прийти, остаётся на экране (сервер сам сохранит частичный
+        // ответ через свой finally на GeneratorExit).
+        const runStream = async (url, body, out) => {
+          curAbort = new AbortController();
           try {
-            const r = await fetch("/api/ai/chat/" + curId + "/send", {
+            const r = await fetch(url, {
               method: "POST", credentials: "same-origin",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ text: text, image: img || undefined, model: PRESET || undefined }),
+              body: JSON.stringify(body), signal: curAbort.signal,
             });
             if (!r.ok || !r.body) {
               const d = await r.json().catch(() => ({}));
               out.parentElement.parentElement.classList.add("err");
               out.textContent = d.error || "Не удалось отправить.";
-              busy = false; $("send").disabled = false; return;
+              return;
             }
             const reader = r.body.getReader();
             const dec = new TextDecoder();
-            let buf = "";
+            let buf = "", acc = "";
             out.classList.add("cursor");
             for (;;) {
               const { value, done } = await reader.read();
@@ -15303,7 +15591,15 @@ def ai_page():
                 if (!line) continue;
                 let ev;
                 try { ev = JSON.parse(line.slice(5).trim()); } catch (e) { continue; }
-                if (ev.model) { modelName = ev.model; $("brand-sub").innerHTML = '<i class="dot on"></i>' + esc(modelName); }
+                if (ev.title) {
+                  const cc = chats.find((x) => x.id === curId);
+                  if (cc && cc.title !== ev.title) { cc.title = ev.title; renderList(); }
+                }
+                else if (ev.model) {
+                  modelName = ev.model; $("brand-sub").innerHTML = '<i class="dot on"></i>' + esc(modelName);
+                  const avEl = out.closest(".msg").querySelector(".av");
+                  if (avEl) avEl.textContent = avaFor(ev.model);
+                }
                 else if (ev.delta) { acc += ev.delta; out.innerHTML = md(acc); out.dataset.raw = acc; scrollDown(); }
                 else if (ev.error) {
                   out.classList.remove("cursor");
@@ -15318,27 +15614,117 @@ def ai_page():
             bumpCard();
           } catch (e) {
             out.classList.remove("cursor");
-            out.parentElement.parentElement.classList.add("err");
-            out.textContent = "Оборвалась связь с сервером.";
+            if (e.name === "AbortError") {
+              if (!out.dataset.raw && !out.textContent) out.textContent = "Остановлено.";
+            } else {
+              out.parentElement.parentElement.classList.add("err");
+              out.textContent = "Оборвалась связь с сервером.";
+            }
           } finally {
-            busy = false; $("send").disabled = false; $("text").focus();
+            curAbort = null;
           }
+        };
+
+        const regenerate = async (el) => {
+          if (busy || !ready || !curId) return;
+          busy = true; setBusy(true);
+          el.remove();
+          const out = bubble("bot", null, undefined, "", { regen: true });
+          await runStream("/api/ai/chat/" + curId + "/regenerate",
+                           { model: PRESET || undefined }, out);
+          setBusy(false);
+        };
+
+        const submit = async () => {
+          if (busy || !ready) return;
+          const ta = $("text");
+          const text = ta.value.trim();
+          const img = pendImg;
+          const pdf = pendPdf, pdfName = pendPdfName;
+          if (!text && !img && !pdf) return;
+          if (!curId) { await newChat(); }
+          if (!curId) return;
+
+          // если открыт экран-приветствие — очищаем его перед первой репликой
+          if (chat.querySelector(".hello")) chat.innerHTML = "";
+
+          busy = true; setBusy(true);
+          let meHtml = "";
+          if (img) meHtml += '<img src="' + img + '" alt="фото">';
+          if (text) meHtml += esc(text).replace(/\n/g, "<br>");
+          bubble("me", meHtml, undefined, text, { pdfName: pdf ? pdfName : "" });
+          ta.value = ""; grow(); clearImg(); clearPdf();
+          bumpCard();
+          const out = bubble("bot", null, undefined, "", { regen: true });
+
+          await runStream("/api/ai/chat/" + curId + "/send", {
+            text: text, image: img || undefined,
+            pdf: pdf || undefined, pdf_name: pdf ? pdfName : undefined,
+            model: PRESET || undefined,
+          }, out);
+
+          setBusy(false); $("text").focus();
         };
 
         // ── ввод ──
         const grow = () => { const ta = $("text"); ta.style.height = "auto"; ta.style.height = Math.min(190, ta.scrollHeight) + "px"; };
         $("text").addEventListener("input", grow);
         $("text").addEventListener("keydown", (e) => {
-          if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); }
+          if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (!busy) submit(); }
         });
-        $("field").addEventListener("submit", (e) => { e.preventDefault(); submit(); });
+        $("field").addEventListener("submit", (e) => {
+          e.preventDefault();
+          if (busy) stopGen(); else submit();
+        });
         $("newbtn").addEventListener("click", newChat);
         $("newfolder").addEventListener("click", () => askNewFolder(null));
         $("burger").addEventListener("click", () => wrap.classList.toggle("open"));
         $("scrim").addEventListener("click", closeDrawer);
 
+        // ── сайдбар: сворачивание, запоминаем на этой машине ──
+        let sideCollapsed = false;
+        try { sideCollapsed = localStorage.getItem("aiSidebarCollapsed") === "1"; } catch (e) {}
+        if (sideCollapsed) wrap.classList.add("collapsed");
+        $("sidebtn").addEventListener("click", () => {
+          sideCollapsed = !sideCollapsed;
+          wrap.classList.toggle("collapsed", sideCollapsed);
+          try { localStorage.setItem("aiSidebarCollapsed", sideCollapsed ? "1" : "0"); } catch (e) {}
+        });
+
+        // ── поиск по чатам ──
+        const searchInput = $("search"), searchRow = $("search-row"), searchClear = $("search-clear");
+        searchInput.addEventListener("input", () => {
+          searchQ = searchInput.value;
+          searchRow.classList.toggle("filled", !!searchQ);
+          renderList();
+        });
+        searchClear.addEventListener("click", () => {
+          searchInput.value = ""; searchQ = "";
+          searchRow.classList.remove("filled");
+          renderList(); searchInput.focus();
+        });
+
+        // ── вложение в поле ввода: показываем либо фото, либо PDF ──
+        const renderChipSlot = () => {
+          const slot = $("chip-slot");
+          slot.innerHTML = "";
+          if (pendImg) {
+            const chip = document.createElement("div");
+            chip.className = "imgchip";
+            chip.innerHTML = '<img src="' + pendImg + '" alt=""><span>фото готово</span><button type="button" title="Убрать">✕</button>';
+            chip.querySelector("button").addEventListener("click", clearImg);
+            slot.appendChild(chip);
+          } else if (pendPdf) {
+            const chip = document.createElement("div");
+            chip.className = "pdf-chip";
+            chip.innerHTML = ICON_PDF + "<span>" + esc(pendPdfName) + "</span><button type=\"button\" title=\"Убрать\">✕</button>";
+            chip.querySelector("button").addEventListener("click", clearPdf);
+            slot.appendChild(chip);
+          }
+        };
+
         // ── фото: ужимаем в браузере, чтобы не гонять гигантские файлы ──
-        const clearImg = () => { pendImg = null; $("chip-slot").innerHTML = ""; $("file").value = ""; };
+        const clearImg = () => { pendImg = null; $("file").value = ""; renderChipSlot(); };
         $("file").addEventListener("change", () => {
           const f = $("file").files[0];
           if (!f) return;
@@ -15350,13 +15736,24 @@ def ai_page():
             cv.width = Math.round(img.width * sc); cv.height = Math.round(img.height * sc);
             cv.getContext("2d").drawImage(img, 0, 0, cv.width, cv.height);
             pendImg = cv.toDataURL("image/jpeg", 0.85);
-            $("chip-slot").innerHTML = "";
-            const chip = document.createElement("div");
-            chip.className = "imgchip";
-            chip.innerHTML = '<img src="' + pendImg + '" alt=""><span>фото готово</span><button type="button" title="Убрать">✕</button>';
-            chip.querySelector("button").addEventListener("click", clearImg);
-            $("chip-slot").appendChild(chip);
+            pendPdf = null; pendPdfName = ""; $("filepdf").value = "";
+            renderChipSlot();
           }; img.src = rd.result; };
+          rd.readAsDataURL(f);
+        });
+
+        // ── PDF: читаем как есть, текст вытащит сервер ──
+        const clearPdf = () => { pendPdf = null; pendPdfName = ""; $("filepdf").value = ""; renderChipSlot(); };
+        $("filepdf").addEventListener("change", () => {
+          const f = $("filepdf").files[0];
+          if (!f) return;
+          if (f.size > 8 * 1024 * 1024) { alert("PDF слишком большой (максимум 8 МБ)."); $("filepdf").value = ""; return; }
+          const rd = new FileReader();
+          rd.onload = () => {
+            pendPdf = rd.result; pendPdfName = f.name;
+            pendImg = null; $("file").value = "";
+            renderChipSlot();
+          };
           rd.readAsDataURL(f);
         });
 

@@ -3,3 +3,4 @@ flask-sock
 paramiko
 pillow
 segno
+pypdf
