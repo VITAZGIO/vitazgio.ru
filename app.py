@@ -15286,6 +15286,15 @@ def ai_page():
                : /llama|meta/i.test(s) ? "LL"
                : /deepseek/i.test(s) ? "DS" : "AI";
         };
+        // Цвет аватарки — тоже по РЕАЛЬНО ответившей модели, не по вкладке:
+        // иначе старый ответ MiniMax, открытый из вкладки NVIDIA (или
+        // наоборот), красился в чужой цвет текущей темы страницы — буквы
+        // говорили одно, а цвет другое.
+        const AV_COLORS = { MM: ["#ff3d9a", "#ff8fc4"], NV: ["#76c900", "#39ff14"] };
+        const avColorFor = (code) => {
+          const c = AV_COLORS[code];
+          return c ? "linear-gradient(160deg, " + c[1] + ", " + c[0] + ")" : "";
+        };
         let chats = [], folders = [], curId = null, busy = false, ready = false, vision = false, modelName = PRESET;
         let pendImg = null, pendPdf = null, pendPdfName = "";
         let curAbort = null, searchQ = "";
@@ -15437,7 +15446,13 @@ def ai_page():
           el.className = "msg " + (role === "me" ? "me" : "bot") + (cls ? " " + cls : "");
           const av = document.createElement("span");
           av.className = "av";
-          av.textContent = role === "me" ? "Я" : avaFor(opts.model);
+          if (role === "me") { av.textContent = "Я"; }
+          else {
+            const code = avaFor(opts.model);
+            av.textContent = code;
+            const bg = avColorFor(code);
+            if (bg) av.style.background = bg;
+          }
           const bd = document.createElement("div");
           bd.className = "bd";
           if (opts.pdfName) {
@@ -15905,7 +15920,11 @@ def ai_page():
                 else if (ev.model) {
                   modelName = ev.model; $("brand-sub").innerHTML = '<i class="dot on"></i>' + esc(modelName);
                   const avEl = out.closest(".msg").querySelector(".av");
-                  if (avEl) avEl.textContent = avaFor(ev.model);
+                  if (avEl) {
+                    const code = avaFor(ev.model);
+                    avEl.textContent = code;
+                    avEl.style.background = avColorFor(code);
+                  }
                 }
                 else if (ev.reasoning) {
                   ensureThink();
