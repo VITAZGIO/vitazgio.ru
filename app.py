@@ -11365,6 +11365,22 @@ def vg_player_js():
   if (bus) bus.onmessage = (e) => {
     if (e.data === "play" && !audio.paused) { audio.pause(); }
     if (e.data === "sync") fire();
+    if (e.data === "ping" && !audio.paused) shout("pong");
+  };
+  /* Спросить остальные вкладки: кто-то уже реально играет? Нужно перед
+     автоподхватом на новой странице — иначе она бы просто перехватывала
+     звук у уже открытой вкладки и та обрывалась («стопается» при открытии
+     сайта во второй вкладке). Ждём отклика недолго и только если правда
+     кто-то есть. */
+  const askIfPlaying = () => {
+    if (!bus) return Promise.resolve(false);
+    return new Promise((resolve) => {
+      let got = false;
+      const onMsg = (e) => { if (e.data === "pong") got = true; };
+      bus.addEventListener("message", onMsg);
+      shout("ping");
+      setTimeout(() => { bus.removeEventListener("message", onMsg); resolve(got); }, 220);
+    });
   };
 
   const fire = () => { subs.forEach((f) => { try { f(state()); } catch (e) {} }); paint(); };
@@ -11428,6 +11444,11 @@ def vg_player_js():
     },
     hide() {
       try { localStorage.setItem("vgPlayerOn", "0"); } catch (e) { /* и ладно */ }
+      if (pipWin) {
+        try { pipWin.removeEventListener("pagehide", closePip); } catch (e) {}
+        try { pipWin.close(); } catch (e) {}
+        pipWin = null;
+      }
       if (box) { box.remove(); box = null; }
     },
     reload: () => fetchList(true),
@@ -11482,6 +11503,11 @@ def vg_player_js():
     if (s && s.shuffle) shuffle = true;
     if (!s || !s.id) return;
 
+    // Если состояние говорит «играет» — прежде чем правда включать звук,
+    // проверим: вдруг это эхо другой, уже открытой и играющей вкладки.
+    const stolen = s.playing ? await askIfPlaying() : false;
+    const shouldPlay = s.playing && !stolen;
+
     // Сначала — звук: ставим трек из сохранённого адреса, без похода на сервер.
     if (s.url) {
       queue = [{ id: s.id, title: s.title || "", artist: s.artist || "",
@@ -11491,7 +11517,7 @@ def vg_player_js():
       audio.addEventListener("loadedmetadata", function once() {
         audio.removeEventListener("loadedmetadata", once);
         if (s.time) audio.currentTime = s.time;
-        if (s.playing) audio.play().catch(() => { if (box) box.classList.add("vgp-wake"); });
+        if (shouldPlay) audio.play().catch(() => { if (box) box.classList.add("vgp-wake"); });
       }, { once: true });
       media(); fire();
     }
@@ -11506,7 +11532,7 @@ def vg_player_js():
         audio.addEventListener("loadedmetadata", function once() {
           audio.removeEventListener("loadedmetadata", once);
           if (s.time) audio.currentTime = s.time;
-          if (s.playing) audio.play().catch(() => { if (box) box.classList.add("vgp-wake"); });
+          if (shouldPlay) audio.play().catch(() => { if (box) box.classList.add("vgp-wake"); });
         }, { once: true });
       }
       media(); fire();
@@ -11514,8 +11540,35 @@ def vg_player_js():
   };
 
   /* ── виджет ────────────────────────────────────────────────────── */
-  let box = null, folded = true, bin = null;
+  let box = null, folded = true, bin = null, pipWin = null;
   const paintFns = [];
+
+  /* Плавающее окно поверх экрана (Document Picture-in-Picture): сам виджет
+     физически переезжает в отдельное окно — тот же <audio>, тот же JS,
+     звук не прерывается. Управлять можно и из окна, и с сайта (это тот же
+     код), просто пока окно открыто, виджет физически живёт в нём одном. */
+  const openPip = async () => {
+    if (pipWin) { try { pipWin.focus(); } catch (e) {} return; }
+    if (!box) return;
+    try {
+      pipWin = await documentPictureInPicture.requestWindow({ width: 340, height: 300 });
+    } catch (e) { pipWin = null; return; }
+    const style = document.createElement("style");
+    style.textContent = CSS;
+    pipWin.document.head.appendChild(style);
+    pipWin.document.body.style.margin = "0";
+    pipWin.document.body.style.background = "#0b0f18";
+    setFolded(false);
+    box.classList.add("vgp-pip");
+    pipWin.document.body.appendChild(box);
+    pipWin.addEventListener("pagehide", closePip, { once: true });
+  };
+  const closePip = () => {
+    pipWin = null;
+    if (!box) return;
+    box.classList.remove("vgp-pip");
+    document.body.appendChild(box);
+  };
 
   /* Корзина, в которую можно выбросить сам плеер. Появляется только когда
      кружок подержали на месте — чтобы не мешала обычному перетаскиванию. */
@@ -11619,6 +11672,10 @@ def vg_player_js():
   .vgp-keys .vgp-sm svg { width:13px; height:13px; }
   .vgp-keys .vgp-sm.on { color:#63f5ad; border-color:rgba(99,245,173,.45); background:rgba(99,245,173,.12); }
 
+  .vgp-vline { margin:9px 0 0; }
+  .vgp-vline .vgp-sm { flex:none; width:28px; height:28px; }
+  .vgp-vline .vgp-bar { height:14px; }
+
   .vgp-list { max-height:0; overflow:hidden; transition:max-height .3s ease; }
   .vgp-list.open { max-height:220px; overflow-y:auto; margin-top:11px;
                    border-top:1px solid rgba(255,255,255,.08); padding-top:8px; }
@@ -11657,6 +11714,16 @@ def vg_player_js():
                  background:rgba(190,40,60,.92); transform:translate(-50%, 0) scale(1.06); }
   .vgp-bin svg { width:17px; height:17px; }
 
+  /* «убрать плеер» — рядом со свёрткой, но видна только в плавающем окне:
+     там перетащить в корзину некуда, само окошко — уже отдельная сущность. */
+  .vgp [data-remove] { display:none; }
+  .vgp.vgp-pip [data-remove] { display:grid; }
+  .vgp.vgp-pip [data-pip] { display:none; }
+  /* в самом плавающем окне виджет — это весь его вьюпорт, без плавания */
+  .vgp.vgp-pip { position:static; inset:auto; right:auto; bottom:auto; left:auto; top:auto;
+                 width:100%; height:100%; border-radius:0; box-shadow:none; }
+  .vgp.vgp-pip .vgp-head { cursor:default; }
+
   /* автоплей не пустили — зовём нажать */
   .vgp.vgp-wake { animation:vgpWake 1.4s ease-in-out infinite; }
   @keyframes vgpWake { 0%,100%{ box-shadow:0 24px 70px rgba(0,0,0,.55), 0 0 0 0 rgba(45,226,255,.5) }
@@ -11673,6 +11740,10 @@ def vg_player_js():
     list: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg>',
     shuf: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h4v4M20 4l-6 6M16 20h4v-4M20 20l-6-6M4 4l6 6M4 20l16-16"/></svg>',
     fold: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/></svg>',
+    vol: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9v6h4l5 4V5L8 9H4Z"/><path d="M16.5 8.5a5 5 0 0 1 0 7"/></svg>',
+    mute: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9v6h4l5 4V5L8 9H4Z"/><path d="M16 9l5 6M21 9l-5 6"/></svg>',
+    pip: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><rect x="12" y="12" width="7" height="5" rx="1" fill="currentColor" stroke="none"/></svg>',
+    remove: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>',
   };
   const mmss = (s) => {
     s = Math.max(0, Math.floor(s || 0));
@@ -11696,6 +11767,8 @@ def vg_player_js():
             '<path d="M9 18V6l10-2v12"/><circle cx="6.5" cy="18" r="2.8"/><circle cx="16.5" cy="16" r="2.8"/></svg>' +
           '<div class="vgp-eq"><i></i><i></i><i></i><i></i></div></div>' +
         '<div class="vgp-meta"><div class="vgp-t">Фонотека</div><div class="vgp-a">ничего не играет</div></div>' +
+        '<button class="vgp-x" data-pip title="Открыть поверх экрана">' + I.pip + '</button>' +
+        '<button class="vgp-x" data-remove title="Убрать плеер">' + I.remove + '</button>' +
         '<button class="vgp-x" data-fold title="Свернуть">' + I.fold + '</button>' +
       '</div>' +
       '<div class="vgp-body">' +
@@ -11708,6 +11781,10 @@ def vg_player_js():
           '<button class="vgp-play" data-play title="Играть">' + I.play + '</button>' +
           '<button class="vgp-side" data-next title="Вперёд">' + I.next + '</button>' +
           '<button class="vgp-sm" data-list title="Список">' + I.list + '</button>' +
+        '</div>' +
+        '<div class="vgp-line vgp-vline">' +
+          '<button class="vgp-sm" data-mute title="Звук">' + I.vol + '</button>' +
+          '<div class="vgp-bar" data-volbar><u></u><i></i><b></b></div>' +
         '</div>' +
         '<div class="vgp-list" data-rows></div>' +
       '</div>';
@@ -11729,7 +11806,7 @@ def vg_player_js():
     /* таскаем за шапку */
     let drag = null;
     q(".vgp-head").addEventListener("pointerdown", (e) => {
-      if (e.target.closest("button")) return;
+      if (e.target.closest("button") || box.classList.contains("vgp-pip")) return;
       const r = box.getBoundingClientRect();
       drag = { dx: e.clientX - r.left, dy: e.clientY - r.top, moved: false, hold: 0 };
       box.classList.add("vgp-drag");
@@ -11797,6 +11874,35 @@ def vg_player_js():
     bar.addEventListener("pointerup", stopSeek);
     bar.addEventListener("pointercancel", stopSeek);
 
+    /* громкость — тот же ползунок, что и перемотка, только крутит звук */
+    const volBar = q("[data-volbar]");
+    let volBeforeMute = audio.volume || 0.7;
+    const volAt = (e) => {
+      const r = volBar.getBoundingClientRect();
+      const k = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+      api.volume(k);
+    };
+    volBar.addEventListener("pointerdown", (e) => {
+      volBar.classList.add("vgp-grab");
+      try { volBar.setPointerCapture(e.pointerId); } catch (err) {}
+      volAt(e);
+    });
+    volBar.addEventListener("pointermove", (e) => { if (volBar.classList.contains("vgp-grab")) volAt(e); });
+    const stopVol = () => volBar.classList.remove("vgp-grab");
+    volBar.addEventListener("pointerup", stopVol);
+    volBar.addEventListener("pointercancel", stopVol);
+    q("[data-mute]").addEventListener("click", () => {
+      if (audio.volume > 0) { volBeforeMute = audio.volume; api.volume(0); }
+      else api.volume(volBeforeMute || 0.7);
+    });
+
+    q("[data-remove]").addEventListener("click", () => api.hide());
+    if ("documentPictureInPicture" in window) {
+      q("[data-pip]").addEventListener("click", openPip);
+    } else {
+      q("[data-pip]").remove();
+    }
+
     const drawRows = () => {
       if (!rows.classList.contains("open")) return;
       rows.innerHTML = queue.length
@@ -11822,11 +11928,15 @@ def vg_player_js():
       box.classList.toggle("vgp-on", !audio.paused);
       q("[data-shuf]").classList.toggle("on", shuffle);
       const k = isFinite(audio.duration) && audio.duration ? audio.currentTime / audio.duration : 0;
-      q(".vgp-bar i").style.width = (k * 100) + "%";
-      q(".vgp-bar b").style.left = (k * 100) + "%";
+      q("[data-bar] i").style.width = (k * 100) + "%";
+      q("[data-bar] b").style.left = (k * 100) + "%";
       q("[data-at]").textContent = mmss(audio.currentTime);
       q("[data-all]").textContent = mmss(audio.duration);
       q(".vgp-ring .fg").style.strokeDashoffset = String(169.6 * (1 - k));
+      const vk = audio.volume;
+      q("[data-volbar] i").style.width = (vk * 100) + "%";
+      q("[data-volbar] b").style.left = (vk * 100) + "%";
+      q("[data-mute]").innerHTML = vk > 0 ? I.vol : I.mute;
       const cur = rows.querySelector(".vgp-row.on");
       if (rows.classList.contains("open") && (!cur || +cur.dataset.i !== idx)) drawRows();
     });
@@ -14813,9 +14923,9 @@ def ai_page():
                border-bottom:1px solid var(--line); background:rgba(8,12,24,.5); flex:none; }
         .back, .burger { width:40px; height:40px; flex:none; display:grid; place-items:center;
                  color:var(--ac); text-decoration:none; cursor:pointer;
-                 border:1px solid rgba(77,107,254,.32); border-radius:11px;
-                 background:rgba(77,107,254,.08); transition:.16s; }
-        .back:hover, .burger:hover { color:#fff; border-color:var(--ac); background:rgba(77,107,254,.2); }
+                 border:1px solid color-mix(in srgb, var(--ac) 32%, transparent); border-radius:11px;
+                 background:color-mix(in srgb, var(--ac) 8%, transparent); transition:.16s; }
+        .back:hover, .burger:hover { color:#fff; border-color:var(--ac); background:color-mix(in srgb, var(--ac) 20%, transparent); }
         .back svg, .burger svg { width:19px; height:19px; }
         .burger { display:none; }
         html.embed .back { display:none; }   /* встроена во вкладку «Нейронки» */
@@ -14828,17 +14938,23 @@ def ai_page():
         .dot.on { background:var(--ok); box-shadow:0 0 9px var(--ok); }
         .dot.off { background:var(--warm); }
 
-        .wrap { flex:1; min-height:0; display:flex; }
+        .wrap { flex:1; min-height:0; display:flex; position:relative; }
         .aside { width:317px; flex:none; border-right:1px solid var(--line); background:var(--panel);
                  display:flex; flex-direction:column; min-height:0;
                  transition:width .18s ease, opacity .18s ease; }
         .wrap.collapsed .aside { width:0; opacity:0; overflow:hidden; border-right:0; pointer-events:none; }
-        .sidebtn { width:40px; height:40px; flex:none; display:grid; place-items:center;
-                   color:var(--muted); cursor:pointer; border:1px solid var(--line); border-radius:11px;
+        .sidebtn { width:44px; height:44px; flex:none; display:grid; place-items:center;
+                   color:var(--muted); cursor:pointer; border:1px solid var(--line); border-radius:12px;
                    background:rgba(255,255,255,.03); transition:.16s; }
         .sidebtn:hover { color:#fff; border-color:rgba(255,255,255,.25); background:rgba(255,255,255,.08); }
         .sidebtn svg { width:18px; height:18px; }
-        @media (max-width:760px) { .sidebtn { display:none; } }
+        /* Кнопка «развернуть обратно» — вне .aside (её саму скрывает
+           collapsed), плавает у левого края поверх чата, видна только
+           когда список свёрнут. */
+        .sideopen { display:none; position:absolute; z-index:6; top:12px; left:12px;
+                    box-shadow:0 6px 20px rgba(0,0,0,.35); }
+        .wrap.collapsed .sideopen { display:grid; }
+        @media (max-width:760px) { .sidebtn, .wrap.collapsed .sideopen { display:none; } }
         .newrow { display:flex; gap:7px; margin:12px; }
         .search-row { margin:0 12px 10px; position:relative; }
         .search-row input { width:100%; height:36px; padding:0 32px 0 11px; color:#f4f7ff;
@@ -14859,21 +14975,21 @@ def ai_page():
                     letter-spacing:.08em; text-transform:uppercase; }
         .newbtn { flex:1; height:44px; display:flex; align-items:center;
                   justify-content:center; gap:9px; cursor:pointer; color:#eaf0ff;
-                  font:700 .82rem inherit; border:1px solid rgba(77,107,254,.4);
-                  border-radius:12px; background:linear-gradient(160deg, rgba(77,107,254,.22), rgba(139,123,255,.14));
+                  font:700 .82rem inherit; border:1px solid color-mix(in srgb, var(--ac) 40%, transparent);
+                  border-radius:12px; background:linear-gradient(160deg, color-mix(in srgb, var(--ac) 22%, transparent), color-mix(in srgb, var(--ac2) 14%, transparent));
                   transition:.16s; }
-        .newbtn:hover { border-color:var(--ac); background:linear-gradient(160deg, rgba(77,107,254,.34), rgba(139,123,255,.2)); }
+        .newbtn:hover { border-color:var(--ac); background:linear-gradient(160deg, color-mix(in srgb, var(--ac) 34%, transparent), color-mix(in srgb, var(--ac2) 20%, transparent)); }
         .newbtn svg { width:17px; height:17px; }
         .newfolder { flex:none; width:44px; height:44px; display:grid; place-items:center; cursor:pointer;
                      color:var(--muted); border:1px solid var(--line); border-radius:12px;
                      background:rgba(255,255,255,.03); transition:.16s; }
-        .newfolder:hover { color:#fff; border-color:rgba(139,123,255,.5); background:rgba(139,123,255,.12); }
+        .newfolder:hover { color:#fff; border-color:color-mix(in srgb, var(--ac2) 50%, transparent); background:color-mix(in srgb, var(--ac2) 12%, transparent); }
         .newfolder svg { width:18px; height:18px; }
         .list { flex:1; min-height:0; overflow-y:auto; padding:0 8px 12px;
-                scrollbar-width:thin; scrollbar-color:rgba(77,107,254,.5) transparent; }
+                scrollbar-width:thin; scrollbar-color:color-mix(in srgb, var(--ac) 50%, transparent) transparent; }
         .list::-webkit-scrollbar { width:8px; }
         .list::-webkit-scrollbar-thumb { border-radius:99px;
-                background:linear-gradient(180deg, var(--ac), rgba(77,107,254,.3)); }
+                background:linear-gradient(180deg, var(--ac), color-mix(in srgb, var(--ac) 30%, transparent)); }
 
         .folder { margin-bottom:2px; }
         .folder-head { display:flex; align-items:center; gap:6px; padding:8px 8px 8px 10px;
@@ -14901,7 +15017,7 @@ def ai_page():
         .row { position:relative; display:flex; align-items:center; gap:8px; padding:9px 10px; margin-bottom:4px;
                border-radius:10px; cursor:pointer; border:1px solid transparent; transition:.13s; }
         .row:hover { background:rgba(255,255,255,.05); }
-        .row.on { background:rgba(77,107,254,.16); border-color:rgba(77,107,254,.4); }
+        .row.on { background:color-mix(in srgb, var(--ac) 16%, transparent); border-color:color-mix(in srgb, var(--ac) 40%, transparent); }
         .row .ico { width:8px; height:8px; flex:none; border-radius:50%; background:var(--ac2); opacity:.6; }
         .row .meta { flex:1; min-width:0; }
         .row .ttl { display:block; font-size:.8rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -14934,20 +15050,20 @@ def ai_page():
         .main { display:flex; flex-direction:column; min-width:0; min-height:0; position:relative; }
         .chat { flex:1; min-height:0; overflow-y:auto; padding:clamp(14px,2.4vw,26px);
                 display:flex; flex-direction:column; gap:16px;
-                scrollbar-width:thin; scrollbar-color:rgba(77,107,254,.4) transparent; }
+                scrollbar-width:thin; scrollbar-color:color-mix(in srgb, var(--ac) 40%, transparent) transparent; }
         .chat::-webkit-scrollbar { width:9px; }
-        .chat::-webkit-scrollbar-thumb { border-radius:99px; background:rgba(77,107,254,.35); }
+        .chat::-webkit-scrollbar-thumb { border-radius:99px; background:color-mix(in srgb, var(--ac) 35%, transparent); }
         .msg { display:flex; gap:12px; max-width:min(760px,100%); align-self:center; width:100%; }
         .msg .av { width:34px; height:34px; flex:none; border-radius:11px; display:grid;
                    place-items:center; font-size:.6rem; font-weight:800; color:#050a18;
-                   background:linear-gradient(160deg,#8fa4ff,#4d6bfe); }
+                   background:linear-gradient(160deg, var(--ac2), var(--ac)); }
         .msg.me .av { color:#eef2fb; background:rgba(255,255,255,.08); border:1px solid var(--line); }
         .msg .bd { min-width:0; }
         .msg .txt { padding:12px 15px; border-radius:14px; font-size:.9rem; line-height:1.62;
                     background:rgba(255,255,255,.045); border:1px solid var(--line);
                     overflow-wrap:anywhere; }
         .msg.me { flex-direction:row-reverse; }
-        .msg.me .txt { background:rgba(77,107,254,.14); border-color:rgba(77,107,254,.3); }
+        .msg.me .txt { background:color-mix(in srgb, var(--ac) 14%, transparent); border-color:color-mix(in srgb, var(--ac) 30%, transparent); }
         .msg.err .txt { color:#ffb3b3; background:rgba(255,90,90,.1); border-color:rgba(255,90,90,.32); }
         .msg .txt img { max-width:260px; max-height:260px; border-radius:9px; display:block;
                         margin:0 0 8px; border:1px solid var(--line); }
@@ -14997,7 +15113,7 @@ def ai_page():
         .txt pre code { font-size:.82rem; line-height:1.5; color:#d7e2ff; }
         .txt code { font-family:inherit; }
         .txt :not(pre) > code { padding:1px 6px; border-radius:6px; font-size:.84rem;
-                   background:rgba(139,123,255,.16); color:#cfd6ff; }
+                   background:color-mix(in srgb, var(--ac2) 16%, transparent); color:#cfd6ff; }
         .txt a { color:#9db4ff; text-decoration:underline; text-underline-offset:2px; }
         .cursor::after { content:"▋"; margin-left:1px; color:var(--ac); animation:blink 1s steps(2) infinite; }
         @keyframes blink { 50% { opacity:0; } }
@@ -15008,14 +15124,14 @@ def ai_page():
 
         .hello { margin:auto; text-align:center; max-width:520px; padding:20px; }
         .hello h2 { margin:0 0 8px; font-size:1.35rem; font-weight:800;
-                    background:linear-gradient(90deg,#a9b8ff,#8b7bff); -webkit-background-clip:text;
+                    background:linear-gradient(90deg, var(--ac2), var(--ac)); -webkit-background-clip:text;
                     background-clip:text; -webkit-text-fill-color:transparent; }
         .hello p { margin:0 0 18px; color:var(--muted); font-size:.82rem; line-height:1.6; }
         .seeds { display:flex; flex-wrap:wrap; gap:8px; justify-content:center; }
         .seeds button { padding:9px 13px; cursor:pointer; color:#cfd8ee; font:400 .76rem inherit;
                         border:1px solid var(--line); border-radius:10px; background:rgba(255,255,255,.04);
                         transition:.15s; }
-        .seeds button:hover { color:#fff; border-color:rgba(77,107,254,.5); background:rgba(77,107,254,.12); }
+        .seeds button:hover { color:#fff; border-color:color-mix(in srgb, var(--ac) 50%, transparent); background:color-mix(in srgb, var(--ac) 12%, transparent); }
 
         .compose { flex:none; border-top:1px solid var(--line); padding:12px clamp(12px,2.4vw,26px) 14px;
                    background:rgba(8,12,24,.55); }
@@ -15028,7 +15144,7 @@ def ai_page():
         .attach { width:46px; height:46px; flex:none; display:grid; place-items:center; cursor:pointer;
                   color:var(--muted); border:1px solid var(--line); border-radius:13px;
                   background:rgba(255,255,255,.04); transition:.15s; }
-        .attach:hover { color:var(--ac2); border-color:rgba(139,123,255,.5); }
+        .attach:hover { color:var(--ac2); border-color:color-mix(in srgb, var(--ac2) 50%, transparent); }
         .attach svg { width:20px; height:20px; }
         .field textarea { flex:1; min-height:46px; max-height:190px; padding:12px 15px; resize:none;
                  color:#f4f7ff; font:400 .9rem inherit; line-height:1.5; border:1px solid var(--line);
@@ -15036,7 +15152,7 @@ def ai_page():
         .field textarea:focus { border-color:var(--ac); }
         .send { width:46px; height:46px; flex:none; display:grid; place-items:center; cursor:pointer;
                 color:#050a18; border:0; border-radius:13px;
-                background:linear-gradient(160deg,#8fa4ff,#4d6bfe); transition:.15s; }
+                background:linear-gradient(160deg, var(--ac2), var(--ac)); transition:.15s; }
         .send:hover { filter:brightness(1.08); } .send:disabled { opacity:.4; cursor:not-allowed; }
         .send svg { width:20px; height:20px; }
         .send.stopmode { background:linear-gradient(160deg,#ff9b9b,#ff4d4d); }
@@ -15054,6 +15170,44 @@ def ai_page():
           .wrap.open .scrim { display:block; }
         }
         @media (prefers-reduced-motion: reduce) { * { animation:none !important; transition:none !important; } }
+
+        /* Свои карточки вместо системных confirm/prompt/alert — в теме сайта */
+        .ui-scrim { position:fixed; inset:0; z-index:60; display:flex; align-items:center;
+                    justify-content:center; padding:16px; background:rgba(2,5,12,.6);
+                    animation:ui-fade .15s ease; }
+        @keyframes ui-fade { from { opacity:0; } to { opacity:1; } }
+        .ui-modal { width:min(360px, 100%); padding:20px; border-radius:16px; color:#eef2fb;
+                    border:1px solid color-mix(in srgb, var(--ac) 35%, var(--line));
+                    background:#10162a;
+                    box-shadow:0 20px 60px rgba(0,0,0,.5), 0 0 0 1px color-mix(in srgb, var(--ac) 12%, transparent);
+                    animation:ui-pop .16s ease; }
+        @keyframes ui-pop { from { transform:scale(.96); opacity:0; } to { transform:scale(1); opacity:1; } }
+        .ui-modal p { margin:0 0 16px; font-size:.86rem; line-height:1.55; color:#dbe2f5; white-space:pre-line; }
+        .ui-modal input { width:100%; height:42px; padding:0 12px; margin:0 0 16px; color:#f4f7ff;
+                           font:400 .88rem inherit; border:1px solid var(--line); border-radius:10px;
+                           outline:none; background:rgba(4,9,20,.65); }
+        .ui-modal input:focus { border-color:var(--ac); }
+        .ui-modal .ui-acts { display:flex; gap:8px; justify-content:flex-end; }
+        .ui-modal button { height:38px; padding:0 16px; cursor:pointer; font:600 .8rem inherit;
+                            border-radius:10px; border:1px solid var(--line);
+                            background:rgba(255,255,255,.04); color:#cfd8ee; transition:.15s; }
+        .ui-modal button:hover { color:#fff; background:rgba(255,255,255,.09); }
+        .ui-modal button.ui-primary { color:#050a18; border-color:transparent;
+                                       background:linear-gradient(160deg, var(--ac2), var(--ac)); }
+        .ui-modal button.ui-primary:hover { filter:brightness(1.08); }
+        .ui-modal button.ui-danger { color:#ffb3b3; border-color:color-mix(in srgb, #ff5a5a 40%, transparent);
+                                      background:color-mix(in srgb, #ff5a5a 12%, transparent); }
+        .ui-modal button.ui-danger:hover { background:color-mix(in srgb, #ff5a5a 22%, transparent); }
+
+        .ui-toasts { position:fixed; z-index:70; left:50%; bottom:22px; transform:translateX(-50%);
+                     display:flex; flex-direction:column; gap:8px; align-items:center; pointer-events:none; }
+        .ui-toast { pointer-events:auto; padding:10px 15px; border-radius:11px; font-size:.8rem;
+                    color:#eef2fb; max-width:min(420px,86vw); text-align:center;
+                    border:1px solid var(--line); background:#10162a;
+                    box-shadow:0 10px 30px rgba(0,0,0,.4); animation:ui-toast-in .18s ease; transition:opacity .25s; }
+        .ui-toast.err { border-color:color-mix(in srgb, #ff5a5a 40%, transparent); color:#ffb3b3; }
+        .ui-toast.ok { border-color:color-mix(in srgb, var(--ok) 40%, transparent); }
+        @keyframes ui-toast-in { from { transform:translateY(8px); opacity:0; } to { transform:translateY(0); opacity:1; } }
       </style>
     </head>
     <body>
@@ -15061,9 +15215,6 @@ def ai_page():
         <a class="back" href="/cabinet" title="В кабинет" aria-label="В кабинет"><svg viewBox="0 0 24 24" fill="none"><path d="M19 12H5m0 0 6-6m-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
         <button class="burger" id="burger" type="button" aria-label="Список чатов"><svg viewBox="0 0 24 24" fill="none"><path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
         <div class="brand"><b id="brand-name">Нейросеть</b><span id="brand-sub"><i class="dot"></i>проверяю связь…</span></div>
-        <button class="sidebtn" id="sidebtn" type="button" title="Свернуть список чатов" aria-label="Свернуть список чатов">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9 4v16"/></svg>
-        </button>
       </div>
 
       <div class="wrap" id="wrap">
@@ -15077,6 +15228,9 @@ def ai_page():
             <button class="newfolder" id="newfolder" type="button" title="Новая папка" aria-label="Новая папка">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/><path d="M12 12v5M9.5 14.5h5"/></svg>
             </button>
+            <button class="sidebtn" id="sidebtn-close" type="button" title="Свернуть список чатов" aria-label="Свернуть список чатов">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9 4v16"/></svg>
+            </button>
           </div>
           <div class="search-row" id="search-row">
             <input type="text" id="search" placeholder="Поиск по чатам…" autocomplete="off">
@@ -15085,6 +15239,10 @@ def ai_page():
           </div>
           <div class="list" id="list"></div>
         </aside>
+
+        <button class="sidebtn sideopen" id="sidebtn-open" type="button" title="Показать список чатов" aria-label="Показать список чатов">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9 4v16"/></svg>
+        </button>
 
         <main class="main">
           <div class="chat" id="chat"></div>
@@ -15163,6 +15321,63 @@ def ai_page():
         };
 
         const esc = (s) => (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+        // Свои карточки вместо системных confirm()/prompt()/alert() — те
+        // выглядят как окно браузера, а не часть сайта.
+        const uiToasts = document.createElement("div");
+        uiToasts.className = "ui-toasts";
+        document.body.appendChild(uiToasts);
+        const uiToast = (text, kind) => {
+          const t = document.createElement("div");
+          t.className = "ui-toast" + (kind ? " " + kind : "");
+          t.textContent = text;
+          uiToasts.appendChild(t);
+          setTimeout(() => { t.style.opacity = "0"; setTimeout(() => t.remove(), 260); }, 2400);
+        };
+        const uiModal = ({ text, input, okLabel, okKind, cancelLabel }) => new Promise((resolve) => {
+          const scrim = document.createElement("div");
+          scrim.className = "ui-scrim";
+          const box = document.createElement("div");
+          box.className = "ui-modal";
+          const p = document.createElement("p");
+          p.textContent = text;
+          box.appendChild(p);
+          let inputEl = null;
+          if (input) {
+            inputEl = document.createElement("input");
+            inputEl.type = "text";
+            inputEl.value = input.value || "";
+            inputEl.placeholder = input.placeholder || "";
+            if (input.maxLength) inputEl.maxLength = input.maxLength;
+            box.appendChild(inputEl);
+          }
+          const acts = document.createElement("div");
+          acts.className = "ui-acts";
+          const cancelBtn = document.createElement("button");
+          cancelBtn.type = "button"; cancelBtn.textContent = cancelLabel || "Отмена";
+          const okBtn = document.createElement("button");
+          okBtn.type = "button"; okBtn.className = okKind === "danger" ? "ui-danger" : "ui-primary";
+          okBtn.textContent = okLabel || "ОК";
+          const finish = (val) => { scrim.remove(); document.removeEventListener("keydown", onKey); resolve(val); };
+          cancelBtn.addEventListener("click", () => finish(input ? null : false));
+          okBtn.addEventListener("click", () => finish(input ? inputEl.value.trim() : true));
+          const onKey = (e) => {
+            if (e.key === "Escape") finish(input ? null : false);
+            else if (e.key === "Enter" && document.activeElement !== cancelBtn) {
+              e.preventDefault(); finish(input ? inputEl.value.trim() : true);
+            }
+          };
+          acts.append(cancelBtn, okBtn);
+          box.appendChild(acts);
+          scrim.appendChild(box);
+          scrim.addEventListener("click", (e) => { if (e.target === scrim) finish(input ? null : false); });
+          document.body.appendChild(scrim);
+          document.addEventListener("keydown", onKey);
+          if (inputEl) { inputEl.focus(); inputEl.select(); } else okBtn.focus();
+        });
+        const uiConfirm = (text, opts) => uiModal({ text, okLabel: (opts && opts.okLabel) || "Удалить",
+                                                     okKind: "danger", cancelLabel: "Отмена" });
+        const uiPrompt = (text, opts) => uiModal({ text, input: opts || {}, okLabel: "ОК" });
 
         // Небольшой безопасный markdown: сначала прячем блоки кода, экранируем
         // остальное, потом возвращаем стили. Так теги из ответа не выполнятся.
@@ -15278,15 +15493,16 @@ def ai_page():
 
         const saveToNotebook = async (text) => {
           if (!text) return;
-          const title = (window.prompt("Название записи в блокноте:") || "").trim().slice(0, 160);
+          const title = ((await uiPrompt("Название записи в блокноте:",
+                          { placeholder: "Например: важная мысль", maxLength: 160 })) || "").trim().slice(0, 160);
           if (!title) return;
           try {
             const r = await fetch("/api/notebook/entry", { method: "POST", credentials: "same-origin",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ type: "text", title: title, text: text }) });
-            if (!r.ok) { alert("Не удалось сохранить в блокнот."); return; }
-            alert("Сохранено в блокнот.");
-          } catch (e) { alert("Не удалось сохранить в блокнот."); }
+            if (!r.ok) { uiToast("Не удалось сохранить в блокнот.", "err"); return; }
+            uiToast("Сохранено в блокнот.", "ok");
+          } catch (e) { uiToast("Не удалось сохранить в блокнот.", "err"); }
         };
 
         const showHello = () => {
@@ -15314,13 +15530,14 @@ def ai_page():
         const closeFMenu = () => { const m = document.querySelector(".fmenu"); if (m) m.remove(); };
 
         const askNewFolder = async (chatToMove) => {
-          const name = (window.prompt("Название новой папки:") || "").trim().slice(0, 40);
+          const name = ((await uiPrompt("Название новой папки:",
+                         { placeholder: "Например: Работа", maxLength: 40 })) || "").trim().slice(0, 40);
           if (!name) return;
           try {
             const r = await fetch("/api/ai/folder", { method: "POST", credentials: "same-origin",
               headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) });
             const d = await r.json();
-            if (!r.ok) { alert(d.error || "Не удалось создать папку."); return; }
+            if (!r.ok) { uiToast(d.error || "Не удалось создать папку.", "err"); return; }
             folders.push({ id: d.id, name: d.name });
             if (chatToMove) await moveChat(chatToMove, d.id); else renderList();
           } catch (e) {}
@@ -15431,7 +15648,8 @@ def ai_page():
         };
 
         const delFolder = async (f) => {
-          if (!confirm('Удалить папку «' + f.name + '»?\nЧаты внутри останутся — просто выйдут из папки.')) return;
+          const ok = await uiConfirm('Удалить папку «' + f.name + '»?\nЧаты внутри останутся — просто выйдут из папки.');
+          if (!ok) return;
           try { await fetch("/api/ai/folder/" + f.id, { method: "DELETE", credentials: "same-origin" }); } catch (e) {}
           folders = folders.filter((x) => x.id !== f.id);
           chats.forEach((c) => { if (c.folder === f.id) c.folder = ""; });
@@ -15592,7 +15810,8 @@ def ai_page():
         };
 
         const delChat = async (id) => {
-          if (!confirm("Удалить этот чат целиком?")) return;
+          const ok = await uiConfirm("Удалить этот чат целиком?");
+          if (!ok) return;
           try {
             await fetch("/api/ai/chat/" + id, { method: "DELETE", credentials: "same-origin" });
           } catch (e) {}
@@ -15785,11 +16004,13 @@ def ai_page():
         let sideCollapsed = false;
         try { sideCollapsed = localStorage.getItem("aiSidebarCollapsed") === "1"; } catch (e) {}
         if (sideCollapsed) wrap.classList.add("collapsed");
-        $("sidebtn").addEventListener("click", () => {
+        const toggleSidebar = () => {
           sideCollapsed = !sideCollapsed;
           wrap.classList.toggle("collapsed", sideCollapsed);
           try { localStorage.setItem("aiSidebarCollapsed", sideCollapsed ? "1" : "0"); } catch (e) {}
-        });
+        };
+        $("sidebtn-close").addEventListener("click", toggleSidebar);
+        $("sidebtn-open").addEventListener("click", toggleSidebar);
 
         // ── поиск по чатам ──
         const searchInput = $("search"), searchRow = $("search-row"), searchClear = $("search-clear");
@@ -15847,7 +16068,7 @@ def ai_page():
         $("filepdf").addEventListener("change", () => {
           const f = $("filepdf").files[0];
           if (!f) return;
-          if (f.size > 8 * 1024 * 1024) { alert("PDF слишком большой (максимум 8 МБ)."); $("filepdf").value = ""; return; }
+          if (f.size > 8 * 1024 * 1024) { uiToast("PDF слишком большой (максимум 8 МБ).", "err"); $("filepdf").value = ""; return; }
           const rd = new FileReader();
           rd.onload = () => {
             pendPdf = rd.result; pendPdfName = f.name;
