@@ -4689,7 +4689,7 @@ def cabinet():
               <span class="pl-label">Аудио</span>
               <span class="pl-actions">
                 <button class="pl-icon" id="pl-pop" type="button"
-                        title="Плеер поверх сайта — не пропадёт при переходах">⧉</button>
+                        title="Вынести плеер в отдельное окно браузера">⧉</button>
                 <button class="pl-icon" id="pl-add" type="button" title="Добавить треки">+</button>
                 <button class="pl-icon" id="pl-toggle-list" type="button" title="Список треков">☰</button>
               </span>
@@ -5929,10 +5929,12 @@ def cabinet():
               }
             };
 
-            // Кнопка ⧉ — развернуть плеер, который висит поверх сайта.
+            // Кнопка ⧉ — вынести звук в ОТДЕЛЬНОЕ ОКНО браузера. Раньше она
+            // звала VGP.open(), то есть показывала виджет поверх страницы —
+            // окна при этом не появлялось, а значок ⧉ обещал именно окно.
             const pop = el("pl-pop");
             if (pop) pop.addEventListener("click", () => {
-              if (window.VGP) window.VGP.open();
+              if (window.VGP) window.VGP.popOut();
             });
 
             el("pl-play").addEventListener("click", () => {
@@ -11490,6 +11492,19 @@ def vg_player_js():
   let shuffle = false;
   const subs = [];
 
+  /* «Музыка ДОЛЖНА звучать» — намерение, а не текущее состояние звука.
+     Разница важная: страницу только открыли, трек ещё грузится, автоподхват
+     ещё не дозвонился до других вкладок — audio.paused в этот миг true, хотя
+     музыка играет и должна играть дальше. Раньше save() писал в память
+     ровно `!audio.paused`, поэтому быстрый переход по сайту (ушли со
+     страницы, пока звук не успел стартовать) сохранял playing:false —
+     и на следующей странице музыка уже не поднималась. Это и было
+     «зависает при перелистывании». Теперь в память едет намерение. */
+  let wantPlay = false;
+  /* Служебная пауза: звук передаём вынесенному окну или уступаем другой
+     вкладке. Намерение при этом не сбрасываем и в память не пишем. */
+  let quiet = false;
+
   const save = () => {
     try {
       const t = queue[idx] || null;
@@ -11502,7 +11517,7 @@ def vg_player_js():
         artist: t ? t.artist : "",
         folder: t ? t.folder : "",
         time: audio.currentTime || 0,
-        playing: !audio.paused,
+        playing: wantPlay,
         vol: audio.volume,
         shuffle: shuffle,
       }));
@@ -11518,7 +11533,12 @@ def vg_player_js():
   try { bus = new BroadcastChannel("vgplayer"); } catch (e) { /* старый браузер */ }
   const shout = (what) => { if (bus) try { bus.postMessage(what); } catch (e) {} };
   if (bus) bus.onmessage = (e) => {
-    if (e.data === "play" && !audio.paused) { audio.pause(); }
+    if (e.data === "play" && !audio.paused) {
+      // Играть будет она, а наше намерение остаётся: вернёмся — подхватим.
+      quiet = true;
+      audio.pause();
+      setTimeout(() => { quiet = false; }, 120);
+    }
     if (e.data === "sync") fire();
     if (e.data === "ping" && !audio.paused) shout("pong");
   };
@@ -11545,12 +11565,16 @@ def vg_player_js():
   });
 
   /* ── ядро ──────────────────────────────────────────────────────── */
+  /* Человек уже сам трогал play/pause на этой странице? Тогда отложенный
+     автоподхват (resume) со своим звуком не лезет — см. goIfAllowed. */
+  let userActed = false;
   const load = (i, autoplay) => {
     if (i < 0 || i >= queue.length) return;
+    userActed = true;
     idx = i;
     audio.src = queue[i].url;
     audio.load();
-    if (autoplay) { shout("play"); audio.play().catch(() => fire()); }
+    if (autoplay) { wantPlay = true; shout("play"); audio.play().catch(() => fire()); }
     media();
     fire();
     save();
@@ -11573,9 +11597,10 @@ def vg_player_js():
       if (at >= 0) load(at, true);
     },
     toggle() {
+      userActed = true;
       if (idx < 0 && queue.length) { load(0, true); return; }
-      if (audio.paused) { shout("play"); audio.play().catch(() => {}); }
-      else audio.pause();
+      if (audio.paused) { wantPlay = true; shout("play"); audio.play().catch(() => {}); }
+      else { wantPlay = false; audio.pause(); }
     },
     next() { if (queue.length) load(idx + 1 >= queue.length ? 0 : idx + 1, true); },
     prev() {
@@ -11597,6 +11622,11 @@ def vg_player_js():
       setFolded(false);
       fetchList(true);
     },
+    /* Вынести звук в отдельное окно браузера (/player/pop) — то же, что
+       кнопка ⧉ в самом виджете. Зовут кнопки в кабинете и на музыке:
+       раньше они звали open() и показывали виджет ПОВЕРХ страницы, из-за
+       чего «вынести из браузера» не получалось — окна не было. */
+    popOut() { openInWindow(); },
     hide() {
       try { localStorage.setItem("vgPlayerOn", "0"); } catch (e) { /* и ладно */ }
       if (popWin && !popWin.closed) { try { popWin.close(); } catch (e) {} }
@@ -11624,14 +11654,14 @@ def vg_player_js():
     } catch (e) { /* не поддержали — не беда */ }
   };
 
-  /* Пока «вынос» в отдельное окно передаёт эстафету (см. popOut ниже),
-     событие pause от нашей же audio.pause() иначе перезаписало бы
-     localStorage обратно на playing:false — оно приходит асинхронно,
-     позже, чем наша ручная запись playing:true для нового окна. */
-  let handingOff = false;
   audio.addEventListener("ended", () => api.next());
-  audio.addEventListener("play", () => { shout("play"); fire(); save(); });
-  audio.addEventListener("pause", () => { fire(); if (!handingOff) save(); });
+  audio.addEventListener("play", () => { wantPlay = true; shout("play"); fire(); save(); });
+  audio.addEventListener("pause", () => {
+    fire();
+    // Настоящая пауза (человек нажал, звук кончился) — намерение снимаем.
+    // Служебная (отдали звук окну или другой вкладке) — оставляем как есть.
+    if (!quiet) { wantPlay = false; save(); }
+  });
   audio.addEventListener("timeupdate", () => { paint(); });
   audio.addEventListener("loadedmetadata", () => fire());
   setInterval(() => { if (!audio.paused) save(); }, 3000);
@@ -11661,9 +11691,27 @@ def vg_player_js():
     if (!s || !s.id) return;
 
     // Если состояние говорит «играет» — прежде чем правда включать звук,
-    // проверим: вдруг это эхо другой, уже открытой и играющей вкладки.
-    const stolen = s.playing ? await askIfPlaying() : false;
-    const shouldPlay = s.playing && !stolen;
+    // проверим: вдруг это эхо другой, уже открытой и играющей вкладки (или
+    // вынесенного окна). Опрос НЕ ждём здесь: раньше стояло `await`, и из-за
+    // него каждый переход по сайту замирал на ~четверть секунды, пока трек
+    // вообще не начинал ставиться — это и ощущалось как «зависает при
+    // перелистывании». Теперь трек и позиция встают сразу, а решение
+    // «включать ли звук» доезжает следом, само по себе.
+    // Намерение восстанавливаем немедленно, не дожидаясь ни загрузки трека,
+    // ни ответа опроса: иначе уход со страницы в эти миллисекунды сохранил бы
+    // «не играет» и оборвал музыку на следующей странице.
+    if (s.playing) wantPlay = true;
+    const mayPlay = s.playing
+      ? askIfPlaying().then((busy) => !busy)
+      : Promise.resolve(false);
+
+    // Автоподхват отменяется, если человек за эти миллисекунды сам нажал
+    // play/pause: его выбор важнее припозднившегося ответа опроса.
+    const goIfAllowed = () => mayPlay.then((go) => {
+      if (go && !userActed && audio.paused) {
+        audio.play().catch(() => { if (box) box.classList.add("vgp-wake"); });
+      }
+    });
 
     // Сначала — звук: ставим трек из сохранённого адреса, без похода на сервер.
     if (s.url) {
@@ -11674,7 +11722,7 @@ def vg_player_js():
       audio.addEventListener("loadedmetadata", function once() {
         audio.removeEventListener("loadedmetadata", once);
         if (s.time) audio.currentTime = s.time;
-        if (shouldPlay) audio.play().catch(() => { if (box) box.classList.add("vgp-wake"); });
+        goIfAllowed();
       }, { once: true });
       media(); fire();
     }
@@ -11689,7 +11737,7 @@ def vg_player_js():
         audio.addEventListener("loadedmetadata", function once() {
           audio.removeEventListener("loadedmetadata", once);
           if (s.time) audio.currentTime = s.time;
-          if (shouldPlay) audio.play().catch(() => { if (box) box.classList.add("vgp-wake"); });
+          goIfAllowed();
         }, { once: true });
       }
       media(); fire();
@@ -11708,18 +11756,30 @@ def vg_player_js():
      запоминает точную секунду через save()) и открываем /player/pop —
      тот же движок, отдельным окном, подхватывает ровно с этого места и
      дальше живёт сам по себе, что бы в браузере ни делали. */
-  const popOut = () => {
+  const openInWindow = () => {
     if (popWin && !popWin.closed) { try { popWin.focus(); } catch (e) {} return; }
-    const wasPlaying = !audio.paused;
-    handingOff = true;
+    // Звук уезжает в окно, значит эта вкладка сама включаться больше не
+    // должна: автоподхват мог ещё не успеть стартовать (страницу только
+    // открыли), и тогда он завёл бы второй голос уже ПОСЛЕ передачи.
+    userActed = true;
+    const s = stored();
+    // «Играло» — это намерение, а не audio.paused: клик по ⧉ сразу после
+    // открытия страницы иначе уносил бы в окно паузу, хотя трек вот-вот
+    // должен был заиграть.
+    const wasPlaying = wantPlay || !audio.paused || !!(s && s.playing);
+    quiet = true;
     audio.pause();
     try {
-      const s = JSON.parse(localStorage.getItem(KEY) || "null");
-      if (s) { s.playing = wasPlaying; localStorage.setItem(KEY, JSON.stringify(s)); }
+      if (s) {
+        s.playing = wasPlaying;
+        // Секунду берём живую, а если подхват не начался — ту, что лежала.
+        s.time = audio.currentTime || s.time || 0;
+        localStorage.setItem(KEY, JSON.stringify(s));
+      }
     } catch (e) {}
     popWin = window.open("/player/pop", "vgplayer",
       "width=340,height=440,menubar=no,toolbar=no,location=no,status=no,resizable=yes");
-    setTimeout(() => { handingOff = false; }, 300);
+    setTimeout(() => { quiet = false; }, 300);
   };
 
   /* Корзина, в которую можно выбросить сам плеер. Появляется только когда
@@ -12055,7 +12115,7 @@ def vg_player_js():
     // В вынесенном окне крестик закрывает само это окно, а не прячет
     // виджет на сайте (виджет там вообще не при чём — окно отдельное).
     q("[data-remove]").addEventListener("click", () => popup ? window.close() : api.hide());
-    q("[data-pip]").addEventListener("click", popOut);
+    q("[data-pip]").addEventListener("click", openInWindow);
 
     const drawRows = () => {
       if (!rows.classList.contains("open")) return;
@@ -16852,10 +16912,10 @@ def music_page():
             <a class="back" href="/" title="На главную" aria-label="На главную"><svg viewBox="0 0 24 24" fill="none"><path d="M19 12H5m0 0 6-6m-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
             <a class="eyebrow" href="/">vitazgio.ru · музыка</a>
             <button class="popout" type="button"
-                    onclick="if(window.VGP)window.VGP.open()"
-                    title="Плеер поверх сайта — не пропадёт при переходе на другую страницу">
+                    onclick="if(window.VGP)window.VGP.popOut()"
+                    title="Отдельное окно браузера: музыка играет сама по себе, что бы ни делали на сайте">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M21 3l-9 9M10 5H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5"/></svg>
-              <span>Плеер поверх сайта</span>
+              <span>Вынести в окно</span>
             </button>
           </div>
           <img class="hero-mark" src="/static/icons/vg-plain.svg" alt="Vitaz Gio"
