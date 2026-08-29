@@ -14046,8 +14046,9 @@ AI_SYS_PROMPT = ("Ты дружелюбный и толковый собесед
                  "и с коротким пояснением.")
 
 os.makedirs(AI_IMG_DIR, exist_ok=True)
-ai_data: dict = {"chats": []}
+ai_data: dict = {"chats": [], "folders": []}
 ai_lock = threading.Lock()
+AI_FOLDERS_MAX = 40
 
 
 def _ai_load():
@@ -14055,8 +14056,11 @@ def _ai_load():
         with open(AI_CHAT_PATH, encoding="utf-8") as fh:
             saved = json.load(fh) or {}
         ai_data["chats"] = saved.get("chats", [])
+        ai_data["folders"] = saved.get("folders", [])
     except (OSError, ValueError):
         pass
+    for c in ai_data["chats"]:
+        c.setdefault("folder", "")
 
 
 def _ai_write():
@@ -14087,7 +14091,14 @@ def _ai_find(chat_id):
 def _ai_card(c):
     return {"id": c["id"], "title": c.get("title") or "Новый чат",
             "updated": c.get("updated", 0), "count": len(c.get("messages", [])),
-            "model": c.get("model", OPENROUTER_MODEL)}
+            "model": c.get("model", OPENROUTER_MODEL), "folder": c.get("folder", "")}
+
+
+def _ai_find_folder(fid):
+    for f in ai_data["folders"]:
+        if f.get("id") == fid:
+            return f
+    return None
 
 
 def _ai_img_path(img_id):
@@ -14121,14 +14132,17 @@ def _ai_http_error(code):
 @app.get("/api/ai/state")
 @login_required
 def ai_state_api():
-    """Готовность и список прошлых чатов — страница спрашивает при открытии."""
+    """Готовность, список прошлых чатов и папок — страница спрашивает при открытии."""
     with ai_lock:
         cards = [_ai_card(c) for c in ai_data["chats"]]
+        folders = [{"id": f["id"], "name": f.get("name", ""), "created": f.get("created", 0)}
+                   for f in ai_data["folders"]]
     cards.sort(key=lambda x: x["updated"], reverse=True)
+    folders.sort(key=lambda x: x["created"])
     with _ai_active_lock:
         active = _ai_active_model
     return jsonify(ready=_ai_ready(), model=active,
-                   vision=bool(OPENROUTER_VISION_MODEL), chats=cards)
+                   vision=bool(OPENROUTER_VISION_MODEL), chats=cards, folders=folders)
 
 
 @app.get("/api/ai/chat/<chat_id>")
@@ -14150,7 +14164,7 @@ def ai_chat_get(chat_id):
 def ai_chat_new():
     cid = uuid.uuid4().hex[:12]
     now = time.time()
-    chat = {"id": cid, "title": "", "model": OPENROUTER_MODEL,
+    chat = {"id": cid, "title": "", "model": OPENROUTER_MODEL, "folder": "",
             "created": now, "updated": now, "messages": []}
     with ai_lock:
         ai_data["chats"].insert(0, chat)
@@ -14165,15 +14179,78 @@ def ai_chat_new():
 @app.patch("/api/ai/chat/<chat_id>")
 @login_required
 def ai_chat_rename(chat_id):
+    """Переименовать чат и/или переложить его в другую папку (folder="" — вон из папки)."""
     payload = request.get_json(silent=True) or {}
-    name = (payload.get("title") or "").strip()[:80]
     with ai_lock:
         c = _ai_find(chat_id)
         if not c:
             return jsonify(error="Чат не найден."), 404
-        c["title"] = name
+        if "title" in payload:
+            c["title"] = (payload.get("title") or "").strip()[:80]
+        if "folder" in payload:
+            fid = (payload.get("folder") or "").strip()
+            if fid and not _ai_find_folder(fid):
+                return jsonify(error="Папка не найдена."), 404
+            c["folder"] = fid
         _ai_write()
-    return jsonify(ok=True, title=name or "Новый чат")
+    return jsonify(ok=True, title=c.get("title") or "Новый чат", folder=c.get("folder", ""))
+
+
+@app.get("/api/ai/folder")
+@login_required
+def ai_folder_list():
+    with ai_lock:
+        folders = [{"id": f["id"], "name": f.get("name", "")} for f in ai_data["folders"]]
+    return jsonify(folders=folders)
+
+
+@app.post("/api/ai/folder")
+@login_required
+def ai_folder_new():
+    payload = request.get_json(silent=True) or {}
+    name = (payload.get("name") or "").strip()[:40]
+    if not name:
+        return jsonify(error="Название папки не может быть пустым."), 400
+    fid = uuid.uuid4().hex[:10]
+    with ai_lock:
+        if len(ai_data["folders"]) >= AI_FOLDERS_MAX:
+            return jsonify(error="Слишком много папок."), 400
+        ai_data["folders"].append({"id": fid, "name": name, "created": time.time()})
+        _ai_write()
+    return jsonify(id=fid, name=name)
+
+
+@app.patch("/api/ai/folder/<fid>")
+@login_required
+def ai_folder_rename(fid):
+    payload = request.get_json(silent=True) or {}
+    name = (payload.get("name") or "").strip()[:40]
+    if not name:
+        return jsonify(error="Название папки не может быть пустым."), 400
+    with ai_lock:
+        f = _ai_find_folder(fid)
+        if not f:
+            return jsonify(error="Папка не найдена."), 404
+        f["name"] = name
+        _ai_write()
+    return jsonify(ok=True, name=name)
+
+
+@app.delete("/api/ai/folder/<fid>")
+@login_required
+def ai_folder_delete(fid):
+    """Удаляет папку. Чаты внутри не трогаем — просто выкладываем их обратно
+    в общий список (folder=""), чтобы удаление папки не роняло разговоры."""
+    with ai_lock:
+        f = _ai_find_folder(fid)
+        if not f:
+            return jsonify(error="Папка не найдена."), 404
+        ai_data["folders"] = [x for x in ai_data["folders"] if x is not f]
+        for c in ai_data["chats"]:
+            if c.get("folder") == fid:
+                c["folder"] = ""
+        _ai_write()
+    return jsonify(ok=True)
 
 
 @app.delete("/api/ai/chat/<chat_id>")
@@ -14470,8 +14547,8 @@ def neuro_page():
       </div>
       <div class="stage">
         <div class="spin" id="spin">открываю…</div>
-        <iframe id="fr-mm" class="on" title="MiniMax" src="/ai?m=minimax%2Fminimax-m3%3Afree" loading="eager"></iframe>
-        <iframe id="fr-nv" title="NVIDIA" data-src="/ai?m=nvidia%2Fnemotron-3-ultra-550b-a55b%3Afree"></iframe>
+        <iframe id="fr-mm" class="on" title="MiniMax" src="/ai?m=minimax%2Fminimax-m3%3Afree" loading="eager" allow="clipboard-write"></iframe>
+        <iframe id="fr-nv" title="NVIDIA" data-src="/ai?m=nvidia%2Fnemotron-3-ultra-550b-a55b%3Afree" allow="clipboard-write"></iframe>
         <iframe id="fr-cl" title="Claude" data-src="/claude"></iframe>
       </div>
 
@@ -14577,31 +14654,78 @@ def ai_page():
         .wrap { flex:1; min-height:0; display:grid; grid-template-columns:264px 1fr; }
         .aside { border-right:1px solid var(--line); background:var(--panel);
                  display:flex; flex-direction:column; min-height:0; }
-        .newbtn { margin:12px; height:44px; flex:none; display:flex; align-items:center;
+        .newrow { display:flex; gap:7px; margin:12px; }
+        .newbtn { flex:1; height:44px; display:flex; align-items:center;
                   justify-content:center; gap:9px; cursor:pointer; color:#eaf0ff;
                   font:700 .82rem inherit; border:1px solid rgba(77,107,254,.4);
                   border-radius:12px; background:linear-gradient(160deg, rgba(77,107,254,.22), rgba(139,123,255,.14));
                   transition:.16s; }
         .newbtn:hover { border-color:var(--ac); background:linear-gradient(160deg, rgba(77,107,254,.34), rgba(139,123,255,.2)); }
         .newbtn svg { width:17px; height:17px; }
+        .newfolder { flex:none; width:44px; height:44px; display:grid; place-items:center; cursor:pointer;
+                     color:var(--muted); border:1px solid var(--line); border-radius:12px;
+                     background:rgba(255,255,255,.03); transition:.16s; }
+        .newfolder:hover { color:#fff; border-color:rgba(139,123,255,.5); background:rgba(139,123,255,.12); }
+        .newfolder svg { width:18px; height:18px; }
         .list { flex:1; min-height:0; overflow-y:auto; padding:0 8px 12px;
                 scrollbar-width:thin; scrollbar-color:rgba(77,107,254,.5) transparent; }
         .list::-webkit-scrollbar { width:8px; }
         .list::-webkit-scrollbar-thumb { border-radius:99px;
                 background:linear-gradient(180deg, var(--ac), rgba(77,107,254,.3)); }
-        .row { display:flex; align-items:center; gap:8px; padding:9px 10px; margin-bottom:4px;
+
+        .folder { margin-bottom:2px; }
+        .folder-head { display:flex; align-items:center; gap:6px; padding:8px 8px 8px 10px;
+                       margin-bottom:2px; border-radius:9px; cursor:pointer; user-select:none; }
+        .folder-head:hover { background:rgba(255,255,255,.04); }
+        .folder-head .car { flex:none; width:14px; height:14px; color:var(--muted);
+                            transition:transform .15s; }
+        .folder.collapsed .folder-head .car { transform:rotate(-90deg); }
+        .folder-head .fname { flex:1; min-width:0; font-size:.76rem; font-weight:700; color:#cfd8ee;
+                              white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .folder-head .fcount { flex:none; color:var(--muted); font-size:.66rem; }
+        .folder-head .ficons { flex:none; display:flex; gap:2px; opacity:0; transition:.13s; }
+        .folder-head:hover .ficons { opacity:1; }
+        .folder-head .fic { width:20px; height:20px; display:grid; place-items:center; color:var(--muted);
+                            border-radius:6px; font-size:.78rem; line-height:1; cursor:pointer; }
+        .folder-head .fic:hover { color:#fff; background:rgba(255,255,255,.1); }
+        .folder-head .fic.del:hover { color:#ff8a8a; background:rgba(255,90,90,.14); }
+        .folder-body { padding-left:14px; }
+        .folder.collapsed .folder-body { display:none; }
+        .folder-empty { color:var(--muted); font-size:.66rem; padding:2px 10px 8px; }
+        .folder-input { width:100%; height:32px; padding:0 9px; margin:0 0 6px; color:#f4f7ff;
+                        font:600 .76rem inherit; border:1px solid var(--ac); border-radius:8px;
+                        outline:none; background:rgba(4,9,20,.7); }
+
+        .row { position:relative; display:flex; align-items:center; gap:8px; padding:9px 10px; margin-bottom:4px;
                border-radius:10px; cursor:pointer; border:1px solid transparent; transition:.13s; }
         .row:hover { background:rgba(255,255,255,.05); }
         .row.on { background:rgba(77,107,254,.16); border-color:rgba(77,107,254,.4); }
         .row .ico { width:8px; height:8px; flex:none; border-radius:50%; background:var(--ac2); opacity:.6; }
         .row .meta { flex:1; min-width:0; }
         .row .ttl { display:block; font-size:.8rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .row .ttl-input { width:100%; height:24px; padding:0 6px; color:#f4f7ff; font:600 .78rem inherit;
+                          border:1px solid var(--ac); border-radius:6px; outline:none; background:rgba(4,9,20,.7); }
         .row .sub { display:block; margin-top:2px; color:var(--muted); font-size:.63rem; }
-        .row .x { flex:none; width:24px; height:24px; display:grid; place-items:center; opacity:0;
-                  color:var(--muted); border-radius:7px; transition:.13s; font-size:1rem; line-height:1; }
-        .row:hover .x { opacity:.7; }
-        .row .x:hover { opacity:1; color:#ff8a8a; background:rgba(255,90,90,.12); }
+        .row .acts { flex:none; display:flex; gap:1px; opacity:0; transition:.13s; }
+        .row:hover .acts { opacity:.75; }
+        .row .acts:hover { opacity:1; }
+        .row .ic { flex:none; width:23px; height:23px; display:grid; place-items:center;
+                  color:var(--muted); border-radius:7px; transition:.13s; font-size:.86rem; line-height:1; }
+        .row .ic:hover { color:#fff; background:rgba(255,255,255,.1); }
+        .row .ic.x:hover { color:#ff8a8a; background:rgba(255,90,90,.12); }
+        .row .ic svg { width:13px; height:13px; display:block; }
         .empty-list { color:var(--muted); font-size:.72rem; text-align:center; padding:24px 14px; line-height:1.6; }
+
+        .fmenu { position:absolute; z-index:30; min-width:168px; padding:6px; color:#eaf0ff;
+                border:1px solid var(--line); border-radius:11px; background:#10162a;
+                box-shadow:0 12px 32px rgba(0,0,0,.5); }
+        .fmenu button { display:flex; align-items:center; gap:8px; width:100%; padding:7px 9px;
+                        color:#dbe2f5; font:400 .76rem inherit; text-align:left; border-radius:7px;
+                        cursor:pointer; background:none; }
+        .fmenu button:hover { background:rgba(255,255,255,.08); }
+        .fmenu button.on { color:var(--ac); }
+        .fmenu button .dot2 { flex:none; width:7px; height:7px; border-radius:50%; background:var(--ac2); opacity:.7; }
+        .fmenu hr { margin:5px 2px; border:0; border-top:1px solid var(--line); }
 
         .main { display:flex; flex-direction:column; min-width:0; min-height:0; position:relative; }
         .chat { flex:1; min-height:0; overflow-y:auto; padding:clamp(14px,2.4vw,26px);
@@ -14623,6 +14747,15 @@ def ai_page():
         .msg.err .txt { color:#ffb3b3; background:rgba(255,90,90,.1); border-color:rgba(255,90,90,.32); }
         .msg .txt img { max-width:260px; max-height:260px; border-radius:9px; display:block;
                         margin:0 0 8px; border:1px solid var(--line); }
+        .msg .tools { display:flex; gap:5px; margin-top:4px; opacity:0; transition:.15s; }
+        .msg:hover .tools, .msg .tools.stay { opacity:1; }
+        .msg.me .tools { justify-content:flex-end; }
+        .copy-btn { flex:none; display:flex; align-items:center; gap:5px; height:24px; padding:0 8px;
+                    cursor:pointer; color:var(--muted); font:600 .64rem inherit; letter-spacing:.02em;
+                    border:1px solid var(--line); border-radius:7px; background:rgba(255,255,255,.03); }
+        .copy-btn:hover { color:#fff; border-color:rgba(255,255,255,.28); background:rgba(255,255,255,.08); }
+        .copy-btn.done { color:var(--ok); border-color:rgba(99,245,173,.4); }
+        .copy-btn svg { width:12px; height:12px; }
         .msg .txt p:first-child { margin-top:0; } .msg .txt p:last-child { margin-bottom:0; }
         .txt pre { margin:9px 0; padding:11px 13px; overflow-x:auto; border-radius:10px;
                    background:rgba(3,7,18,.7); border:1px solid var(--line);
@@ -14698,10 +14831,15 @@ def ai_page():
       <div class="wrap" id="wrap">
         <div class="scrim" id="scrim"></div>
         <aside class="aside">
-          <button class="newbtn" id="newbtn" type="button">
-            <svg viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
-            Новый чат
-          </button>
+          <div class="newrow">
+            <button class="newbtn" id="newbtn" type="button">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
+              Новый чат
+            </button>
+            <button class="newfolder" id="newfolder" type="button" title="Новая папка" aria-label="Новая папка">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/><path d="M12 12v5M9.5 14.5h5"/></svg>
+            </button>
+          </div>
           <div class="list" id="list"></div>
         </aside>
 
@@ -14738,8 +14876,32 @@ def ai_page():
                   : /gemma|google/i.test(PRESET) ? "GM"
                   : /llama|meta/i.test(PRESET) ? "LL"
                   : /deepseek/i.test(PRESET) ? "DS" : "AI";
-        let chats = [], curId = null, busy = false, ready = false, vision = false, modelName = PRESET;
+        let chats = [], folders = [], curId = null, busy = false, ready = false, vision = false, modelName = PRESET;
         let pendImg = null;
+        let foldedSet = new Set();
+        try { foldedSet = new Set(JSON.parse(localStorage.getItem("aiFolded") || "[]")); } catch (e) {}
+        const saveFolded = () => { try { localStorage.setItem("aiFolded", JSON.stringify([...foldedSet])); } catch (e) {} };
+
+        const ICON_COPY = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>';
+        const ICON_CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
+        const ICON_MOVE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>';
+
+        const copyMsg = async (btn, text) => {
+          if (!text) return;
+          try {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              await navigator.clipboard.writeText(text);
+            } else {
+              const ta = document.createElement("textarea");
+              ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+              document.body.appendChild(ta); ta.focus(); ta.select();
+              document.execCommand("copy"); ta.remove();
+            }
+            btn.classList.add("done");
+            btn.innerHTML = ICON_CHECK + "<span>Скопировано</span>";
+            setTimeout(() => { btn.classList.remove("done"); btn.innerHTML = ICON_COPY + "<span>Копировать</span>"; }, 1400);
+          } catch (e) {}
+        };
 
         const esc = (s) => (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
@@ -14775,7 +14937,7 @@ def ai_page():
 
         const scrollDown = () => { chat.scrollTop = chat.scrollHeight; };
 
-        const bubble = (role, html, cls) => {
+        const bubble = (role, html, cls, raw) => {
           const el = document.createElement("div");
           el.className = "msg " + (role === "me" ? "me" : "bot") + (cls ? " " + cls : "");
           const av = document.createElement("span");
@@ -14788,6 +14950,17 @@ def ai_page():
           if (html === null) tx.innerHTML = '<span class="dots"><span></span><span></span><span></span></span>';
           else tx.innerHTML = html;
           bd.appendChild(tx);
+          if (raw != null) {
+            tx.dataset.raw = raw;
+            const tools = document.createElement("div");
+            tools.className = "tools";
+            const cp = document.createElement("button");
+            cp.type = "button"; cp.className = "copy-btn";
+            cp.innerHTML = ICON_COPY + "<span>Копировать</span>";
+            cp.addEventListener("click", () => copyMsg(cp, tx.dataset.raw));
+            tools.appendChild(cp);
+            bd.appendChild(tools);
+          }
           el.append(av, bd);
           chat.appendChild(el);
           scrollDown();
@@ -14816,23 +14989,184 @@ def ai_page():
           }));
         };
 
+        const closeFMenu = () => { const m = document.querySelector(".fmenu"); if (m) m.remove(); };
+
+        const askNewFolder = async (chatToMove) => {
+          const name = (window.prompt("Название новой папки:") || "").trim().slice(0, 40);
+          if (!name) return;
+          try {
+            const r = await fetch("/api/ai/folder", { method: "POST", credentials: "same-origin",
+              headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) });
+            const d = await r.json();
+            if (!r.ok) { alert(d.error || "Не удалось создать папку."); return; }
+            folders.push({ id: d.id, name: d.name });
+            if (chatToMove) await moveChat(chatToMove, d.id); else renderList();
+          } catch (e) {}
+        };
+
+        const moveChat = async (c, fid) => {
+          c.folder = fid;
+          renderList();
+          try {
+            await fetch("/api/ai/chat/" + c.id, { method: "PATCH", credentials: "same-origin",
+              headers: { "Content-Type": "application/json" }, body: JSON.stringify({ folder: fid }) });
+          } catch (e) {}
+        };
+
+        const openFolderMenu = (anchor, c) => {
+          closeFMenu();
+          const menu = document.createElement("div");
+          menu.className = "fmenu";
+          const mkBtn = (label, active, onClick, dot) => {
+            const b = document.createElement("button");
+            b.type = "button";
+            if (active) b.className = "on";
+            b.innerHTML = (dot ? '<span class="dot2"></span>' : "") + esc(label);
+            b.addEventListener("click", (e) => { e.stopPropagation(); onClick(); closeFMenu(); });
+            return b;
+          };
+          menu.appendChild(mkBtn("Без папки", !c.folder, () => moveChat(c, "")));
+          if (folders.length) menu.appendChild(document.createElement("hr"));
+          folders.forEach((f) => menu.appendChild(mkBtn(f.name, c.folder === f.id, () => moveChat(c, f.id), true)));
+          menu.appendChild(document.createElement("hr"));
+          menu.appendChild(mkBtn("+ Новая папка…", false, () => askNewFolder(c)));
+          document.body.appendChild(menu);
+          const r = anchor.getBoundingClientRect();
+          const mw = 180;
+          let left = r.left;
+          if (left + mw > window.innerWidth - 8) left = window.innerWidth - mw - 8;
+          menu.style.left = Math.max(8, left) + "px";
+          menu.style.top = (r.bottom + 4) + "px";
+          setTimeout(() => document.addEventListener("click", closeFMenu, { once: true }), 0);
+        };
+
+        const startRename = (row, c) => {
+          closeFMenu();
+          const ttl = row.querySelector(".ttl");
+          const input = document.createElement("input");
+          input.className = "ttl-input";
+          input.value = c.title;
+          ttl.replaceWith(input);
+          input.focus(); input.select();
+          let done = false;
+          const save = async () => {
+            if (done) return;
+            done = true;
+            const val = input.value.trim().slice(0, 80) || "Новый чат";
+            ttl.textContent = val;
+            input.replaceWith(ttl);
+            if (val === c.title) return;
+            c.title = val;
+            try {
+              await fetch("/api/ai/chat/" + c.id, { method: "PATCH", credentials: "same-origin",
+                headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: val }) });
+            } catch (e) {}
+          };
+          input.addEventListener("keydown", (e) => {
+            if (e.key === "Enter") { e.preventDefault(); save(); }
+            else if (e.key === "Escape") { done = true; input.replaceWith(ttl); }
+          });
+          input.addEventListener("blur", save);
+          input.addEventListener("click", (e) => e.stopPropagation());
+        };
+
+        const startFolderRename = (head, f) => {
+          const nameEl = head.querySelector(".fname");
+          const input = document.createElement("input");
+          input.className = "folder-input";
+          input.value = f.name;
+          nameEl.replaceWith(input);
+          input.focus(); input.select();
+          let done = false;
+          const save = async () => {
+            if (done) return;
+            done = true;
+            const val = input.value.trim().slice(0, 40) || f.name;
+            nameEl.textContent = val;
+            input.replaceWith(nameEl);
+            if (val === f.name) return;
+            f.name = val;
+            try {
+              await fetch("/api/ai/folder/" + f.id, { method: "PATCH", credentials: "same-origin",
+                headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: val }) });
+            } catch (e) {}
+          };
+          input.addEventListener("keydown", (e) => {
+            if (e.key === "Enter") { e.preventDefault(); save(); }
+            else if (e.key === "Escape") { done = true; input.replaceWith(nameEl); }
+          });
+          input.addEventListener("blur", save);
+          input.addEventListener("click", (e) => e.stopPropagation());
+        };
+
+        const delFolder = async (f) => {
+          if (!confirm('Удалить папку «' + f.name + '»?\nЧаты внутри останутся — просто выйдут из папки.')) return;
+          try { await fetch("/api/ai/folder/" + f.id, { method: "DELETE", credentials: "same-origin" }); } catch (e) {}
+          folders = folders.filter((x) => x.id !== f.id);
+          chats.forEach((c) => { if (c.folder === f.id) c.folder = ""; });
+          renderList();
+        };
+
+        const makeRow = (c) => {
+          const row = document.createElement("div");
+          row.className = "row" + (c.id === curId ? " on" : "");
+          row.innerHTML = '<span class="ico"></span><span class="meta">' +
+            '<span class="ttl">' + esc(c.title) + '</span>' +
+            '<span class="sub">' + c.count + ' сообщ. · ' + ago(c.updated) + '</span></span>' +
+            '<span class="acts">' +
+              '<span class="ic ren" title="Переименовать">✎</span>' +
+              '<span class="ic mov" title="Переложить в папку">' + ICON_MOVE + '</span>' +
+              '<span class="ic x" title="Удалить">✕</span>' +
+            '</span>';
+          row.querySelector(".meta").addEventListener("click", () => openChat(c.id));
+          row.querySelector(".ren").addEventListener("click", (e) => { e.stopPropagation(); startRename(row, c); });
+          row.querySelector(".mov").addEventListener("click", (e) => { e.stopPropagation(); openFolderMenu(e.currentTarget, c); });
+          row.querySelector(".x").addEventListener("click", (e) => { e.stopPropagation(); delChat(c.id); });
+          return row;
+        };
+
+        const folderBlock = (f) => {
+          const wrap = document.createElement("div");
+          wrap.className = "folder" + (foldedSet.has(f.id) ? " collapsed" : "");
+          const mine = chats.filter((c) => c.folder === f.id);
+          const head = document.createElement("div");
+          head.className = "folder-head";
+          head.innerHTML = '<svg class="car" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>' +
+            '<span class="fname">' + esc(f.name) + '</span>' +
+            '<span class="fcount">' + mine.length + '</span>' +
+            '<span class="ficons"><span class="fic ren" title="Переименовать">✎</span><span class="fic del" title="Удалить папку">✕</span></span>';
+          head.addEventListener("click", (e) => {
+            if (e.target.closest(".fic")) return;
+            wrap.classList.toggle("collapsed");
+            if (wrap.classList.contains("collapsed")) foldedSet.add(f.id); else foldedSet.delete(f.id);
+            saveFolded();
+          });
+          head.querySelector(".ren").addEventListener("click", (e) => { e.stopPropagation(); startFolderRename(head, f); });
+          head.querySelector(".del").addEventListener("click", (e) => { e.stopPropagation(); delFolder(f); });
+          const body = document.createElement("div");
+          body.className = "folder-body";
+          if (!mine.length) body.innerHTML = '<div class="folder-empty">Пусто</div>';
+          else mine.forEach((c) => body.appendChild(makeRow(c)));
+          wrap.append(head, body);
+          return wrap;
+        };
+
         const renderList = () => {
           list.innerHTML = "";
-          if (!chats.length) {
+          const rest = chats.filter((c) => !c.folder || !folders.some((f) => f.id === c.folder));
+          if (!chats.length && !folders.length) {
             list.innerHTML = '<div class="empty-list">Пока пусто.<br>Нажмите «Новый чат».</div>';
             return;
           }
-          chats.forEach((c) => {
-            const row = document.createElement("div");
-            row.className = "row" + (c.id === curId ? " on" : "");
-            row.innerHTML = '<span class="ico"></span><span class="meta">' +
-              '<span class="ttl">' + esc(c.title) + '</span>' +
-              '<span class="sub">' + c.count + ' сообщ. · ' + ago(c.updated) + '</span></span>' +
-              '<span class="x" title="Удалить">✕</span>';
-            row.querySelector(".meta").addEventListener("click", () => openChat(c.id));
-            row.querySelector(".x").addEventListener("click", (e) => { e.stopPropagation(); delChat(c.id); });
-            list.appendChild(row);
-          });
+          folders.forEach((f) => list.appendChild(folderBlock(f)));
+          if (folders.length && rest.length) {
+            const head = document.createElement("div");
+            head.className = "folder-head";
+            head.style.cursor = "default";
+            head.innerHTML = '<span class="fname" style="opacity:.6">Без папки</span><span class="fcount">' + rest.length + '</span>';
+            list.appendChild(head);
+          }
+          rest.forEach((c) => list.appendChild(makeRow(c)));
         };
 
         const closeDrawer = () => wrap.classList.remove("open");
@@ -14843,6 +15177,7 @@ def ai_page():
             const d = await r.json();
             ready = !!d.ready; vision = !!d.vision; modelName = d.model || "";
             chats = d.chats || [];
+            folders = d.folders || [];
             const shownModel = PRESET || modelName;
             const family = /minimax/i.test(shownModel) ? "MiniMax"
                          : /nvidia|nemotron/i.test(shownModel) ? "NVIDIA"
@@ -14867,7 +15202,7 @@ def ai_page():
           try {
             const r = await fetch("/api/ai/chat", { method: "POST", credentials: "same-origin" });
             const d = await r.json();
-            chats.unshift({ id: d.id, title: d.title, count: 0, updated: Date.now() / 1000 });
+            chats.unshift({ id: d.id, title: d.title, count: 0, updated: Date.now() / 1000, folder: "" });
             curId = d.id;
             renderList();
             chat.innerHTML = "";
@@ -14892,7 +15227,7 @@ def ai_page():
               let html = "";
               if (m.img) html += '<img src="/api/ai/img/' + encodeURIComponent(m.img) + '" alt="фото">';
               html += isMe ? esc(m.text).replace(/\n/g, "<br>") : md(m.text);
-              bubble(isMe ? "me" : "bot", html);
+              bubble(isMe ? "me" : "bot", html, undefined, m.text || "");
             });
           } catch (e) {
             chat.innerHTML = "";
@@ -14935,10 +15270,10 @@ def ai_page():
           let meHtml = "";
           if (img) meHtml += '<img src="' + img + '" alt="фото">';
           if (text) meHtml += esc(text).replace(/\n/g, "<br>");
-          bubble("me", meHtml);
+          bubble("me", meHtml, undefined, text);
           ta.value = ""; grow(); clearImg();
           bumpCard();
-          const out = bubble("bot", null);
+          const out = bubble("bot", null, undefined, "");
 
           let acc = "";
           try {
@@ -14969,13 +15304,13 @@ def ai_page():
                 let ev;
                 try { ev = JSON.parse(line.slice(5).trim()); } catch (e) { continue; }
                 if (ev.model) { modelName = ev.model; $("brand-sub").innerHTML = '<i class="dot on"></i>' + esc(modelName); }
-                else if (ev.delta) { acc += ev.delta; out.innerHTML = md(acc); scrollDown(); }
+                else if (ev.delta) { acc += ev.delta; out.innerHTML = md(acc); out.dataset.raw = acc; scrollDown(); }
                 else if (ev.error) {
                   out.classList.remove("cursor");
                   out.parentElement.parentElement.classList.add("err");
                   out.textContent = ev.error;
                 }
-                else if (ev.done && ev.text) { acc = ev.text; out.innerHTML = md(acc); }
+                else if (ev.done && ev.text) { acc = ev.text; out.innerHTML = md(acc); out.dataset.raw = acc; }
               }
             }
             out.classList.remove("cursor");
@@ -14998,6 +15333,7 @@ def ai_page():
         });
         $("field").addEventListener("submit", (e) => { e.preventDefault(); submit(); });
         $("newbtn").addEventListener("click", newChat);
+        $("newfolder").addEventListener("click", () => askNewFolder(null));
         $("burger").addEventListener("click", () => wrap.classList.toggle("open"));
         $("scrim").addEventListener("click", closeDrawer);
 
