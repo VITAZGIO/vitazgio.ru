@@ -14102,6 +14102,13 @@ def _ai_card(c):
             "pinned": bool(c.get("pinned"))}
 
 
+def _ai_wants_reasoning(model_id):
+    """Показ размышлений просим только у моделей, которые их реально умеют
+    (MiniMax, NVIDIA/Nemotron) — остальным лишний параметр может не
+    понравиться, а откатной список моделей общий для всех сетей."""
+    return bool(re.search(r"minimax|nemotron|nvidia", model_id or "", re.I))
+
+
 def _ai_smart_title(text):
     """Короткий заголовок из первой реплики: без markdown-мусора, обрезан по
     границе слова, а не насрединеслова."""
@@ -14203,7 +14210,9 @@ def ai_chat_get(chat_id):
             return jsonify(error="Чат не найден."), 404
         msgs = [{"role": m.get("role"), "text": m.get("text", ""),
                  "img": m.get("img") or "", "model": m.get("model") or "",
-                 "pdf_name": m.get("pdf_name") or "", "ts": m.get("ts", 0)}
+                 "pdf_name": m.get("pdf_name") or "", "ts": m.get("ts", 0),
+                 "reasoning": m.get("reasoning") or "",
+                 "reasoning_secs": m.get("reasoning_secs") or 0}
                 for m in c.get("messages", [])]
         title = c.get("title") or "Новый чат"
     return jsonify(id=chat_id, title=title, messages=msgs)
@@ -14360,19 +14369,27 @@ def _ai_run_stream(chat_id, ctx, use_vision, img_b64, requested_model, model):
                 body = "[фото]"
             api_msgs.append({"role": msg.get("role", "user"), "content": body})
 
-    req_body = json.dumps({
-        "model": model,
-        "messages": api_msgs,
-        "stream": True,
-        "max_tokens": AI_REPLY_TOKENS,
-    }).encode("utf-8")
+    def _body_for(candidate):
+        body = {"model": candidate, "messages": api_msgs, "stream": True,
+                "max_tokens": AI_REPLY_TOKENS}
+        # Показ размышлений просим только у моделей, которые их реально
+        # умеют (MiniMax, NVIDIA/Nemotron) — остальным лишний параметр
+        # может не понравиться, а откатной список моделей общий.
+        if _ai_wants_reasoning(candidate):
+            body["reasoning"] = {"enabled": True}
+        return json.dumps(body).encode("utf-8")
 
-    def save_reply(full, used_model):
+    req_body = _body_for(model)
+
+    def save_reply(full, used_model, reasoning="", reasoning_secs=0):
         with ai_lock:
             cc = _ai_find(chat_id)
             if cc is not None:
-                cc.setdefault("messages", []).append(
-                    {"role": "assistant", "text": full, "model": used_model, "ts": time.time()})
+                msg = {"role": "assistant", "text": full, "model": used_model, "ts": time.time()}
+                if reasoning:
+                    msg["reasoning"] = reasoning
+                    msg["reasoning_secs"] = reasoning_secs
+                cc.setdefault("messages", []).append(msg)
                 cc["updated"] = time.time()
                 _ai_write()
 
@@ -14398,9 +14415,7 @@ def _ai_run_stream(chat_id, ctx, use_vision, img_b64, requested_model, model):
         resp = None
         chosen = candidates[0]
         for candidate in candidates:
-            body_try = req_body if candidate == model else json.dumps({
-                "model": candidate, "messages": api_msgs, "stream": True,
-                "max_tokens": AI_REPLY_TOKENS}).encode("utf-8")
+            body_try = req_body if candidate == model else _body_for(candidate)
             req = urlrequest.Request(OPENROUTER_URL, data=body_try, headers=headers)
             try:
                 resp = urlrequest.urlopen(req, timeout=AI_TIMEOUT)
@@ -14435,6 +14450,10 @@ def _ai_run_stream(chat_id, ctx, use_vision, img_b64, requested_model, model):
             yield _sse({"model": chosen})
 
         acc = []
+        racc = []                      # текст размышлений (если модель умеет)
+        think_start = time.time()
+        think_secs = {"v": 0}
+        content_started = {"v": False}
         saved = {"done": False}
 
         def save_once():
@@ -14443,7 +14462,7 @@ def _ai_run_stream(chat_id, ctx, use_vision, img_b64, requested_model, model):
             full = "".join(acc).strip()
             if full:
                 saved["done"] = True
-                save_reply(full, chosen)
+                save_reply(full, chosen, "".join(racc).strip(), think_secs["v"])
 
         try:
             for rawline in resp:
@@ -14458,10 +14477,18 @@ def _ai_run_stream(chat_id, ctx, use_vision, img_b64, requested_model, model):
                 except ValueError:
                     continue
                 choices = obj.get("choices") or [{}]
-                delta = (choices[0].get("delta") or {}).get("content")
-                if delta:
-                    acc.append(delta)
-                    yield _sse({"delta": delta})
+                delta = choices[0].get("delta") or {}
+                rtext = delta.get("reasoning") or delta.get("reasoning_content")
+                if rtext:
+                    racc.append(rtext)
+                    yield _sse({"reasoning": rtext})
+                ctext = delta.get("content")
+                if ctext:
+                    if not content_started["v"]:
+                        content_started["v"] = True
+                        think_secs["v"] = round(time.time() - think_start, 1)
+                    acc.append(ctext)
+                    yield _sse({"delta": ctext})
         except Exception:
             pass
         finally:
@@ -14949,6 +14976,20 @@ def ai_page():
                         border-radius:8px; font-size:.72rem; color:#b9c6dc;
                         border:1px solid var(--line); background:rgba(255,255,255,.04); }
         .msg .pdf-tag svg { width:13px; height:13px; flex:none; }
+        .think { margin:0 0 9px; border:1px solid var(--line); border-radius:10px;
+                 background:rgba(255,255,255,.03); overflow:hidden; }
+        .think-head { display:flex; align-items:center; gap:7px; padding:8px 11px;
+                      cursor:pointer; user-select:none; color:var(--muted); font-size:.72rem; }
+        .think-head:hover { color:#dbe2f5; }
+        .think-head .tcar { width:12px; height:12px; flex:none; transition:transform .15s; }
+        .think.open .think-head .tcar { transform:rotate(180deg); }
+        .think-label { flex:1; font-weight:600; }
+        .think.live .think-label::after { content:"…"; }
+        .think-timer { flex:none; font-variant-numeric:tabular-nums; font-size:.68rem; }
+        .think-body { display:none; padding:0 12px 11px; color:#9aa5c2; font-size:.78rem;
+                      line-height:1.55; white-space:pre-wrap; overflow-wrap:anywhere;
+                      max-height:260px; overflow-y:auto; }
+        .think.open .think-body { display:block; }
         .msg .txt p:first-child { margin-top:0; } .msg .txt p:last-child { margin-bottom:0; }
         .txt pre { margin:9px 0; padding:11px 13px; overflow-x:auto; border-radius:10px;
                    background:rgba(3,7,18,.7); border:1px solid var(--line);
@@ -15161,6 +15202,20 @@ def ai_page():
         // появлении новой.
         let lastRegenBtn = null;
 
+        // Блок «размышлений» (reasoning) — общий для живого стриминга
+        // (runStream) и статичного показа истории (bubble).
+        const ICON_TCAR = '<svg class="tcar" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>';
+        const fmtSecs = (s) => (Math.round((s || 0) * 10) / 10) + " с";
+        const newThink = () => {
+          const think = document.createElement("div");
+          think.className = "think";
+          think.innerHTML = '<div class="think-head">' + ICON_TCAR +
+            '<span class="think-label">Думает</span><span class="think-timer">0 с</span></div>' +
+            '<div class="think-body"></div>';
+          think.querySelector(".think-head").addEventListener("click", () => think.classList.toggle("open"));
+          return think;
+        };
+
         const bubble = (role, html, cls, raw, opts) => {
           opts = opts || {};
           const el = document.createElement("div");
@@ -15175,6 +15230,13 @@ def ai_page():
             tag.className = "pdf-tag";
             tag.innerHTML = ICON_PDF + "<span>" + esc(opts.pdfName) + "</span>";
             bd.appendChild(tag);
+          }
+          if (opts.think && opts.think.text) {
+            const think = newThink();
+            think.querySelector(".think-label").textContent = "Думал";
+            think.querySelector(".think-timer").textContent = fmtSecs(opts.think.secs);
+            think.querySelector(".think-body").textContent = opts.think.text;
+            bd.appendChild(think);
           }
           const tx = document.createElement("div");
           tx.className = "txt";
@@ -15520,7 +15582,8 @@ def ai_page():
               html += isMe ? esc(m.text).replace(/\n/g, "<br>") : md(m.text);
               const isLastBot = !isMe && idx === d.messages.length - 1;
               bubble(isMe ? "me" : "bot", html, undefined, m.text || "",
-                     { model: m.model, pdfName: isMe ? m.pdf_name : "", regen: isLastBot });
+                     { model: m.model, pdfName: isMe ? m.pdf_name : "", regen: isLastBot,
+                       think: (!isMe && m.reasoning) ? { text: m.reasoning, secs: m.reasoning_secs } : null });
             });
           } catch (e) {
             chat.innerHTML = "";
@@ -15564,6 +15627,31 @@ def ai_page():
         // ответ через свой finally на GeneratorExit).
         const runStream = async (url, body, out) => {
           curAbort = new AbortController();
+          // Живой блок размышлений: создаётся лениво на первый reasoning-кусок,
+          // тикает таймер, на первом куске самого ответа — сворачивается,
+          // подпись меняется на «Думал», таймер замирает на финальном числе.
+          let thinkEl = null, thinkBody = null, thinkTimer = null;
+          let thinkStart = 0, thinkTick = null, thinkDone = false;
+          const ensureThink = () => {
+            if (thinkEl) return;
+            thinkStart = Date.now();
+            thinkEl = newThink();
+            thinkEl.classList.add("open", "live");
+            out.parentElement.insertBefore(thinkEl, out);
+            thinkBody = thinkEl.querySelector(".think-body");
+            thinkTimer = thinkEl.querySelector(".think-timer");
+            thinkTick = setInterval(() => {
+              thinkTimer.textContent = fmtSecs((Date.now() - thinkStart) / 1000);
+            }, 400);
+          };
+          const finishThink = () => {
+            if (!thinkEl || thinkDone) return;
+            thinkDone = true;
+            if (thinkTick) { clearInterval(thinkTick); thinkTick = null; }
+            thinkTimer.textContent = fmtSecs((Date.now() - thinkStart) / 1000);
+            thinkEl.querySelector(".think-label").textContent = "Думал";
+            thinkEl.classList.remove("open", "live");
+          };
           try {
             const r = await fetch(url, {
               method: "POST", credentials: "same-origin",
@@ -15600,20 +15688,32 @@ def ai_page():
                   const avEl = out.closest(".msg").querySelector(".av");
                   if (avEl) avEl.textContent = avaFor(ev.model);
                 }
-                else if (ev.delta) { acc += ev.delta; out.innerHTML = md(acc); out.dataset.raw = acc; scrollDown(); }
+                else if (ev.reasoning) {
+                  ensureThink();
+                  thinkBody.textContent += ev.reasoning;
+                  thinkBody.scrollTop = thinkBody.scrollHeight;
+                  scrollDown();
+                }
+                else if (ev.delta) {
+                  finishThink();
+                  acc += ev.delta; out.innerHTML = md(acc); out.dataset.raw = acc; scrollDown();
+                }
                 else if (ev.error) {
                   out.classList.remove("cursor");
+                  finishThink();
                   out.parentElement.parentElement.classList.add("err");
                   out.textContent = ev.error;
                 }
-                else if (ev.done && ev.text) { acc = ev.text; out.innerHTML = md(acc); out.dataset.raw = acc; }
+                else if (ev.done && ev.text) { finishThink(); acc = ev.text; out.innerHTML = md(acc); out.dataset.raw = acc; }
               }
             }
             out.classList.remove("cursor");
+            finishThink();
             if (!acc && !out.textContent) out.textContent = "Пустой ответ.";
             bumpCard();
           } catch (e) {
             out.classList.remove("cursor");
+            finishThink();
             if (e.name === "AbortError") {
               if (!out.dataset.raw && !out.textContent) out.textContent = "Остановлено.";
             } else {
