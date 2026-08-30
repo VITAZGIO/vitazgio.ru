@@ -4689,7 +4689,7 @@ def cabinet():
               <span class="pl-label">Аудио</span>
               <span class="pl-actions">
                 <button class="pl-icon" id="pl-pop" type="button"
-                        title="Вынести плеер в отдельное окно браузера">⧉</button>
+                        title="Плавающее окно поверх всех окон (как в ютубе)">⧉</button>
                 <button class="pl-icon" id="pl-add" type="button" title="Добавить треки">+</button>
                 <button class="pl-icon" id="pl-toggle-list" type="button" title="Список треков">☰</button>
               </span>
@@ -5934,10 +5934,11 @@ def cabinet():
             // окна при этом не появлялось, а значок ⧉ обещал именно окно.
             const pop = el("pl-pop");
             if (pop) pop.addEventListener("click", () => {
-              // Запасной путь на случай, если из кэша приехал старый движок
-              // без popOut: окно всё равно откроется. Кнопка не имеет права
-              // молча не делать ничего.
-              if (window.VGP && window.VGP.popOut) window.VGP.popOut();
+              // Сразу финальная плавашка поверх всех окон (как в ютубе), без
+              // промежуточного окна. Запасной путь — если из кэша приехал
+              // старый движок без floatOut: хотя бы отдельное окно.
+              if (window.VGP && window.VGP.floatOut) window.VGP.floatOut();
+              else if (window.VGP && window.VGP.popOut) window.VGP.popOut();
               else window.open("/player/pop", "vgplayer", "width=340,height=440");
             });
 
@@ -11631,6 +11632,18 @@ def vg_player_js():
        раньше они звали open() и показывали виджет ПОВЕРХ страницы, из-за
        чего «вынести из браузера» не получалось — окна не было. */
     popOut() { openInWindow(); },
+    /* Сразу ФИНАЛЬНАЯ плавашка, без промежуточного окна /player/pop.
+       Chrome/Edge — живой виджет поверх всех окон (Document PiP), Firefox —
+       видео-PiP как у ютуба. Где нет ни того ни другого — тогда уже окно
+       /player/pop как запасной путь. Звук и очередь берём из движка этой
+       же страницы, поэтому лишнего окна не нужно. */
+    floatOut() {
+      if ("documentPictureInPicture" in window) { onTop(); return; }
+      if ("pictureInPictureEnabled" in document && document.pictureInPictureEnabled) {
+        fetchList(); videoPip(); return;
+      }
+      openInWindow();
+    },
     hide() {
       try { localStorage.setItem("vgPlayerOn", "0"); } catch (e) { /* и ладно */ }
       if (popWin && !popWin.closed) { try { popWin.close(); } catch (e) {} }
@@ -11768,21 +11781,28 @@ def vg_player_js():
      его из окна /player/pop: то никуда не переходит, значит и плавающее
      окошко переживёт любую навигацию в основных вкладках. */
   const onTop = async () => {
-    if (!("documentPictureInPicture" in window) || !box) return;
+    if (!("documentPictureInPicture" in window)) return;
+    if (!box) build();                 // зовут прямо с сайта — виджета ещё нет
     let w;
     try {
-      w = await documentPictureInPicture.requestWindow({ width: 320, height: 200 });
+      w = await documentPictureInPicture.requestWindow({ width: 340, height: 300 });
     } catch (e) { return; }
     const st = w.document.createElement("style");
     st.textContent = CSS;
     w.document.head.appendChild(st);
     w.document.body.style.margin = "0";
     w.document.body.style.background = "#0b0f18";
-    box.classList.add("vgp-top");
+    // vgp-pip даёт полноразмерную раскладку (как в окне /player/pop),
+    // vgp-top прячет кнопку «поверх окон» — мы уже поверх. В окне /player/pop
+    // vgp-pip уже стоит и должен остаться после закрытия плавашки, поэтому
+    // снимаем при возврате только то, чего раньше не было.
+    const hadPip = box.classList.contains("vgp-pip");
+    setFolded(false);
+    box.classList.add("vgp-pip", "vgp-top");
     w.document.body.appendChild(box);
-    // Закрыли плавающее окошко — виджет возвращается в окно плеера.
     w.addEventListener("pagehide", () => {
       if (!box) return;
+      if (!hadPip) box.classList.remove("vgp-pip");
       box.classList.remove("vgp-top");
       document.body.appendChild(box);
     }, { once: true });
@@ -17121,10 +17141,10 @@ def music_page():
             <a class="back" href="/" title="На главную" aria-label="На главную"><svg viewBox="0 0 24 24" fill="none"><path d="M19 12H5m0 0 6-6m-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
             <a class="eyebrow" href="/">vitazgio.ru · музыка</a>
             <button class="popout" type="button"
-                    onclick="(window.VGP&amp;&amp;VGP.popOut)?VGP.popOut():window.open('/player/pop','vgplayer','width=340,height=440')"
-                    title="Отдельное окно браузера: музыка играет сама по себе, что бы ни делали на сайте">
+                    onclick="(window.VGP&amp;&amp;VGP.floatOut)?VGP.floatOut():(window.VGP&amp;&amp;VGP.popOut?VGP.popOut():window.open('/player/pop','vgplayer','width=340,height=440'))"
+                    title="Плавающее окно поверх всех окон, как в ютубе">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M21 3l-9 9M10 5H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5"/></svg>
-              <span>Вынести в окно</span>
+              <span>Плавающее окно</span>
             </button>
           </div>
           <img class="hero-mark" src="/static/icons/vg-plain.svg" alt="Vitaz Gio"
