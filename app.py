@@ -15148,7 +15148,12 @@ def ai_page():
         .fmenu button .dot2 { flex:none; width:7px; height:7px; border-radius:50%; background:var(--ac2); opacity:.7; }
         .fmenu hr { margin:5px 2px; border:0; border-top:1px solid var(--line); }
 
-        .main { display:flex; flex-direction:column; min-width:0; min-height:0; position:relative; }
+        /* flex:1 обязателен: без него область чата в flex-строке .wrap
+           сжимается до ширины своего содержимого (~820px) и липнет к
+           сайдбару слева — тогда прокрутка чата оказывается «по центру»,
+           а поле ввода не по центру экрана. С flex:1 .main занимает всё
+           место справа от списка, а .chat/.field центрируются в нём. */
+        .main { flex:1; display:flex; flex-direction:column; min-width:0; min-height:0; position:relative; }
         .chat { flex:1; min-height:0; overflow-y:auto; padding:clamp(14px,2.4vw,26px);
                 display:flex; flex-direction:column; gap:16px;
                 scrollbar-width:thin; scrollbar-color:color-mix(in srgb, var(--ac) 40%, transparent) transparent; }
