@@ -14591,6 +14591,7 @@ AI_MSGS_MAX = 600          # столько реплик на чат
 AI_REPLY_TOKENS = 1400
 AI_TIMEOUT = 120
 AI_IMG_MAX = 4 * 1024 * 1024
+AI_IMG_COUNT_MAX = 6                # столько фото за одну реплику
 AI_PDF_MAX = 8 * 1024 * 1024        # исходный файл
 AI_PDF_TEXT_MAX = 6000              # столько текста из PDF отдаём модели
 AI_SYS_PROMPT = ("Ты дружелюбный и толковый собеседник на личном сайте. "
@@ -14706,11 +14707,40 @@ def _ai_img_path(img_id):
     return os.path.join(AI_IMG_DIR, img_id)
 
 
+def _ai_store_image(data_url):
+    """Разбирает data:image-URL, сохраняет файл на диск, возвращает
+    (id, base64) или (None, None), если картинка кривая/слишком большая."""
+    m = re.match(r"^data:image/(?:png|jpe?g|webp);base64,(.+)$", data_url or "", re.I)
+    if not m:
+        return None, None
+    try:
+        raw = base64.b64decode(m.group(1), validate=True)
+    except Exception:                                        # noqa: BLE001
+        return None, None
+    if not raw or len(raw) > AI_IMG_MAX:
+        return None, None
+    img_id = uuid.uuid4().hex[:16] + ".jpg"
+    try:
+        with open(_ai_img_path(img_id), "wb") as fh:
+            fh.write(raw)
+    except OSError:
+        return None, None
+    return img_id, base64.b64encode(raw).decode("ascii")
+
+
+def _ai_msg_imgs(m):
+    """Все id картинок сообщения — новый список imgs плюс старое одиночное img."""
+    ids = list(m.get("imgs") or [])
+    if m.get("img") and m["img"] not in ids:
+        ids.append(m["img"])
+    return ids
+
+
 def _ai_drop_images(chat):
     for m in chat.get("messages", []):
-        if m.get("img"):
+        for iid in _ai_msg_imgs(m):
             try:
-                os.remove(_ai_img_path(m["img"]))
+                os.remove(_ai_img_path(iid))
             except OSError:
                 pass
 
@@ -14754,7 +14784,7 @@ def ai_chat_get(chat_id):
         if not c:
             return jsonify(error="Чат не найден."), 404
         msgs = [{"role": m.get("role"), "text": m.get("text", ""),
-                 "img": m.get("img") or "", "model": m.get("model") or "",
+                 "imgs": _ai_msg_imgs(m), "model": m.get("model") or "",
                  "pdf_name": m.get("pdf_name") or "", "ts": m.get("ts", 0),
                  "reasoning": m.get("reasoning") or "",
                  "reasoning_secs": m.get("reasoning_secs") or 0}
@@ -14884,7 +14914,7 @@ def ai_img_api(img_id):
     return send_file(path, mimetype="image/jpeg")
 
 
-def _ai_run_stream(chat_id, ctx, use_vision, img_b64, requested_model, model):
+def _ai_run_stream(chat_id, ctx, use_vision, imgs_b64, requested_model, model):
     """Строит сообщения для OpenRouter и возвращает функцию-генератор SSE.
     Общий код для отправки нового сообщения и для «Перегенерировать».
 
@@ -14895,12 +14925,13 @@ def _ai_run_stream(chat_id, ctx, use_vision, img_b64, requested_model, model):
     api_msgs = [{"role": "system", "content": AI_SYS_PROMPT}]
     last = ctx[-1] if ctx else None
     for msg in ctx:
-        if msg is last and use_vision and img_b64:
+        if msg is last and use_vision and imgs_b64:
             content = []
             if msg.get("text"):
                 content.append({"type": "text", "text": msg["text"]})
-            content.append({"type": "image_url", "image_url": {
-                "url": "data:image/jpeg;base64," + img_b64}})
+            for b64 in imgs_b64:
+                content.append({"type": "image_url", "image_url": {
+                    "url": "data:image/jpeg;base64," + b64}})
             api_msgs.append({"role": "user", "content": content})
         else:
             body = msg.get("text", "")
@@ -14910,7 +14941,7 @@ def _ai_run_stream(chat_id, ctx, use_vision, img_b64, requested_model, model):
                 # так разговор про документ продолжается и на следующих ходах.
                 body = (f"[Файл: {msg.get('pdf_name') or 'документ.pdf'}]\n"
                         f"{msg['pdf_text']}\n\n{body}").strip()
-            if not body and msg.get("img"):
+            if not body and _ai_msg_imgs(msg):
                 body = "[фото]"
             api_msgs.append({"role": msg.get("role", "user"), "content": body})
 
@@ -15064,30 +15095,23 @@ def ai_chat_send(chat_id):
 
     payload = request.get_json(silent=True) or {}
     text = (payload.get("text") or "").strip()[:AI_TEXT_MAX]
-    image_data = payload.get("image") or ""
+    # Фото: новый список images, плюс совместимость со старым одиночным image.
+    images_in = payload.get("images")
+    if not isinstance(images_in, list):
+        images_in = [payload.get("image")] if payload.get("image") else []
+    images_in = [x for x in images_in if x][:AI_IMG_COUNT_MAX]
     pdf_data = payload.get("pdf") or ""
     pdf_name = (payload.get("pdf_name") or "").strip()[:120]
-    if not text and not image_data and not pdf_data:
+    if not text and not images_in and not pdf_data:
         return jsonify(error="Пустое сообщение."), 400
 
-    use_vision = bool(image_data) and bool(OPENROUTER_VISION_MODEL)
-    img_id, img_b64 = None, None
-    if image_data:
-        m = re.match(r"^data:image/(?:png|jpe?g|webp);base64,(.+)$",
-                     image_data, re.I)
-        if m:
-            try:
-                raw = base64.b64decode(m.group(1), validate=True)
-            except Exception:
-                raw = b""
-            if raw and len(raw) <= AI_IMG_MAX:
-                img_id = uuid.uuid4().hex[:16] + ".jpg"
-                try:
-                    with open(_ai_img_path(img_id), "wb") as fh:
-                        fh.write(raw)
-                    img_b64 = base64.b64encode(raw).decode("ascii")
-                except OSError:
-                    img_id, img_b64 = None, None
+    img_ids, imgs_b64 = [], []
+    for data_url in images_in:
+        iid, b64 = _ai_store_image(data_url)
+        if iid:
+            img_ids.append(iid)
+            imgs_b64.append(b64)
+    use_vision = bool(imgs_b64) and bool(OPENROUTER_VISION_MODEL)
 
     pdf_text = ""
     if pdf_data:
@@ -15107,8 +15131,8 @@ def ai_chat_send(chat_id):
         if not c:
             return jsonify(error="Чат не найден."), 404
         umsg = {"role": "user", "text": text, "ts": time.time()}
-        if img_id:
-            umsg["img"] = img_id
+        if img_ids:
+            umsg["imgs"] = img_ids
         if pdf_text:
             umsg["pdf_name"] = pdf_name or "документ.pdf"
             umsg["pdf_text"] = pdf_text
@@ -15120,9 +15144,9 @@ def ai_chat_send(chat_id):
         c["updated"] = time.time()
         if len(c["messages"]) > AI_MSGS_MAX:
             for old in c["messages"][:-AI_MSGS_MAX]:
-                if old.get("img"):
+                for iid in _ai_msg_imgs(old):
                     try:
-                        os.remove(_ai_img_path(old["img"]))
+                        os.remove(_ai_img_path(iid))
                     except OSError:
                         pass
             c["messages"] = c["messages"][-AI_MSGS_MAX:]
@@ -15132,7 +15156,7 @@ def ai_chat_send(chat_id):
 
     requested_model = (payload.get("model") or "").strip()
     model = OPENROUTER_VISION_MODEL if use_vision else (requested_model or OPENROUTER_MODEL)
-    gen = _ai_run_stream(chat_id, ctx, use_vision, img_b64, requested_model, model)
+    gen = _ai_run_stream(chat_id, ctx, use_vision, imgs_b64, requested_model, model)
 
     def with_title():
         # Заголовок чата на первой реплике вычисляется здесь же, на сервере
@@ -15168,19 +15192,20 @@ def ai_chat_regenerate(chat_id):
         if not msgs or msgs[-1].get("role") != "user":
             return jsonify(error="Нечего перегенерировать — нет вопроса."), 400
         ctx = list(msgs[-AI_CTX_MSGS:])
-        last_img = ctx[-1].get("img") if ctx else None
+        last_imgs = _ai_msg_imgs(ctx[-1]) if ctx else []
 
-    img_b64 = None
-    use_vision = bool(last_img) and bool(OPENROUTER_VISION_MODEL)
-    if use_vision:
-        try:
-            with open(_ai_img_path(last_img), "rb") as fh:
-                img_b64 = base64.b64encode(fh.read()).decode("ascii")
-        except OSError:
-            use_vision, img_b64 = False, None
+    imgs_b64 = []
+    if last_imgs and OPENROUTER_VISION_MODEL:
+        for iid in last_imgs:
+            try:
+                with open(_ai_img_path(iid), "rb") as fh:
+                    imgs_b64.append(base64.b64encode(fh.read()).decode("ascii"))
+            except OSError:
+                pass
+    use_vision = bool(imgs_b64)
 
     model = OPENROUTER_VISION_MODEL if use_vision else (requested_model or OPENROUTER_MODEL)
-    gen = _ai_run_stream(chat_id, ctx, use_vision, img_b64, requested_model, model)
+    gen = _ai_run_stream(chat_id, ctx, use_vision, imgs_b64, requested_model, model)
     return Response(gen(), mimetype="text/event-stream",
                     headers={"Cache-Control": "no-store",
                              "X-Accel-Buffering": "no"})
@@ -15689,9 +15714,9 @@ def ai_page():
           <div class="compose">
             <div id="chip-slot"></div>
             <form class="field" id="field">
-              <label class="attach" id="attach" title="Прикрепить фото" hidden>
+              <label class="attach" id="attach" title="Прикрепить фото (можно несколько, и Ctrl+V из буфера)" hidden>
                 <svg viewBox="0 0 24 24" fill="none"><path d="M21 12.5 12.5 21a5 5 0 0 1-7-7l8-8a3.5 3.5 0 0 1 5 5l-8 8a2 2 0 0 1-3-3l7.5-7.5" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                <input type="file" id="file" accept="image/*" hidden>
+                <input type="file" id="file" accept="image/*" multiple hidden>
               </label>
               <label class="attach" id="attach-pdf" title="Прикрепить PDF">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/></svg>
@@ -15736,7 +15761,8 @@ def ai_page():
           return c ? "linear-gradient(160deg, " + c[1] + ", " + c[0] + ")" : "";
         };
         let chats = [], folders = [], curId = null, busy = false, ready = false, vision = false, modelName = PRESET;
-        let pendImg = null, pendPdf = null, pendPdfName = "";
+        let pendImgs = [], pendPdf = null, pendPdfName = "";
+        const IMG_MAX_COUNT = 6;
         let curAbort = null, searchQ = "";
         let foldedSet = new Set();
         try { foldedSet = new Set(JSON.parse(localStorage.getItem("aiFolded") || "[]")); } catch (e) {}
@@ -16251,7 +16277,9 @@ def ai_page():
             d.messages.forEach((m, idx) => {
               const isMe = m.role === "user";
               let html = "";
-              if (m.img) html += '<img src="/api/ai/img/' + encodeURIComponent(m.img) + '" alt="фото">';
+              (m.imgs || []).forEach((iid) => {
+                html += '<img src="/api/ai/img/' + encodeURIComponent(iid) + '" alt="фото">';
+              });
               html += isMe ? esc(m.text).replace(/\n/g, "<br>") : md(m.text);
               const isLastBot = !isMe && idx === d.messages.length - 1;
               bubble(isMe ? "me" : "bot", html, undefined, m.text || "",
@@ -16417,9 +16445,9 @@ def ai_page():
           if (busy || !ready) return;
           const ta = $("text");
           const text = ta.value.trim();
-          const img = pendImg;
+          const imgs = pendImgs.slice();
           const pdf = pendPdf, pdfName = pendPdfName;
-          if (!text && !img && !pdf) return;
+          if (!text && !imgs.length && !pdf) return;
           if (!curId) { await newChat(); }
           if (!curId) return;
 
@@ -16428,7 +16456,7 @@ def ai_page():
 
           busy = true; setBusy(true);
           let meHtml = "";
-          if (img) meHtml += '<img src="' + img + '" alt="фото">';
+          imgs.forEach((src) => { meHtml += '<img src="' + src + '" alt="фото">'; });
           if (text) meHtml += esc(text).replace(/\n/g, "<br>");
           bubble("me", meHtml, undefined, text, { pdfName: pdf ? pdfName : "" });
           ta.value = ""; grow(); clearImg(); clearPdf();
@@ -16436,7 +16464,7 @@ def ai_page():
           const out = bubble("bot", null, undefined, "", { regen: true });
 
           await runStream("/api/ai/chat/" + curId + "/send", {
-            text: text, image: img || undefined,
+            text: text, images: imgs.length ? imgs : undefined,
             pdf: pdf || undefined, pdf_name: pdf ? pdfName : undefined,
             model: PRESET || undefined,
           }, out);
@@ -16484,16 +16512,22 @@ def ai_page():
           renderList(); searchInput.focus();
         });
 
-        // ── вложение в поле ввода: показываем либо фото, либо PDF ──
+        // ── вложение в поле ввода: несколько фото ЛИБО один PDF ──
         const renderChipSlot = () => {
           const slot = $("chip-slot");
           slot.innerHTML = "";
-          if (pendImg) {
-            const chip = document.createElement("div");
-            chip.className = "imgchip";
-            chip.innerHTML = '<img src="' + pendImg + '" alt=""><span>фото готово</span><button type="button" title="Убрать">✕</button>';
-            chip.querySelector("button").addEventListener("click", clearImg);
-            slot.appendChild(chip);
+          if (pendImgs.length) {
+            pendImgs.forEach((src, i) => {
+              const chip = document.createElement("div");
+              chip.className = "imgchip";
+              chip.innerHTML = '<img alt=""><span>фото ' + (i + 1) + '</span>' +
+                '<button type="button" title="Убрать">✕</button>';
+              chip.querySelector("img").src = src;
+              chip.querySelector("button").addEventListener("click", () => {
+                pendImgs.splice(i, 1); $("file").value = ""; renderChipSlot();
+              });
+              slot.appendChild(chip);
+            });
           } else if (pendPdf) {
             const chip = document.createElement("div");
             chip.className = "pdf-chip";
@@ -16504,10 +16538,12 @@ def ai_page():
         };
 
         // ── фото: ужимаем в браузере, чтобы не гонять гигантские файлы ──
-        const clearImg = () => { pendImg = null; $("file").value = ""; renderChipSlot(); };
-        $("file").addEventListener("change", () => {
-          const f = $("file").files[0];
-          if (!f) return;
+        const clearImg = () => { pendImgs = []; $("file").value = ""; renderChipSlot(); };
+        // Одна картинка (File или Blob) → ужать → добавить в список.
+        const addImage = (file) => new Promise((resolve) => {
+          if (pendImgs.length >= IMG_MAX_COUNT) {
+            uiToast("Больше " + IMG_MAX_COUNT + " фото за раз нельзя.", "err"); resolve(); return;
+          }
           const img = new Image();
           const rd = new FileReader();
           rd.onload = () => { img.onload = () => {
@@ -16515,11 +16551,32 @@ def ai_page():
             const cv = document.createElement("canvas");
             cv.width = Math.round(img.width * sc); cv.height = Math.round(img.height * sc);
             cv.getContext("2d").drawImage(img, 0, 0, cv.width, cv.height);
-            pendImg = cv.toDataURL("image/jpeg", 0.85);
+            pendImgs.push(cv.toDataURL("image/jpeg", 0.85));
             pendPdf = null; pendPdfName = ""; $("filepdf").value = "";
-            renderChipSlot();
-          }; img.src = rd.result; };
-          rd.readAsDataURL(f);
+            resolve();
+          }; img.onerror = () => resolve(); img.src = rd.result; };
+          rd.onerror = () => resolve();
+          rd.readAsDataURL(file);
+        });
+        const addImages = async (files) => {
+          for (const f of files) { if (f && f.type && f.type.startsWith("image/")) await addImage(f); }
+          renderChipSlot();
+        };
+        $("file").addEventListener("change", () => addImages([...$("file").files]));
+
+        // ── Ctrl+V: фото прямо из буфера обмена, не с диска ──
+        $("text").addEventListener("paste", (e) => {
+          const items = (e.clipboardData && e.clipboardData.items) || [];
+          const imgs = [];
+          for (const it of items) {
+            if (it.kind === "file" && it.type.startsWith("image/")) {
+              const f = it.getAsFile(); if (f) imgs.push(f);
+            }
+          }
+          if (!imgs.length) return;        // обычный текст — не мешаем вставке
+          e.preventDefault();
+          if (!vision) { uiToast("Эта модель не умеет смотреть фото.", "err"); return; }
+          addImages(imgs);
         });
 
         // ── PDF: читаем как есть, текст вытащит сервер ──
@@ -16531,7 +16588,7 @@ def ai_page():
           const rd = new FileReader();
           rd.onload = () => {
             pendPdf = rd.result; pendPdfName = f.name;
-            pendImg = null; $("file").value = "";
+            pendImgs = []; $("file").value = "";
             renderChipSlot();
           };
           rd.readAsDataURL(f);
