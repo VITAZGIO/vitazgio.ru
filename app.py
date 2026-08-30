@@ -7800,6 +7800,12 @@ def drop_page():
                      border: 1px solid rgba(255,255,255,.16); background: rgba(255,255,255,.05); }
         .share-btns button.go { color: #04121c; border-color: #2de2ff; background: #2de2ff; }
         .share-btns button.bad { color: #ff8f8f; border-color: rgba(255,90,90,.4); }
+        /* Диалог совпадения имён: галочка «ко всем» и кнопки в столбик,
+           чтобы длинные подписи не жались. */
+        .conf-all { display: flex; align-items: center; gap: 8px; margin: 0 0 14px;
+                    color: #b6c4d6; font-size: .74rem; cursor: pointer; }
+        .conf-all input { width: 16px; height: 16px; accent-color: #2de2ff; cursor: pointer; }
+        .conf-btns { flex-direction: column; }
 
         /* Окно корзины */
         .trash-panel { width: min(560px, 100%); }
@@ -8946,9 +8952,52 @@ def drop_page():
           if (e.key === "Escape" && (picking || clip)) { clip = null; stopPicking(); }
         });
 
+        /* Файл с таким именем уже лежит в этой папке — спрашиваем, как быть,
+           прямо как проводник: заменить / сохранить оба (допишем номер) /
+           пропустить. Галочка «для всех» запоминает выбор на остаток пачки. */
+        const askConflict = (name) => new Promise((resolve) => {
+          const m = modal(
+            "<h3>Файл уже есть</h3>" +
+            '<p class="share-note">В этой папке уже лежит <b>' + esc(name) + "</b>. Что делаем?</p>" +
+            '<label class="conf-all"><input type="checkbox" id="cf-all"> Применить ко всем</label>' +
+            '<div class="share-btns conf-btns">' +
+              '<button type="button" class="go" data-act="keep">Сохранить оба</button>' +
+              '<button type="button" data-act="replace">Заменить</button>' +
+              '<button type="button" data-act="skip">Пропустить</button>' +
+            "</div>");
+          let done = false;
+          const closeBox = m.shut;
+          const finish = (action) => {
+            if (done) return; done = true;
+            const all = !!(m.box.querySelector("#cf-all") || {}).checked;
+            document.removeEventListener("keydown", onEsc);
+            closeBox(); resolve({ action, all });
+          };
+          // Escape и клик мимо панели = «Пропустить». Вешаем СВОИ обработчики:
+          // встроенные в modal закрывают окно, но промис бы не разрешили.
+          // Важно: НЕ называть это `esc` — так зовётся глобальный
+          // html-экранировщик, а он нужен выше при сборке разметки диалога.
+          const onEsc = (ev) => { if (ev.key === "Escape") finish("skip"); };
+          document.addEventListener("keydown", onEsc);
+          m.box.addEventListener("click", (ev) => { if (ev.target === m.box) finish("skip"); });
+          m.box.querySelectorAll("[data-act]").forEach((b) =>
+            b.addEventListener("click", () => finish(b.dataset.act)));
+        });
+
         // ── Загрузка кусками ──
         const queue = [];
         let busy = false;
+        // Свободное имя «файл (2).ext», если «файл.ext» занят. Учитываем и
+        // то, что уже в папке, и то, что назначили в этой же пачке.
+        const freeName = (name, taken) => {
+          if (!taken.has(name)) return name;
+          const dot = name.lastIndexOf(".");
+          const stem = dot > 0 ? name.slice(0, dot) : name;
+          const ext = dot > 0 ? name.slice(dot) : "";
+          let n = 2, cand;
+          do { cand = stem + " (" + n + ")" + ext; n++; } while (taken.has(cand));
+          return cand;
+        };
 
         const upRow = file => {
           const row = document.createElement("div");
@@ -8959,12 +9008,12 @@ def drop_page():
           return row;
         };
 
-        const sendOne = async (file, row) => {
+        const sendOne = async (file, row, asName) => {
           const pctEl = row.querySelector(".up-pct");
           const fillEl = row.querySelector(".up-fill");
           const init = await api("/api/drop/upload/init", {
             method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ name: file.name, size: file.size, parent,
+            body: JSON.stringify({ name: asName || file.name, size: file.size, parent,
                                    content_type: file.type || "application/octet-stream" }),
           });
           let offset = 0;
@@ -8996,11 +9045,42 @@ def drop_page():
         const pump = async () => {
           if (busy) return;
           busy = true;
+          // Имена, уже занятые в этой папке (файлы) — для проверки совпадений
+          // и подбора свободного имени при «сохранить оба».
+          const taken = new Set((items || [])
+            .filter((it) => it.kind === "file").map((it) => it.name));
+          let forAll = null;   // выбор «применить ко всем» на остаток пачки
           while (queue.length) {
             const file = queue.shift();
+            let asName = null;
+            if (taken.has(file.name)) {
+              let choice = forAll;
+              if (!choice) {
+                const res = await askConflict(file.name);
+                choice = res.action;
+                if (res.all) forAll = choice;
+              }
+              if (choice === "skip") continue;
+              if (choice === "keep") {
+                asName = freeName(file.name, taken);
+              } else if (choice === "replace") {
+                // Старое уходит в корзину, новое встаёт под тем же именем.
+                const olds = (items || [])
+                  .filter((it) => it.kind === "file" && it.name === file.name)
+                  .map((it) => it.id);
+                if (olds.length) {
+                  try { await api("/api/drop/op", { method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ op: "delete", ids: olds, parent: null }) }); }
+                  catch (e) { /* не вышло убрать старое — не страшно, зальём рядом */ }
+                }
+              }
+            }
+            // застолбим имя, чтобы следующие файлы пачки его не заняли снова
+            taken.add(asName || file.name);
             const row = upRow(file);
             try {
-              await sendOne(file, row);
+              await sendOne(file, row, asName);
               row.remove();
             } catch (e) {
               row.classList.add("failed");
