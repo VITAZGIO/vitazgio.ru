@@ -4058,7 +4058,9 @@ def cabinet():
         [hidden] { display: none !important; }
         .workspace { flex: 1 1 auto; min-width: 0; margin-top: clamp(22px, 3.5vw, 40px);
                      display: flex; flex-direction: column; min-height: 0; }
-        .workspace > .dash { flex: 1 1 auto; }
+        /* Панель метрик — по содержимому, а не на всю высоту колонки: иначе
+           под карточками зияла пустая тёмная плашка на высоком экране. */
+        .workspace > .dash { flex: none; }
         .workspace > .cab { flex: none; }
         .device-list { container-type: inline-size; margin: 0; padding: 8px 18px 18px; list-style: none; border-top: 1px solid rgba(255,255,255,.07); }
         .device { min-height: 48px; display: grid; grid-template-columns: 150px 1fr 70px 36px 116px 82px; align-items: center; gap: 12px; border-bottom: 1px solid rgba(255,255,255,.06); }
