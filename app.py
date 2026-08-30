@@ -4704,7 +4704,7 @@ def cabinet():
               <span class="pl-label">Аудио</span>
               <span class="pl-actions">
                 <button class="pl-icon" id="pl-pop" type="button"
-                        title="Плавающее окно поверх всех окон (как в ютубе)">⧉</button>
+                        title="Отдельное окно: свой звук, не закрывается при переходах по сайту">⧉</button>
                 <button class="pl-icon" id="pl-add" type="button" title="Добавить треки">+</button>
                 <button class="pl-icon" id="pl-toggle-list" type="button" title="Список треков">☰</button>
               </span>
@@ -5949,12 +5949,14 @@ def cabinet():
             // окна при этом не появлялось, а значок ⧉ обещал именно окно.
             const pop = el("pl-pop");
             if (pop) pop.addEventListener("click", () => {
-              // Сразу финальная плавашка поверх всех окон (как в ютубе), без
-              // промежуточного окна. Запасной путь — если из кэша приехал
-              // старый движок без floatOut: хотя бы отдельное окно.
-              if (window.VGP && window.VGP.floatOut) window.VGP.floatOut();
-              else if (window.VGP && window.VGP.popOut) window.VGP.popOut();
-              else window.open("/player/pop", "vgplayer", "width=340,height=440");
+              // Отдельное НЕЗАВИСИМОЕ окно /player/pop: свой звук, не
+              // перезагружается от переходов по сайту — потому и не лагает и
+              // не закрывается, когда листаешь вкладки. Музыка на сайте
+              // встаёт на паузу, а в окне продолжается с той же секунды.
+              // «Как в ютубе» (без рамок, поверх окон) — кнопка ⧉ уже ВНУТРИ
+              // окна: оттуда плавашка тоже переживает навигацию по сайту.
+              if (window.VGP && window.VGP.popOut) window.VGP.popOut();
+              else window.open("/player/pop", "vgplayer", "width=340,height=460");
             });
 
             el("pl-play").addEventListener("click", () => {
@@ -11452,15 +11454,28 @@ def _soon_page(name, kicker, headline, lead, points):
 @login_required
 def player_tracks():
     """Единый список для плеера: фонотека (/music) плюс всё аудио, что лежит
-    в папке MUSIK личного дропа. У каждого трека свой адрес потока."""
+    в папке MUSIK личного дропа. У каждого трека свой адрес потока.
+
+    Выбор папки: без параметра играет избранная папка (звезда) или вся
+    музыка. `?folder=<id>` — конкретная папка фонотеки с подпапками;
+    `?folder=__all__` — вся музыка вопреки избранному. В ответе ещё и всё
+    дерево папок (`folders`) — по нему плеер рисует выбор папок."""
+    pick = (request.args.get("folder") or "").strip()
     tracks = []
     with music_lock:
         _music_scan()
         folder_name = {k: v["name"] for k, v in music_folders.items()}
-        # Если хозяин отметил папку звездой — мини-плеер и виджет играют
-        # только её (с подпапками). Нет избранной — вся фонотека, как раньше.
+        folders = [{"id": k, "name": v["name"], "parent": v.get("parent", "")}
+                   for k, v in sorted(music_folders.items(), key=lambda x: x[1]["name"].lower())]
         fav_id = next((k for k, v in music_folders.items() if v.get("fav")), "")
-        allowed = _music_subtree(fav_id) if fav_id else None
+        if pick and pick in music_folders:
+            allowed = _music_subtree(pick)          # выбрали конкретную папку
+        elif pick == "__all__":
+            allowed = None                          # вся музыка
+        elif fav_id:
+            allowed = _music_subtree(fav_id)        # избранная по умолчанию
+        else:
+            allowed = None                          # избранной нет — вся музыка
         for k, v in sorted(music_items.items(),
                            key=lambda x: (str(x[1].get("artist", "")).lower(),
                                           str(x[1].get("title", "")).lower())):
@@ -11471,12 +11486,12 @@ def player_tracks():
                 "folder": folder_name.get(v.get("folder", ""), ""),
                 "url": "/api/music/file/" + k,
             })
-    # Папку MUSIK из дропа добавляем только когда избранного нет: со звездой
-    # список должен быть ровно тем, что лежит в избранной папке.
+    # Папку MUSIK из дропа (аудио, лежащее прямо в дропе) добавляем только
+    # когда показываем всю музыку — при выборе конкретной папки её не мешаем.
     if allowed is None:
         with drop_lock:
             tracks.extend(_drop_musik_tracks())
-    return jsonify(tracks=tracks)
+    return jsonify(tracks=tracks, folders=folders, fav=fav_id, pick=pick)
 
 
 @app.get("/vg-player.js")
@@ -11510,6 +11525,8 @@ def vg_player_js():
   let idx = -1;
   let ready = false;       // список загружен
   let shuffle = false;
+  let allFolders = [];     // всё дерево папок фонотеки [{id,name,parent}]
+  let favFolder = "";      // id избранной папки (звезда), "" если нет
   const subs = [];
 
   /* «Музыка ДОЛЖНА звучать» — намерение, а не текущее состояние звука.
@@ -11700,16 +11717,22 @@ def vg_player_js():
   addEventListener("pagehide", save);
 
   /* ── список треков ─────────────────────────────────────────────── */
-  const fetchList = async (force) => {
-    if (ready && !force) return queue;
+  const fetchList = async (force, pick) => {
+    // pick: id папки фонотеки, "__all__" — вся музыка, undefined — по
+    // умолчанию (избранная папка или вся музыка). При выборе папки всегда
+    // грузим заново, даже если список уже был.
+    if (ready && !force && pick === undefined) return queue;
     let d;
     try {
-      const r = await fetch("/api/player/tracks", { credentials: "same-origin" });
+      const url = "/api/player/tracks" + (pick !== undefined ? "?folder=" + encodeURIComponent(pick) : "");
+      const r = await fetch(url, { credentials: "same-origin" });
       if (!r.ok) { if (box) box.remove(); box = null; return []; }
       d = await r.json();
     } catch (e) { return []; }
     queue = (d.tracks || []).map((t) => ({
       id: t.id, title: t.title, artist: t.artist, folder: t.folder || "", url: t.url }));
+    allFolders = d.folders || [];
+    favFolder = d.fav || "";
     ready = true;
     fire();
     return queue;
@@ -12058,8 +12081,12 @@ def vg_player_js():
   .vgp-row .fico { flex:none; width:20px; text-align:center; color:#7f93a8; font-size:13px; }
   .vgp-fold .n b, .vgp-back .n b { color:#dfe7f3; }
   .vgp-fold:hover .fico { color:#2de2ff; }
+  .vgp-fold.on { background:rgba(45,226,255,.12); }
+  .vgp-fold.on .n b { color:#2de2ff; }
   .vgp-back { color:#8ba0b8; }
   .vgp-back .fico { font-size:18px; line-height:1; }
+  .vgp-lhdr { padding:8px 8px 3px; color:#6b7c8f; font-size:9.5px; letter-spacing:.08em;
+              text-transform:uppercase; }
 
   /* ── свёрнутый вид: кружок с кольцом прогресса ── */
   .vgp.vgp-folded { width:60px; height:60px; border-radius:50%; }
@@ -12173,7 +12200,9 @@ def vg_player_js():
     const rows = q("[data-rows]");
     // Список умеет два уровня: сперва папки, внутри — их треки. null =
     // показываем папки (или сразу треки, если папка всего одна).
-    let listFolder = null;
+    // Выбранная в списке папка: id папки, "__all__" — вся музыка,
+    // undefined — по умолчанию (избранная папка или вся музыка).
+    let curPick;
 
     /* положение помним между страницами */
     try {
@@ -12297,59 +12326,53 @@ def vg_player_js():
       q("[data-pip]").addEventListener("click", openInWindow);
     }
 
+    // Глубина папки по цепочке parent — для отступа в списке.
+    const fdepth = (id) => {
+      let d = 0, p = id; const seen = new Set();
+      while (p) { const f = allFolders.find((x) => x.id === p);
+        if (!f || seen.has(p)) break; seen.add(p); p = f.parent; d++; }
+      return d;
+    };
     const drawRows = () => {
       if (!rows.classList.contains("open")) return;
-      if (!queue.length) {
-        rows.innerHTML = '<div class="vgp-row"><div class="n"><b>Пусто</b>' +
+      // ВЕРХ списка — выбор папки из ПОЛНОГО дерева фонотеки (не только из
+      // того, что сейчас в очереди). «Вся музыка» и каждая папка кликабельны:
+      // тычок грузит эту папку с подпапками, треки ниже обновляются.
+      let html = "";
+      if (allFolders.length) {
+        html += '<div class="vgp-lhdr">Папки</div>';
+        html += '<div class="vgp-row vgp-fold" data-pick="__all__"><span class="fico">♪</span>' +
+          '<div class="n"><b>Вся музыка</b><span></span></div></div>';
+        html += allFolders.map(() =>
+          '<div class="vgp-row vgp-fold" data-pick><span class="fico">🗀</span>' +
+          '<div class="n"><b></b><span></span></div></div>').join("");
+      }
+      html += '<div class="vgp-lhdr">Треки</div>';
+      html += queue.length
+        ? queue.map((t, i) =>
+            '<div class="vgp-row" data-i="' + i + '"><div class="n"><b></b><span></span></div></div>').join("")
+        : '<div class="vgp-row"><div class="n"><b>Пусто</b>' +
           '<span>добавь треки в фонотеку или папку MUSIK</span></div></div>';
-        return;
+      rows.innerHTML = html;
+
+      // имена папок, отступ по глубине, подсветка активной. Первый data-pick
+      // в списке — «Вся музыка», дальше папки в порядке allFolders.
+      const picks = [...rows.querySelectorAll("[data-pick]")];
+      const allEl = picks[0];
+      if (allEl) {
+        allEl.classList.toggle("on", curPick === "__all__" || (curPick === undefined && !favFolder));
+        allEl.addEventListener("click", () => choosePick("__all__"));
       }
-      // какие вообще есть папки (по имени, как пришло в треках)
-      const names = [];
-      queue.forEach((t) => { const f = t.folder || ""; if (f && names.indexOf(f) < 0) names.push(f); });
+      allFolders.forEach((f, k) => {
+        const el = picks[k + 1];
+        if (!el) return;
+        el.dataset.pick = f.id;
+        el.querySelector(".n b").textContent = f.name;
+        el.style.paddingLeft = (8 + fdepth(f.parent) * 12) + "px";
+        el.classList.toggle("on", curPick === f.id || (curPick === undefined && favFolder === f.id));
+        el.addEventListener("click", () => choosePick(f.id));
+      });
 
-      // сколько «треков/трека/трек» — по-человечески
-      const plural = (n) => {
-        const a = Math.abs(n) % 100, b = a % 10;
-        const w = (a > 10 && a < 20) ? "треков" : (b === 1) ? "трек"
-                : (b >= 2 && b <= 4) ? "трека" : "треков";
-        return n + " " + w;
-      };
-
-      // Показываем ПАПКИ, если их больше одной и ни одна не открыта.
-      if (names.length > 1 && listFolder === null) {
-        const loose = queue.filter((t) => !t.folder).length;
-        rows.innerHTML =
-          names.map(() => '<div class="vgp-row vgp-fold" data-folder="1"><span class="fico">🗀</span>' +
-            '<div class="n"><b></b><span></span></div></div>').join("") +
-          (loose ? '<div class="vgp-row vgp-fold" data-loose="1"><span class="fico">♪</span>' +
-            '<div class="n"><b>Без папки</b><span></span></div></div>' : "");
-        [...rows.querySelectorAll("[data-folder]")].forEach((el, k) => {
-          const f = names[k], cnt = queue.filter((t) => t.folder === f).length;
-          el.querySelector(".n b").textContent = f;
-          el.querySelector(".n span").textContent = plural(cnt);
-          el.addEventListener("click", () => { listFolder = f; drawRows(); });
-        });
-        const lb = rows.querySelector("[data-loose]");
-        if (lb) {
-          lb.querySelector(".n span").textContent = plural(loose);
-          lb.addEventListener("click", () => { listFolder = ""; drawRows(); });
-        }
-        return;
-      }
-
-      // Треки: либо выбранной папки, либо (если папка одна/нет) все подряд.
-      const show = queue
-        .map((t, i) => ({ t, i }))
-        .filter(({ t }) => listFolder === null || (t.folder || "") === listFolder);
-      const back = (names.length > 1 && listFolder !== null)
-        ? '<div class="vgp-row vgp-back" data-back="1"><span class="fico">‹</span>' +
-          '<div class="n"><b>Все папки</b><span></span></div></div>'
-        : "";
-      rows.innerHTML = back + show.map(({ i }) =>
-        '<div class="vgp-row" data-i="' + i + '"><div class="n"><b></b><span></span></div></div>').join("");
-      const bb = rows.querySelector("[data-back]");
-      if (bb) bb.addEventListener("click", () => { listFolder = null; drawRows(); });
       // текст ставим через textContent — имена файлов бывают какие угодно
       rows.querySelectorAll(".vgp-row[data-i]").forEach((el) => {
         const t = queue[+el.dataset.i];
@@ -12358,6 +12381,13 @@ def vg_player_js():
         el.querySelector("span").textContent = (t.artist || "") + (t.folder ? " · " + t.folder : "");
         el.addEventListener("click", () => { api.playAt(+el.dataset.i); drawRows(); });
       });
+    };
+    // выбрали папку: грузим её (с подпапками) и показываем треки, играть даём
+    // тычком по треку — не пугаем внезапным стартом.
+    const choosePick = async (pick) => {
+      curPick = pick;
+      await fetchList(true, pick);
+      drawRows();
     };
 
     paintFns.push(() => {
@@ -12378,12 +12408,12 @@ def vg_player_js():
       q("[data-volbar] i").style.width = (vk * 100) + "%";
       q("[data-volbar] b").style.left = (vk * 100) + "%";
       q("[data-mute]").innerHTML = vk > 0 ? I.vol : I.mute;
-      // Подсветку синхронизируем только когда РЕАЛЬНО показаны треки: в
-      // обзоре папок строк с data-i нет, и без этой проверки drawRows
-      // дёргался бы каждый кадр.
-      const hasTracks = rows.querySelector(".vgp-row[data-i]");
-      const cur = rows.querySelector(".vgp-row.on");
-      if (rows.classList.contains("open") && hasTracks && (!cur || +cur.dataset.i !== idx)) drawRows();
+      // Подсветку играющего трека двигаем на месте, БЕЗ полной перерисовки —
+      // иначе список (с папками) дёргался бы и прыгал бы скролл каждый кадр.
+      if (rows.classList.contains("open")) {
+        rows.querySelectorAll(".vgp-row[data-i]").forEach((el) =>
+          el.classList.toggle("on", +el.dataset.i === idx));
+      }
     });
     paint();
   };
@@ -17156,10 +17186,10 @@ def music_page():
             <a class="back" href="/" title="На главную" aria-label="На главную"><svg viewBox="0 0 24 24" fill="none"><path d="M19 12H5m0 0 6-6m-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
             <a class="eyebrow" href="/">vitazgio.ru · музыка</a>
             <button class="popout" type="button"
-                    onclick="(window.VGP&amp;&amp;VGP.floatOut)?VGP.floatOut():(window.VGP&amp;&amp;VGP.popOut?VGP.popOut():window.open('/player/pop','vgplayer','width=340,height=440'))"
-                    title="Плавающее окно поверх всех окон, как в ютубе">
+                    onclick="(window.VGP&amp;&amp;VGP.popOut)?VGP.popOut():window.open('/player/pop','vgplayer','width=340,height=460')"
+                    title="Отдельное окно: свой звук, не закрывается при переходах по сайту">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M21 3l-9 9M10 5H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5"/></svg>
-              <span>Плавающее окно</span>
+              <span>Вынести в окно</span>
             </button>
           </div>
           <img class="hero-mark" src="/static/icons/vg-plain.svg" alt="Vitaz Gio"
