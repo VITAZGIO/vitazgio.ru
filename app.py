@@ -715,6 +715,22 @@ def _music_used():
     return sum(seen.values())
 
 
+# Дроп и фонотека делят ОДНО хранилище на 30 ГБ (DROP_QUOTA). Раньше у музыки
+# был свой лимит на 2 ГБ, из-за чего гигабайты треков не входили в «Занято»
+# дропа, а загрузка упиралась в «нет места в фонотеке», хотя на диске место
+# было. Эти помощники берут занятое каждой половиной СВОИМ локом и без
+# вложенности — правило одно: сначала music_lock, потом drop_lock (или
+# каждый отдельно), но никогда наоборот, иначе взаимоблокировка.
+def _music_used_safe():
+    with music_lock:
+        return _music_used()
+
+
+def _drop_used_safe():
+    with drop_lock:
+        return _drop_used()
+
+
 def _music_drop_file(fname):
     """Убрать файл с диска, если на него больше никто не ссылается.
     Вызывать под music_lock."""
@@ -2333,7 +2349,10 @@ def music_list_api():
             for k, v in sorted(music_folders.items(), key=lambda x: x[1]["name"].lower())
         ]
         fav_folder = next((k for k, v in music_folders.items() if v.get("fav")), "")
-    return jsonify(tracks=tracks, folders=folders, used=used, quota=MUSIC_QUOTA,
+    # Место общее с дропом: показываем занятое всем хранилищем из 30 ГБ.
+    drop_used = _drop_used_safe()
+    return jsonify(tracks=tracks, folders=folders,
+                   used=drop_used + used, music=used, quota=DROP_QUOTA,
                    limit=MUSIC_MAX_SIZE, fav_folder=fav_folder,
                    can_edit=bool(session.get("authenticated")))
 
@@ -2352,10 +2371,11 @@ def music_upload_api():
         return jsonify(error="Трек больше 40 МБ."), 413
 
     folder = (request.form.get("folder") or "").strip()
+    drop_used = _drop_used_safe()          # место общее с дропом (30 ГБ)
     with music_lock:
         _music_scan()
-        if _music_used() > MUSIC_QUOTA:
-            return jsonify(error="Места под музыку больше нет."), 507
+        if drop_used + _music_used() > DROP_QUOTA:
+            return jsonify(error="В хранилище больше нет места."), 507
         if folder and folder not in music_folders:
             folder = ""
         taken = {t["file"] for t in music_items.values()}
@@ -2912,13 +2932,14 @@ def drop_upload_init():
 
     upload_id = str(uuid.uuid4())
     music_target = parent == DROP_MUSIK_ID or (parent or "").startswith("mf_")
+    music_used = _music_used_safe()        # музыка тоже в общем лимите 30 ГБ
     with drop_lock:
         _drop_sweep_uploads()
         # MUSIK и папки внутри неё — приёмник фонотеки, а не склад дропа
         if not music_target and parent and drop_items.get(parent, {}).get("kind") != "folder":
             parent = None
         reserved = sum(u["size"] for u in drop_uploads.values())
-        if _drop_used() + reserved + size > DROP_QUOTA:
+        if _drop_used() + music_used + reserved + size > DROP_QUOTA:
             return jsonify(error="Нет места: квота исчерпана."), 507
         drop_uploads[upload_id] = {
             "name": name, "size": size, "parent": parent,
@@ -2996,8 +3017,9 @@ def drop_upload_finish(upload_id):
                                 "" if parent_in == DROP_MUSIK_ID else parent_in[3:])
 
     item_id = str(uuid.uuid4())
+    music_used = _music_used_safe()        # музыка тоже в общем лимите 30 ГБ
     with drop_lock:
-        if _drop_used() + actual > DROP_QUOTA:
+        if _drop_used() + music_used + actual > DROP_QUOTA:
             try:
                 os.remove(tmp_path)
             except OSError:
@@ -3026,10 +3048,12 @@ def _drop_music_take(tmp_path, name, size, folder):
     if ext not in MUSIC_EXTS:
         _music_unlink(tmp_path)
         return jsonify(error="В MUSIK кладём только музыку."), 415
+    # Место общее с дропом: дроп занят + вся музыка + новый файл против 30 ГБ.
+    drop_used = _drop_used_safe()
     with music_lock:
-        if _music_used() + size > MUSIC_QUOTA:
+        if drop_used + _music_used() + size > DROP_QUOTA:
             _music_unlink(tmp_path)
-            return jsonify(error="В фонотеке кончилось место."), 507
+            return jsonify(error="В хранилище кончилось место."), 507
         if folder and folder not in music_folders:
             folder = ""
         # подбираем свободное имя, как это делает загрузка на странице музыки
@@ -3065,6 +3089,7 @@ def _drop_music_view(parent):
     items, chain = [], []
     with music_lock:
         _music_scan()
+        music_used = _music_used()
         for k, v in sorted(music_folders.items(), key=lambda x: x[1]["name"].lower()):
             if v.get("parent", "") != inside:
                 continue
@@ -3097,10 +3122,11 @@ def _drop_music_view(parent):
             node = music_folders[node].get("parent", "")
         chain.reverse()
     with drop_lock:
-        used, quota, trash = _drop_used(), DROP_QUOTA, _drop_trash_bytes()
+        used, trash = _drop_used() + music_used, _drop_trash_bytes()
     return jsonify(items=items,
                    breadcrumbs=[{"id": DROP_MUSIK_ID, "name": "MUSIK"}] + chain,
-                   used=used, quota=quota, trash=trash, music_view=True)
+                   used=used, music=music_used, quota=DROP_QUOTA, trash=trash,
+                   music_view=True)
 
 
 @app.get("/api/drop/list")
@@ -3116,6 +3142,7 @@ def drop_list_api():
             return jsonify(items=[], breadcrumbs=[{"id": DROP_MUSIK_ID, "name": "MUSIK"}],
                            used=0, quota=DROP_QUOTA, trash=0, music_view=True,
                            warn="Фонотека сейчас не читается.")
+    music_used = _music_used_safe()        # музыка делит хранилище с дропом
     with drop_lock:
         _drop_sweep_trash()
         if parent and parent not in drop_items:
@@ -3166,7 +3193,8 @@ def drop_list_api():
         return jsonify(
             items=items,
             breadcrumbs=_drop_path_to_root(parent),
-            used=_drop_used(),
+            used=_drop_used() + music_used,
+            music=music_used,
             quota=DROP_QUOTA,
             trash=_drop_trash_bytes(memo),
         )
@@ -7499,7 +7527,7 @@ def drop_page():
         h1 { margin: 0; font-size: clamp(1.5rem, 3.5vw, 2.3rem); font-weight: 700; letter-spacing: -.02em;
              color: #eaf6ff; text-shadow: 0 0 22px rgba(45,226,255,.35); }
         h1 span { color: #2de2ff; text-shadow: 0 0 22px rgba(45,226,255,.5); }
-        .quota { margin-left: auto; min-width: 262px; }
+        .quota { margin-left: auto; min-width: 320px; }
         /* Две подписи вокруг шкалы: сверху сколько занято всего (папка),
            снизу сколько в корзине (кликабельно). */
         .quota-line { display: flex; align-items: center; gap: 8px; color: #8f99ab;
@@ -7514,6 +7542,8 @@ def drop_page():
         .quota-can .qi { color: #e8eef6; }
         .quota-can:hover { color: #ffffff; }
         .quota-can:hover .qi { color: #ffffff; }
+        .quota-music { margin-top: 6px; font-size: .82rem; }
+        .quota-music .qi { color: #2de2ff; }
         /* Шкала: слева обычная заливка (живые файлы), дальше белым — корзина. */
         .quota-bar { position: relative; height: 7px; background: rgba(255,255,255,.08); overflow: hidden; }
         .quota-fill { position: absolute; left: 0; top: 0; height: 100%; width: 0;
@@ -7897,6 +7927,10 @@ def drop_page():
               <div class="quota-fill" id="quota-fill"></div>
               <div class="quota-trash" id="quota-trash-seg"></div>
             </div>
+            <div class="quota-line quota-music">
+              <span class="qi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></span>
+              <span>Музыка: <b id="quota-music">—</b></span>
+            </div>
             <button class="quota-line quota-can" id="trash-open" type="button" title="Открыть корзину">
               <span class="qi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V5h6v2m-8 0 1 13h8l1-13"/></svg></span>
               <span>Корзина: <b id="quota-trash">—</b></span>
@@ -8231,6 +8265,10 @@ def drop_page():
           $("quota-used").textContent = fmtSize(used);
           $("quota-all").textContent = fmtSize(quota);
           $("quota-trash").textContent = fmtSize(trash);
+          // Музыка делит хранилище с дропом — показываем, сколько её.
+          const music = data.music || 0;
+          const qm = $("quota-music");
+          if (qm) qm.textContent = fmtSize(music);
           $("quota-fill").style.width = activePct + "%";
           $("quota-fill").classList.toggle("hot", quota && used / quota > 0.8);
           const seg = $("quota-trash-seg");
