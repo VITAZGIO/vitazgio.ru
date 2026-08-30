@@ -2868,6 +2868,21 @@ def drop_folder_create():
     icon = payload.get("icon") if payload.get("icon") in DROP_FOLDER_ICONS else "folder"
     if not name:
         return jsonify(error="Имя пустое."), 400
+    # Папка внутри MUSIK — это папка ФОНОТЕКИ, а не склад дропа. MUSIK
+    # показывает не свои вложения, а папки фонотеки (id с «mf_»), поэтому
+    # обычная папка дропа тут просто не показалась бы — «создал, а её нет».
+    # Заводим настоящую папку фонотеки, туда же потом лягут загруженные треки.
+    if parent == DROP_MUSIK_ID or (parent or "").startswith("mf_"):
+        inside = "" if parent == DROP_MUSIK_ID else parent[3:]
+        with music_lock:
+            if inside and inside not in music_folders:
+                inside = ""
+            if _music_folder_depth(inside) >= MUSIC_MAX_DEPTH:
+                return jsonify(error="Глубже вкладывать некуда."), 400
+            fid = str(uuid.uuid4())
+            music_folders[fid] = {"name": name, "parent": inside, "added": time.time()}
+            _music_write_index()
+        return jsonify(id="mf_" + fid, name=name)
     item_id = str(uuid.uuid4())
     with drop_lock:
         if parent and drop_items.get(parent, {}).get("kind") != "folder":
