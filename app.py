@@ -5934,7 +5934,11 @@ def cabinet():
             // окна при этом не появлялось, а значок ⧉ обещал именно окно.
             const pop = el("pl-pop");
             if (pop) pop.addEventListener("click", () => {
-              if (window.VGP) window.VGP.popOut();
+              // Запасной путь на случай, если из кэша приехал старый движок
+              // без popOut: окно всё равно откроется. Кнопка не имеет права
+              // молча не делать ничего.
+              if (window.VGP && window.VGP.popOut) window.VGP.popOut();
+              else window.open("/player/pop", "vgplayer", "width=340,height=440");
             });
 
             el("pl-play").addEventListener("click", () => {
@@ -12173,8 +12177,16 @@ def vg_player_js():
 })();
 """
     response = Response(js, mimetype="application/javascript; charset=utf-8")
-    response.headers["Cache-Control"] = "private, max-age=300"
-    return response
+    # Движок ОБЯЗАН перепроверяться при каждой загрузке страницы, а не жить
+    # своей жизнью в кэше. Раньше стояло max-age=300 без ETag: после деплоя
+    # страница приезжала новая (её кнопки зовут VGP.popOut), а движок браузер
+    # ещё пять минут брал старый, из кэша, где popOut ещё не было. Кнопка
+    # «вынести в окно» при этом молча падала с «popOut is not a function».
+    # no-cache — это не «не кэшировать», а «кэшируй, но каждый раз спрашивай»:
+    # ETag не изменился — прилетает пустой 304, трафика столько же.
+    response.set_etag(hashlib.md5(js.encode("utf-8")).hexdigest())
+    response.headers["Cache-Control"] = "private, no-cache"
+    return response.make_conditional(request)
 
 
 @app.get("/player/pop")
@@ -16912,7 +16924,7 @@ def music_page():
             <a class="back" href="/" title="На главную" aria-label="На главную"><svg viewBox="0 0 24 24" fill="none"><path d="M19 12H5m0 0 6-6m-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
             <a class="eyebrow" href="/">vitazgio.ru · музыка</a>
             <button class="popout" type="button"
-                    onclick="if(window.VGP)window.VGP.popOut()"
+                    onclick="(window.VGP&amp;&amp;VGP.popOut)?VGP.popOut():window.open('/player/pop','vgplayer','width=340,height=440')"
                     title="Отдельное окно браузера: музыка играет сама по себе, что бы ни делали на сайте">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M21 3l-9 9M10 5H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5"/></svg>
               <span>Вынести в окно</span>
