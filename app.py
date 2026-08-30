@@ -4732,7 +4732,7 @@ def cabinet():
               <span class="pl-label">Аудио</span>
               <span class="pl-actions">
                 <button class="pl-icon" id="pl-pop" type="button"
-                        title="Плавашка поверх всех окон, одним кликом (как в ютубе)">⧉</button>
+                        title="Отдельное окно: свой звук, не закрывается при переходах по сайту">⧉</button>
                 <button class="pl-icon" id="pl-add" type="button" title="Добавить треки">+</button>
                 <button class="pl-icon" id="pl-toggle-list" type="button" title="Список треков">☰</button>
               </span>
@@ -5977,12 +5977,13 @@ def cabinet():
             // окна при этом не появлялось, а значок ⧉ обещал именно окно.
             const pop = el("pl-pop");
             if (pop) pop.addEventListener("click", () => {
-              // СРАЗУ плавашка поверх всех окон, одним кликом, без
-              // промежуточного окна: Document PiP (Chrome) или видео-PiP как
-              // у ютуба (Firefox). Если PiP нет — запасной путь в отдельное
-              // окно /player/pop.
-              if (window.VGP && window.VGP.floatOut) window.VGP.floatOut();
-              else if (window.VGP && window.VGP.popOut) window.VGP.popOut();
+              // НЕЗАВИСИМОЕ окно /player/pop: свой звук, не перезагружается
+              // от переходов по сайту — потому и не лагает и не закрывается,
+              // когда листаешь вкладки. Музыка на сайте встаёт, а в окне
+              // продолжается с той же секунды. «Как в ютубе» (без рамок,
+              // поверх окон) — кнопка ⧉ уже ВНУТРИ окна: оттуда плавашка
+              // тоже переживает навигацию, ведь само окно никуда не идёт.
+              if (window.VGP && window.VGP.popOut) window.VGP.popOut();
               else window.open("/player/pop", "vgplayer", "width=340,height=460");
             });
 
@@ -17307,10 +17308,10 @@ def music_page():
             <a class="back" href="/" title="На главную" aria-label="На главную"><svg viewBox="0 0 24 24" fill="none"><path d="M19 12H5m0 0 6-6m-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
             <a class="eyebrow" href="/">vitazgio.ru · музыка</a>
             <button class="popout" type="button"
-                    onclick="(window.VGP&amp;&amp;VGP.floatOut)?VGP.floatOut():(window.VGP&amp;&amp;VGP.popOut?VGP.popOut():window.open('/player/pop','vgplayer','width=340,height=460'))"
-                    title="Плавашка поверх всех окон, одним кликом (как в ютубе)">
+                    onclick="(window.VGP&amp;&amp;VGP.popOut)?VGP.popOut():window.open('/player/pop','vgplayer','width=340,height=460')"
+                    title="Отдельное окно: свой звук, не закрывается при переходах по сайту">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M21 3l-9 9M10 5H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5"/></svg>
-              <span>Поверх окон</span>
+              <span>Вынести в окно</span>
             </button>
           </div>
           <img class="hero-mark" src="/static/icons/vg-plain.svg" alt="Vitaz Gio"
