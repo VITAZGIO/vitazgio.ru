@@ -11760,6 +11760,34 @@ def vg_player_js():
      запоминает точную секунду через save()) и открываем /player/pop —
      тот же движок, отдельным окном, подхватывает ровно с этого места и
      дальше живёт сам по себе, что бы в браузере ни делали. */
+  /* «Поверх всех окон, без рамок» — это умеет только Document
+     Picture-in-Picture, и только Chrome/Edge: рамку окна и адресную строку
+     веб-страница убрать не может, а Firefox такого API не даёт вовсе.
+     Важно, КТО открывает это окно: если сама страница сайта — оно умрёт при
+     первом же переходе по сайту (на этом мы уже обожглись). Поэтому зовём
+     его из окна /player/pop: то никуда не переходит, значит и плавающее
+     окошко переживёт любую навигацию в основных вкладках. */
+  const onTop = async () => {
+    if (!("documentPictureInPicture" in window) || !box) return;
+    let w;
+    try {
+      w = await documentPictureInPicture.requestWindow({ width: 320, height: 200 });
+    } catch (e) { return; }
+    const st = w.document.createElement("style");
+    st.textContent = CSS;
+    w.document.head.appendChild(st);
+    w.document.body.style.margin = "0";
+    w.document.body.style.background = "#0b0f18";
+    box.classList.add("vgp-top");
+    w.document.body.appendChild(box);
+    // Закрыли плавающее окошко — виджет возвращается в окно плеера.
+    w.addEventListener("pagehide", () => {
+      if (!box) return;
+      box.classList.remove("vgp-top");
+      document.body.appendChild(box);
+    }, { once: true });
+  };
+
   const openInWindow = () => {
     if (popWin && !popWin.closed) { try { popWin.focus(); } catch (e) {} return; }
     // Звук уезжает в окно, значит эта вкладка сама включаться больше не
@@ -11807,6 +11835,12 @@ def vg_player_js():
   };
   const paint = () => paintFns.forEach((f) => { try { f(); } catch (e) {} });
   const setFolded = (v) => {
+    // В вынесенном окне сворачивать некуда: виджет и есть всё окно. Раньше
+    // кнопка «свернуть» тут срабатывала и запирала плеер намертво: кружок
+    // растягивался на весь вьюпорт, а вместе с телом виджета пряталась и
+    // сама кнопка. Развернуть было нечем — обычно кружок разворачивают
+    // тычком, но перетаскивание в этом окне намеренно отключено.
+    if (popup) return;
     folded = v;
     if (!box) return;
     box.classList.toggle("vgp-folded", folded);
@@ -11934,7 +11968,10 @@ def vg_player_js():
      выбросить плеер, не надо зажимать и тащить в корзину. В вынесенном окне
      тем более — там тащить некуда. */
   .vgp [data-remove]:hover { color:#ff8f9b; }
-  .vgp.vgp-pip [data-pip] { display:none; }
+  /* в вынесенном окне «свернуть» не нужно и опасно — см. setFolded */
+  .vgp.vgp-pip [data-fold] { display:none; }
+  /* кнопка «поверх всех окон» прячется, только когда мы уже поверх всех окон */
+  .vgp.vgp-top [data-pip] { display:none; }
   /* в самом вынесенном окне (/player/pop) виджет — это весь его вьюпорт,
      без плавания и перетаскивания */
   .vgp.vgp-pip { position:static; inset:auto; right:auto; bottom:auto; left:auto; top:auto;
@@ -12119,7 +12156,20 @@ def vg_player_js():
     // В вынесенном окне крестик закрывает само это окно, а не прячет
     // виджет на сайте (виджет там вообще не при чём — окно отдельное).
     q("[data-remove]").addEventListener("click", () => popup ? window.close() : api.hide());
-    q("[data-pip]").addEventListener("click", openInWindow);
+    if (popup) {
+      // В окне плеера ⧉ — это уже не «вынести» (мы вынесены), а «поверх всех
+      // окон». Умеет не всякий браузер: где нельзя — кнопку не показываем,
+      // чтобы она не обманывала.
+      const top = q("[data-pip]");
+      if ("documentPictureInPicture" in window) {
+        top.title = "Поверх всех окон, без рамок";
+        top.addEventListener("click", onTop);
+      } else {
+        top.remove();
+      }
+    } else {
+      q("[data-pip]").addEventListener("click", openInWindow);
+    }
 
     const drawRows = () => {
       if (!rows.classList.contains("open")) return;
