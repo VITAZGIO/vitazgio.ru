@@ -4424,8 +4424,11 @@ def cabinet():
         .btn-line.warn:hover { color: #fff; border-color: #ff8c3c; background: rgba(255,140,60,.18); }
 
         /* Метрики */
-        .metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 14px; flex: 1 1 auto; }
-        .metrics-host { border: 1px solid rgba(255,255,255,.07); padding: 22px 24px; display: flex; flex-direction: column; gap: 18px; justify-content: center; }
+        /* flex:none + align-content:start — карточки естественной высоты, а
+           не растянутые на всю высоту колонки (на узком/высоком экране они
+           разъезжались, а содержимое центровалось внизу с пустотой сверху). */
+        .metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 14px; flex: none; align-content: start; }
+        .metrics-host { border: 1px solid rgba(255,255,255,.07); padding: 22px 24px; display: flex; flex-direction: column; gap: 18px; justify-content: flex-start; }
         .metrics-host-name { font: 700 1.06rem "Cascadia Code", Consolas, monospace; color: #dfe6f2; margin: 0; }
         .metrics-bars { display: grid; grid-template-columns: 48px 1fr 52px; align-items: center; gap: 14px 12px; font-size: .92rem; }
         .metrics-label { color: #6b7385; }
