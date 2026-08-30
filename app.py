@@ -11788,6 +11788,88 @@ def vg_player_js():
     }, { once: true });
   };
 
+  /* «Как в ютубе» — настоящая плавашка браузера без рамок и поверх всех
+     окон. Это НЕ наш html, а нативный Picture-in-Picture: ровно то, что
+     ютуб делает со своим маленьким окошком на рабочем столе. Document PiP
+     (interactive, выше) есть только у Chrome/Edge, а в Firefox плавашку
+     умеет лишь ВИДЕО. Поэтому рисуем плеер на холст, снимаем с него
+     видеопоток и просим у браузера PiP — так же, как ютуб. Железное
+     ограничение видео-PiP: внутри одни пиксели, кликать нечего, поэтому
+     список треков туда не влезает — только обложка, название, полоса и
+     родные кнопки браузера (play/pause/дальше/назад через mediaSession). */
+  let pipVideo = null, pipCanvas = null, pipRaf = 0;
+  const drawPip = () => {
+    const c = pipCanvas, x = c.getContext("2d"), W = c.width, H = c.height;
+    const g = x.createLinearGradient(0, 0, W, H);
+    g.addColorStop(0, "#122036"); g.addColorStop(1, "#090e19");
+    x.fillStyle = g; x.fillRect(0, 0, W, H);
+    // мягкое бирюзовое зарево сверху
+    const gl = x.createRadialGradient(W / 2, 0, 10, W / 2, 0, W * .8);
+    gl.addColorStop(0, "rgba(45,226,255,.25)"); gl.addColorStop(1, "transparent");
+    x.fillStyle = gl; x.fillRect(0, 0, W, H);
+    const t = queue[idx] || {};
+    // обложка-нота
+    const cs = 96, cx = 40, cy = H / 2 - cs / 2;
+    x.fillStyle = "rgba(45,226,255,.14)";
+    if (x.roundRect) { x.beginPath(); x.roundRect(cx, cy, cs, cs, 20); x.fill(); }
+    else x.fillRect(cx, cy, cs, cs);
+    x.fillStyle = "#7df0ff"; x.font = "54px sans-serif"; x.textAlign = "center";
+    x.textBaseline = "middle"; x.fillText("♪", cx + cs / 2, cy + cs / 2 + 3);
+    // название и исполнитель
+    const tx = cx + cs + 30;
+    x.textAlign = "left"; x.fillStyle = "#f2fbff"; x.font = "700 30px sans-serif";
+    const clip = (s, max) => {
+      s = s || ""; if (x.measureText(s).width <= max) return s;
+      while (s.length && x.measureText(s + "…").width > max) s = s.slice(0, -1);
+      return s + "…";
+    };
+    x.fillText(clip(t.title || "Фонотека", W - tx - 30), tx, H / 2 - 34);
+    x.fillStyle = "#8ba0b8"; x.font = "22px sans-serif";
+    x.fillText(clip((t.artist || "vitazgio.ru") + (t.folder ? " · " + t.folder : ""), W - tx - 30), tx, H / 2 + 2);
+    // полоса прогресса
+    const bx = tx, bw = W - tx - 40, by = H / 2 + 42;
+    const k = isFinite(audio.duration) && audio.duration ? audio.currentTime / audio.duration : 0;
+    x.fillStyle = "rgba(255,255,255,.14)"; x.fillRect(bx, by, bw, 6);
+    const pg = x.createLinearGradient(bx, 0, bx + bw, 0);
+    pg.addColorStop(0, "#2de2ff"); pg.addColorStop(1, "#63f5ad");
+    x.fillStyle = pg; x.fillRect(bx, by, bw * k, 6);
+    x.fillStyle = "#6b7c8f"; x.font = "18px sans-serif";
+    x.fillText(mmss(audio.currentTime) + " / " + mmss(audio.duration), bx, by + 26);
+    pipRaf = requestAnimationFrame(drawPip);
+  };
+  const videoPip = async () => {
+    if (!("pictureInPictureEnabled" in document) || !document.pictureInPictureEnabled) return false;
+    if (pipVideo && document.pictureInPictureElement === pipVideo) {
+      try { await document.exitPictureInPicture(); } catch (e) {}
+      return true;
+    }
+    if (!pipCanvas) { pipCanvas = document.createElement("canvas"); pipCanvas.width = 480; pipCanvas.height = 270; }
+    cancelAnimationFrame(pipRaf); drawPip();
+    if (!pipVideo) {
+      pipVideo = document.createElement("video");
+      pipVideo.muted = true; pipVideo.playsInline = true;
+      pipVideo.srcObject = pipCanvas.captureStream(20);
+      pipVideo.addEventListener("leavepictureinpicture", () => {
+        cancelAnimationFrame(pipRaf); pipRaf = 0;
+      });
+    }
+    try {
+      await pipVideo.play();
+      await pipVideo.requestPictureInPicture();
+      return true;
+    } catch (e) { cancelAnimationFrame(pipRaf); pipRaf = 0; return false; }
+  };
+
+  /* Одна кнопка «поверх всех окон»: где есть Document PiP (Chrome/Edge) —
+     наш живой виджет целиком; где нет (Firefox) — видео-PiP как у ютуба. */
+  const floatOnTop = () => {
+    if ("documentPictureInPicture" in window) return onTop();
+    return videoPip();
+  };
+  const canFloat = () =>
+    ("documentPictureInPicture" in window) ||
+    ("pictureInPictureEnabled" in document && document.pictureInPictureEnabled);
+
   const openInWindow = () => {
     if (popWin && !popWin.closed) { try { popWin.focus(); } catch (e) {} return; }
     // Звук уезжает в окно, значит эта вкладка сама включаться больше не
@@ -11938,6 +12020,11 @@ def vg_player_js():
   .vgp-row .n span { display:block; font-size:10px; color:#6b7c8f;
                      white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .vgp-row.on .n b { color:#2de2ff; }
+  .vgp-row .fico { flex:none; width:20px; text-align:center; color:#7f93a8; font-size:13px; }
+  .vgp-fold .n b, .vgp-back .n b { color:#dfe7f3; }
+  .vgp-fold:hover .fico { color:#2de2ff; }
+  .vgp-back { color:#8ba0b8; }
+  .vgp-back .fico { font-size:18px; line-height:1; }
 
   /* ── свёрнутый вид: кружок с кольцом прогресса ── */
   .vgp.vgp-folded { width:60px; height:60px; border-radius:50%; }
@@ -12049,6 +12136,9 @@ def vg_player_js():
 
     const q = (s) => box.querySelector(s);
     const rows = q("[data-rows]");
+    // Список умеет два уровня: сперва папки, внутри — их треки. null =
+    // показываем папки (или сразу треки, если папка всего одна).
+    let listFolder = null;
 
     /* положение помним между страницами */
     try {
@@ -12158,12 +12248,13 @@ def vg_player_js():
     q("[data-remove]").addEventListener("click", () => popup ? window.close() : api.hide());
     if (popup) {
       // В окне плеера ⧉ — это уже не «вынести» (мы вынесены), а «поверх всех
-      // окон». Умеет не всякий браузер: где нельзя — кнопку не показываем,
-      // чтобы она не обманывала.
+      // окон, без рамок» — как маленькое окошко ютуба. В Chrome/Edge это наш
+      // живой виджет (Document PiP), в Firefox — видео-PiP из холста. Где не
+      // умеет вообще ни то ни другое — кнопку прячем, чтобы не обманывать.
       const top = q("[data-pip]");
-      if ("documentPictureInPicture" in window) {
-        top.title = "Поверх всех окон, без рамок";
-        top.addEventListener("click", onTop);
+      if (canFloat()) {
+        top.title = "Поверх всех окон, без рамок (как в ютубе)";
+        top.addEventListener("click", floatOnTop);
       } else {
         top.remove();
       }
@@ -12173,14 +12264,61 @@ def vg_player_js():
 
     const drawRows = () => {
       if (!rows.classList.contains("open")) return;
-      rows.innerHTML = queue.length
-        ? queue.map((t, i) =>
-            '<div class="vgp-row' + (i === idx ? " on" : "") + '" data-i="' + i + '">' +
-            '<div class="n"><b></b><span></span></div></div>').join("")
-        : '<div class="vgp-row"><div class="n"><b>Пусто</b><span>добавь треки в фонотеку или папку MUSIK</span></div></div>';
+      if (!queue.length) {
+        rows.innerHTML = '<div class="vgp-row"><div class="n"><b>Пусто</b>' +
+          '<span>добавь треки в фонотеку или папку MUSIK</span></div></div>';
+        return;
+      }
+      // какие вообще есть папки (по имени, как пришло в треках)
+      const names = [];
+      queue.forEach((t) => { const f = t.folder || ""; if (f && names.indexOf(f) < 0) names.push(f); });
+
+      // сколько «треков/трека/трек» — по-человечески
+      const plural = (n) => {
+        const a = Math.abs(n) % 100, b = a % 10;
+        const w = (a > 10 && a < 20) ? "треков" : (b === 1) ? "трек"
+                : (b >= 2 && b <= 4) ? "трека" : "треков";
+        return n + " " + w;
+      };
+
+      // Показываем ПАПКИ, если их больше одной и ни одна не открыта.
+      if (names.length > 1 && listFolder === null) {
+        const loose = queue.filter((t) => !t.folder).length;
+        rows.innerHTML =
+          names.map(() => '<div class="vgp-row vgp-fold" data-folder="1"><span class="fico">🗀</span>' +
+            '<div class="n"><b></b><span></span></div></div>').join("") +
+          (loose ? '<div class="vgp-row vgp-fold" data-loose="1"><span class="fico">♪</span>' +
+            '<div class="n"><b>Без папки</b><span></span></div></div>' : "");
+        [...rows.querySelectorAll("[data-folder]")].forEach((el, k) => {
+          const f = names[k], cnt = queue.filter((t) => t.folder === f).length;
+          el.querySelector(".n b").textContent = f;
+          el.querySelector(".n span").textContent = plural(cnt);
+          el.addEventListener("click", () => { listFolder = f; drawRows(); });
+        });
+        const lb = rows.querySelector("[data-loose]");
+        if (lb) {
+          lb.querySelector(".n span").textContent = plural(loose);
+          lb.addEventListener("click", () => { listFolder = ""; drawRows(); });
+        }
+        return;
+      }
+
+      // Треки: либо выбранной папки, либо (если папка одна/нет) все подряд.
+      const show = queue
+        .map((t, i) => ({ t, i }))
+        .filter(({ t }) => listFolder === null || (t.folder || "") === listFolder);
+      const back = (names.length > 1 && listFolder !== null)
+        ? '<div class="vgp-row vgp-back" data-back="1"><span class="fico">‹</span>' +
+          '<div class="n"><b>Все папки</b><span></span></div></div>'
+        : "";
+      rows.innerHTML = back + show.map(({ i }) =>
+        '<div class="vgp-row" data-i="' + i + '"><div class="n"><b></b><span></span></div></div>').join("");
+      const bb = rows.querySelector("[data-back]");
+      if (bb) bb.addEventListener("click", () => { listFolder = null; drawRows(); });
       // текст ставим через textContent — имена файлов бывают какие угодно
       rows.querySelectorAll(".vgp-row[data-i]").forEach((el) => {
         const t = queue[+el.dataset.i];
+        el.classList.toggle("on", +el.dataset.i === idx);
         el.querySelector("b").textContent = t.title;
         el.querySelector("span").textContent = (t.artist || "") + (t.folder ? " · " + t.folder : "");
         el.addEventListener("click", () => { api.playAt(+el.dataset.i); drawRows(); });
@@ -12205,8 +12343,12 @@ def vg_player_js():
       q("[data-volbar] i").style.width = (vk * 100) + "%";
       q("[data-volbar] b").style.left = (vk * 100) + "%";
       q("[data-mute]").innerHTML = vk > 0 ? I.vol : I.mute;
+      // Подсветку синхронизируем только когда РЕАЛЬНО показаны треки: в
+      // обзоре папок строк с data-i нет, и без этой проверки drawRows
+      // дёргался бы каждый кадр.
+      const hasTracks = rows.querySelector(".vgp-row[data-i]");
       const cur = rows.querySelector(".vgp-row.on");
-      if (rows.classList.contains("open") && (!cur || +cur.dataset.i !== idx)) drawRows();
+      if (rows.classList.contains("open") && hasTracks && (!cur || +cur.dataset.i !== idx)) drawRows();
     });
     paint();
   };
