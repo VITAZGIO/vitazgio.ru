@@ -11651,6 +11651,7 @@ def vg_player_js():
   let shuffle = false;
   let allFolders = [];     // всё дерево папок фонотеки [{id,name,parent}]
   let favFolder = "";      // id избранной папки (звезда), "" если нет
+  let curPick;             // selected folder for the current queue; undefined keeps the old default
   const subs = [];
 
   /* «Музыка ДОЛЖНА звучать» — намерение, а не текущее состояние звука.
@@ -11681,6 +11682,9 @@ def vg_player_js():
         playing: wantPlay,
         vol: audio.volume,
         shuffle: shuffle,
+        queue: queue,
+        idx: idx,
+        pick: curPick,
       }));
     } catch (e) { /* приватное окно — переживём */ }
   };
@@ -11740,15 +11744,26 @@ def vg_player_js():
     fire();
     save();
   };
+  const shuffleQueue = () => {
+    if (queue.length < 2) return;
+    const cur = queue[idx] || null;
+    for (let i = queue.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [queue[i], queue[j]] = [queue[j], queue[i]];
+    }
+    if (cur) idx = Math.max(0, queue.findIndex((t) => t.id === cur.id));
+  };
 
   const api = {
     audio,
     get state() { return state(); },
     subscribe(fn) { subs.push(fn); try { fn(state()); } catch (e) {} },
     /* Кто-то другой (страница музыки) назначил очередь — принимаем её. */
-    adopt(list, at) {
+    adopt(list, at, opts) {
       queue = list.slice();
       idx = Math.max(0, at | 0);
+      if (opts && Object.prototype.hasOwnProperty.call(opts, "pick")) curPick = opts.pick;
+      if (opts && Object.prototype.hasOwnProperty.call(opts, "shuffle")) shuffle = !!opts.shuffle;
       ready = true;
       media(); fire(); save();
     },
@@ -11772,6 +11787,7 @@ def vg_player_js():
     volume(v) { audio.volume = Math.min(1, Math.max(0, v)); save(); fire(); },
     shuffle(on) {
       shuffle = on === undefined ? !shuffle : !!on;
+      if (shuffle) shuffleQueue();
       save(); fire();
       return shuffle;
     },
@@ -11787,7 +11803,7 @@ def vg_player_js():
        кнопка ⧉ в самом виджете. Зовут кнопки в кабинете и на музыке:
        раньше они звали open() и показывали виджет ПОВЕРХ страницы, из-за
        чего «вынести из браузера» не получалось — окна не было. */
-    popOut() { openInWindow(); },
+    popOut() { openInWindow({ float: true }); },
     /* Сразу ФИНАЛЬНАЯ плавашка, без промежуточного окна /player/pop.
        Chrome/Edge — живой виджет поверх всех окон (Document PiP), Firefox —
        видео-PiP как у ютуба. Где нет ни того ни другого — тогда уже окно
@@ -11861,6 +11877,7 @@ def vg_player_js():
       id: t.id, title: t.title, artist: t.artist, folder: t.folder || "", url: t.url }));
     allFolders = d.folders || [];
     favFolder = d.fav || "";
+    curPick = pick;
     ready = true;
     fire();
     return queue;
@@ -11871,6 +11888,7 @@ def vg_player_js():
     const s = stored();
     if (s && typeof s.vol === "number") audio.volume = s.vol;
     if (s && s.shuffle) shuffle = true;
+    if (s && Object.prototype.hasOwnProperty.call(s, "pick")) curPick = s.pick;
     if (!s || !s.id) return;
 
     // Если состояние говорит «играет» — прежде чем правда включать звук,
@@ -11897,7 +11915,23 @@ def vg_player_js():
     });
 
     // Сначала — звук: ставим трек из сохранённого адреса, без похода на сервер.
-    if (s.url) {
+    const savedQueue = Array.isArray(s.queue)
+      ? s.queue.filter((t) => t && t.id && t.url)
+      : [];
+    if (savedQueue.length) {
+      queue = savedQueue.slice();
+      const bySavedId = queue.findIndex((t) => t.id === s.id);
+      const bySavedIdx = Number.isInteger(s.idx) && s.idx >= 0 && s.idx < queue.length ? s.idx : -1;
+      idx = bySavedId >= 0 ? bySavedId : (bySavedIdx >= 0 ? bySavedIdx : 0);
+      ready = true;
+      audio.src = queue[idx].url;
+      audio.addEventListener("loadedmetadata", function once() {
+        audio.removeEventListener("loadedmetadata", once);
+        if (s.time) audio.currentTime = s.time;
+        goIfAllowed();
+      }, { once: true });
+      media(); fire();
+    } else if (s.url) {
       queue = [{ id: s.id, title: s.title || "", artist: s.artist || "",
                  folder: s.folder || "", url: s.url }];
       idx = 0;
@@ -11911,7 +11945,9 @@ def vg_player_js():
     }
 
     // А полный список подтянем следом — он нужен только для «дальше» и списка.
-    const list = await fetchList();
+    const list = savedQueue.length
+      ? queue
+      : await fetchList(false, Object.prototype.hasOwnProperty.call(s, "pick") ? s.pick : undefined);
     const at = list.findIndex((t) => t.id === s.id);
     if (at >= 0) {
       idx = at;
@@ -11951,7 +11987,7 @@ def vg_player_js():
     if (!box) build();                 // зовут прямо с сайта — виджета ещё нет
     let w;
     try {
-      w = await documentPictureInPicture.requestWindow({ width: 340, height: 300 });
+      w = await documentPictureInPicture.requestWindow({ width: 360, height: 232 });
     } catch (e) { return; }
     const st = w.document.createElement("style");
     st.textContent = CSS;
@@ -12056,12 +12092,13 @@ def vg_player_js():
     ("documentPictureInPicture" in window) ||
     ("pictureInPictureEnabled" in document && document.pictureInPictureEnabled);
 
-  const openInWindow = () => {
+  const openInWindow = (opts) => {
     if (popWin && !popWin.closed) { try { popWin.focus(); } catch (e) {} return; }
     // Звук уезжает в окно, значит эта вкладка сама включаться больше не
     // должна: автоподхват мог ещё не успеть стартовать (страницу только
     // открыли), и тогда он завёл бы второй голос уже ПОСЛЕ передачи.
     userActed = true;
+    save();
     const s = stored();
     // «Играло» — это намерение, а не audio.paused: клик по ⧉ сразу после
     // открытия страницы иначе уносил бы в окно паузу, хотя трек вот-вот
@@ -12074,11 +12111,16 @@ def vg_player_js():
         s.playing = wasPlaying;
         // Секунду берём живую, а если подхват не начался — ту, что лежала.
         s.time = audio.currentTime || s.time || 0;
+        s.queue = queue;
+        s.idx = idx;
+        s.pick = curPick;
+        s.shuffle = shuffle;
         localStorage.setItem(KEY, JSON.stringify(s));
       }
     } catch (e) {}
-    popWin = window.open("/player/pop", "vgplayer",
-      "width=340,height=440,menubar=no,toolbar=no,location=no,status=no,resizable=yes");
+    const url = opts && opts.float ? "/player/pop?float=1" : "/player/pop";
+    popWin = window.open(url, "vgplayer",
+      "width=360,height=260,menubar=no,toolbar=no,location=no,status=no,resizable=yes");
     setTimeout(() => { quiet = false; }, 300);
   };
 
@@ -12330,8 +12372,6 @@ def vg_player_js():
     // показываем папки (или сразу треки, если папка всего одна).
     // Выбранная в списке папка: id папки, "__all__" — вся музыка,
     // undefined — по умолчанию (избранная папка или вся музыка).
-    let curPick;
-
     /* положение помним между страницами */
     try {
       const p = JSON.parse(localStorage.getItem(POS) || "null");
@@ -12390,7 +12430,7 @@ def vg_player_js():
     q("[data-prev]").addEventListener("click", () => api.prev());
     q("[data-shuf]").addEventListener("click", () => api.shuffle());
     q("[data-list]").addEventListener("click", async () => {
-      await fetchList(true);            // всегда свежий: могли докинуть треков
+      await fetchList(true, curPick);   // всегда свежий: могли докинуть треков
       rows.classList.toggle("open");
       q("[data-list]").classList.toggle("on", rows.classList.contains("open"));
       drawRows();
@@ -12451,7 +12491,7 @@ def vg_player_js():
         top.remove();
       }
     } else {
-      q("[data-pip]").addEventListener("click", openInWindow);
+      q("[data-pip]").addEventListener("click", () => openInWindow({ float: true }));
     }
 
     // Глубина папки по цепочке parent — для отступа в списке.
@@ -12554,6 +12594,9 @@ def vg_player_js():
     let on = popup;
     if (!popup) { try { on = localStorage.getItem("vgPlayerOn") === "1"; } catch (e) { on = false; } }
     if (!headless && on) build();
+    if (popup && window.VGP_AUTO_FLOAT && canFloat()) {
+      setTimeout(floatOnTop, 60);
+    }
     resume();
   };
   if (document.readyState === "loading")
@@ -12597,7 +12640,10 @@ def player_pop_page():
 </style>
 </head>
 <body>
-<script>window.VGP_POPUP = true;</script>
+<script>
+window.VGP_POPUP = true;
+window.VGP_AUTO_FLOAT = new URLSearchParams(location.search).get("float") === "1";
+</script>
 <script src="/vg-player.js"></script>
 </body>
 </html>"""
@@ -17371,7 +17417,7 @@ def music_page():
             <a class="back" href="/" title="На главную" aria-label="На главную"><svg viewBox="0 0 24 24" fill="none"><path d="M19 12H5m0 0 6-6m-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
             <a class="eyebrow" href="/">vitazgio.ru · музыка</a>
             <button class="popout" type="button"
-                    onclick="(window.VGP&amp;&amp;VGP.popOut)?VGP.popOut():window.open('/player/pop','vgplayer','width=340,height=460')"
+                    onclick="(window.VGP&amp;&amp;VGP.popOut)?VGP.popOut():window.open('/player/pop?float=1','vgplayer','width=360,height=260')"
                     title="Отдельное окно: свой звук, не закрывается при переходах по сайту">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M21 3l-9 9M10 5H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5"/></svg>
               <span>Вынести в окно</span>
@@ -17707,6 +17753,18 @@ def music_page():
           atIndex = Math.max(0, list.indexOf(startId));
         };
 
+        const playerPick = () => here || "__all__";
+        const syncVgpQueue = () => {
+          if (!window.VGP || !queueIds.length) return;
+          const folderName = {};
+          folders.forEach((f) => { folderName[f.id] = f.name; });
+          window.VGP.adopt(queueIds.map((qid) => {
+            const q = byId(qid) || {};
+            return { id: "m_" + qid, title: q.title || "", artist: q.artist || "",
+                     folder: folderName[q.folder] || "", url: "/api/music/file/" + qid };
+          }), atIndex, { pick: playerPick(), shuffle });
+        };
+
         const play = (id) => {
           if (!queueIds.includes(id)) buildQueue(id);
           else atIndex = queueIds.indexOf(id);
@@ -17719,15 +17777,7 @@ def music_page():
           document.title = t.title + " — vitazgio.ru";
           // Отдаём очередь общему движку: с ней виджет на других страницах
           // знает, что играет, и умеет листать дальше.
-          if (window.VGP) {
-            const folderName = {};
-            folders.forEach((f) => { folderName[f.id] = f.name; });
-            window.VGP.adopt(queueIds.map((qid) => {
-              const q = byId(qid) || {};
-              return { id: "m_" + qid, title: q.title || "", artist: q.artist || "",
-                       folder: folderName[q.folder] || "", url: "/api/music/file/" + qid };
-            }), atIndex);
-          }
+          syncVgpQueue();
           paint();
         };
 
@@ -17822,7 +17872,7 @@ def music_page():
           shuffle = !shuffle;
           $("k-shuffle").classList.toggle("on", shuffle);
           const nowId = queueIds[atIndex];
-          if (nowId) buildQueue(nowId);
+          if (nowId) { buildQueue(nowId); syncVgpQueue(); paint(); }
         });
         $("k-repeat").addEventListener("click", () => {
           repeat = !repeat;
