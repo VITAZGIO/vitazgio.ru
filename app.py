@@ -89,6 +89,7 @@ NETBIRD_DEVICES = [
     {"ip": "100.104.1.172", "name": "windows10proxmox", "rdp_enabled": True},
     {"ip": "100.104.67.89", "name": "orangepizero3", "ssh_enabled": True},
     {"ip": "100.104.221.91", "name": "ubuntu-server", "ssh_enabled": True},
+    {"ip": "100.104.208.57", "name": "proxmox_vps", "ssh_enabled": True},
     {"ip": "100.104.160.121", "name": "windows10V", "rdp_enabled": True},
     {"ip": "100.104.111.39", "name": "ubuntuvitaz1", "ssh_enabled": True},
     {"ip": "100.104.86.103", "name": "MOBILA", "vnc_enabled": True},
@@ -4512,7 +4513,7 @@ def cabinet():
               <button id="netbird-toggle" class="ex-head panel-head" type="button"
                       aria-expanded="false" aria-controls="netbird-devices">
                 <span class="ex-ic"><img src="/static/netbird-official.png" alt=""></span>
-                <span class="ex-tx"><b>NetBird</b><i>домашняя сеть · 8 устройств</i></span>
+                <span class="ex-tx"><b>NetBird</b><i>домашняя сеть · 9 устройств</i></span>
                 <span class="ex-ar" aria-hidden="true">⌄</span>
               </button>
               <div id="netbird-devices" hidden>
