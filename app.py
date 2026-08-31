@@ -4210,12 +4210,16 @@ def cabinet():
         .pl-icon { width: 24px; height: 24px; display: grid; place-items: center; color: #2de2ff; font-size: .9rem; line-height: 1;
                    border: 1px solid rgba(45,226,255,.3); background: rgba(45,226,255,.06); cursor: pointer; transition: all .16s; }
         .pl-icon:hover { color: #061018; border-color: #2de2ff; background: #2de2ff; }
-        .pl-eq { display: flex; align-items: flex-end; justify-content: center; gap: 2px; height: 26px; margin: 11px 0 8px; }
-        .pl-eq span { width: 2px; height: 3px; background: linear-gradient(180deg, #ff3fa4, #2de2ff); opacity: .35; transition: height .12s, opacity .12s; }
+        .pl-eq { flex: none; display: flex; align-items: flex-end; justify-content: center; gap: 2px;
+                 height: 26px; min-height: 26px; max-height: 26px; margin: 11px 0 8px;
+                 overflow: hidden; line-height: 0; contain: layout paint; }
+        .pl-eq span { flex: none; width: 2px; height: 26px; transform: scaleY(.12);
+                      transform-origin: bottom center; background: linear-gradient(180deg, #ff3fa4, #2de2ff);
+                      opacity: .35; transition: transform .12s, opacity .12s; will-change: transform; }
         .player.on .pl-eq span { opacity: 1; }
-        .pl-now { text-align: center; }
-        .pl-title { color: #eaf6ff; font-size: .79rem; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .pl-artist { margin-top: 2px; color: #6b7385; font-size: .66rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .pl-now { flex: none; min-height: 33px; text-align: center; contain: layout paint; }
+        .pl-title { display: block; height: 16px; line-height: 16px; color: #eaf6ff; font-size: .79rem; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .pl-artist { display: block; height: 15px; line-height: 15px; margin-top: 2px; color: #6b7385; font-size: .66rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .pl-seek { position: relative; height: 3px; margin: 10px 0 4px; background: rgba(255,255,255,.09); }
         .pl-seek-fill { height: 100%; width: 0; background: linear-gradient(90deg, #ff3fa4, #2de2ff); }
         .pl-seek-input { position: absolute; inset: -7px 0; width: 100%; height: 18px; margin: 0; opacity: 0; cursor: pointer; }
@@ -5890,12 +5894,12 @@ def cabinet():
                 const step = Math.floor(freq.length / bars.length / 2) || 1;
                 bars.forEach((b, i) => {
                   const v = freq[i * step] / 255;
-                  b.style.height = Math.max(2, v * 26) + "px";
+                  b.style.transform = "scaleY(" + Math.max(.12, v) + ")";
                 });
               } else if (!audio.paused) {
-                bars.forEach(b => { b.style.height = (3 + Math.random() * 20) + "px"; });
+                bars.forEach(b => { b.style.transform = "scaleY(" + (.12 + Math.random() * .78) + ")"; });
               } else {
-                bars.forEach(b => { b.style.height = "3px"; });
+                bars.forEach(b => { b.style.transform = "scaleY(.12)"; });
               }
               raf = requestAnimationFrame(drawBars);
             };
@@ -12185,13 +12189,13 @@ def vg_player_js():
   .vgp.vgp-on .vgp-note { display:none; }
   .vgp:not(.vgp-on) .vgp-eq { display:none; }
   .vgp-eq { display:flex; align-items:flex-end; gap:3px; height:20px; }
-  .vgp-eq i { width:3px; height:5px; border-radius:2px; background:linear-gradient(180deg,#7df0ff,#2de2ff);
+  .vgp-eq i { width:3px; height:20px; transform:scaleY(.25); transform-origin:bottom center; border-radius:2px; background:linear-gradient(180deg,#7df0ff,#2de2ff);
               box-shadow:0 0 7px rgba(45,226,255,.75); }
   .vgp.vgp-on .vgp-eq i { animation:vgpBar .9s ease-in-out infinite; }
   .vgp.vgp-on .vgp-eq i:nth-child(2){ animation-duration:.62s }
   .vgp.vgp-on .vgp-eq i:nth-child(3){ animation-duration:1.05s }
   .vgp.vgp-on .vgp-eq i:nth-child(4){ animation-duration:.78s }
-  @keyframes vgpBar { 0%,100%{height:5px} 50%{height:19px} }
+  @keyframes vgpBar { 0%,100%{transform:scaleY(.25)} 50%{transform:scaleY(.95)} }
   .vgp-meta { flex:1; min-width:0; }
   .vgp-t { font-size:13.5px; font-weight:700; color:#f2fbff; white-space:nowrap;
            overflow:hidden; text-overflow:ellipsis; }
