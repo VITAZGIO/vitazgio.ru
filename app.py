@@ -5990,7 +5990,7 @@ def cabinet():
               // поверх окон) — кнопка ⧉ уже ВНУТРИ окна: оттуда плавашка
               // тоже переживает навигацию, ведь само окно никуда не идёт.
               if (window.VGP && window.VGP.popOut) window.VGP.popOut();
-              else window.open("/player/pop", "vgplayer", "width=340,height=460");
+              else window.open("/player/pop", "vgplayer", "width=360,height=260");
             });
 
             el("pl-play").addEventListener("click", () => {
@@ -11803,7 +11803,7 @@ def vg_player_js():
        кнопка ⧉ в самом виджете. Зовут кнопки в кабинете и на музыке:
        раньше они звали open() и показывали виджет ПОВЕРХ страницы, из-за
        чего «вынести из браузера» не получалось — окна не было. */
-    popOut() { openInWindow({ float: true }); },
+    popOut() { openInWindow(); },
     /* Сразу ФИНАЛЬНАЯ плавашка, без промежуточного окна /player/pop.
        Chrome/Edge — живой виджет поверх всех окон (Document PiP), Firefox —
        видео-PiP как у ютуба. Где нет ни того ни другого — тогда уже окно
@@ -12118,8 +12118,7 @@ def vg_player_js():
         localStorage.setItem(KEY, JSON.stringify(s));
       }
     } catch (e) {}
-    const url = opts && opts.float ? "/player/pop?float=1" : "/player/pop";
-    popWin = window.open(url, "vgplayer",
+    popWin = window.open("/player/pop", "vgplayer",
       "width=360,height=260,menubar=no,toolbar=no,location=no,status=no,resizable=yes");
     setTimeout(() => { quiet = false; }, 300);
   };
@@ -12294,7 +12293,7 @@ def vg_player_js():
   /* в самом вынесенном окне (/player/pop) виджет — это весь его вьюпорт,
      без плавания и перетаскивания */
   .vgp.vgp-pip { position:static; inset:auto; right:auto; bottom:auto; left:auto; top:auto;
-                 width:100%; height:100%; border-radius:0; box-shadow:none; }
+                 width:100%; height:auto; min-height:0; border-radius:0; box-shadow:none; }
   .vgp.vgp-pip .vgp-head { cursor:default; }
 
   /* автоплей не пустили — зовём нажать */
@@ -12483,7 +12482,7 @@ def vg_player_js():
       // окон, без рамок» — как маленькое окошко ютуба. В Chrome/Edge это наш
       // живой виджет (Document PiP), в Firefox — видео-PiP из холста. Где не
       // умеет вообще ни то ни другое — кнопку прячем, чтобы не обманывать.
-      const top = q("[data-pip]");
+      const top = q("[data-pip]"); top.remove();
       if (canFloat()) {
         top.title = "Поверх всех окон, без рамок (как в ютубе)";
         top.addEventListener("click", floatOnTop);
@@ -12491,7 +12490,7 @@ def vg_player_js():
         top.remove();
       }
     } else {
-      q("[data-pip]").addEventListener("click", () => openInWindow({ float: true }));
+      q("[data-pip]").addEventListener("click", openInWindow);
     }
 
     // Глубина папки по цепочке parent — для отступа в списке.
@@ -12594,9 +12593,6 @@ def vg_player_js():
     let on = popup;
     if (!popup) { try { on = localStorage.getItem("vgPlayerOn") === "1"; } catch (e) { on = false; } }
     if (!headless && on) build();
-    if (popup && window.VGP_AUTO_FLOAT && canFloat()) {
-      setTimeout(floatOnTop, 60);
-    }
     resume();
   };
   if (document.readyState === "loading")
@@ -12640,10 +12636,7 @@ def player_pop_page():
 </style>
 </head>
 <body>
-<script>
-window.VGP_POPUP = true;
-window.VGP_AUTO_FLOAT = new URLSearchParams(location.search).get("float") === "1";
-</script>
+<script>window.VGP_POPUP = true;</script>
 <script src="/vg-player.js"></script>
 </body>
 </html>"""
@@ -17417,7 +17410,7 @@ def music_page():
             <a class="back" href="/" title="На главную" aria-label="На главную"><svg viewBox="0 0 24 24" fill="none"><path d="M19 12H5m0 0 6-6m-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
             <a class="eyebrow" href="/">vitazgio.ru · музыка</a>
             <button class="popout" type="button"
-                    onclick="(window.VGP&amp;&amp;VGP.popOut)?VGP.popOut():window.open('/player/pop?float=1','vgplayer','width=360,height=260')"
+                    onclick="(window.VGP&amp;&amp;VGP.popOut)?VGP.popOut():window.open('/player/pop','vgplayer','width=360,height=260')"
                     title="Отдельное окно: свой звук, не закрывается при переходах по сайту">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M21 3l-9 9M10 5H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5"/></svg>
               <span>Вынести в окно</span>
