@@ -24,6 +24,7 @@ import urllib.request
 import zipfile
 from collections import defaultdict, deque
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 from functools import wraps
 from zoneinfo import ZoneInfo
 
@@ -973,6 +974,165 @@ def console_password_today():
     return f"{SSH_GATE_PASSWORD_PREFIX}{now:%d%m}"
 
 
+DEBTS_PATH = os.path.join(DATA_DIR, "debts.json")
+debts_lock = threading.Lock()
+debts_data = {"users": [], "entries": []}
+
+
+def _today_iso():
+    return datetime.now(ZoneInfo("Europe/Moscow")).strftime("%Y-%m-%d")
+
+
+def _debts_load():
+    global debts_data
+    try:
+        with open(DEBTS_PATH, encoding="utf-8") as fh:
+            raw = json.load(fh)
+    except (OSError, ValueError):
+        raw = {}
+    debts_data = {
+        "users": raw.get("users") if isinstance(raw.get("users"), list) else [],
+        "entries": raw.get("entries") if isinstance(raw.get("entries"), list) else [],
+    }
+
+
+def _debts_write_locked():
+    os.makedirs(DATA_DIR, exist_ok=True)
+    tmp = DEBTS_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(debts_data, fh, ensure_ascii=False, indent=2)
+    os.replace(tmp, DEBTS_PATH)
+
+
+def _debt_hash_password(password, salt=None):
+    salt = salt or secrets.token_bytes(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, PASSWORD_ITERATIONS)
+    return base64.b64encode(salt).decode("ascii"), base64.b64encode(digest).decode("ascii")
+
+
+def _debt_password_matches(user, password):
+    visible = user.get("password_plain")
+    if isinstance(visible, str) and visible:
+        return hmac.compare_digest(visible, password)
+    try:
+        salt = base64.b64decode(user.get("salt", ""))
+        expected = base64.b64decode(user.get("password_hash", ""))
+    except (ValueError, TypeError):
+        return False
+    actual = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, PASSWORD_ITERATIONS)
+    return hmac.compare_digest(actual, expected)
+
+
+def _debt_find_user_by_password(password):
+    if not isinstance(password, str) or not password:
+        return None
+    with debts_lock:
+        for user in debts_data["users"]:
+            if _debt_password_matches(user, password):
+                return {"id": user["id"], "name": user.get("name", "Должник")}
+    return None
+
+
+def _debt_amount_cents(raw):
+    text = str(raw or "").strip().replace(" ", "").replace(",", ".")
+    if not re.fullmatch(r"\d+(?:\.\d{1,2})?", text):
+        raise ValueError("Введите сумму числом, максимум 2 знака после точки.")
+    try:
+        value = Decimal(text)
+    except InvalidOperation:
+        raise ValueError("Введите сумму числом.")
+    if value <= 0 or value > Decimal("10000000"):
+        raise ValueError("Сумма должна быть больше нуля и меньше 10 000 000.")
+    return int((value * Decimal("100")).quantize(Decimal("1")))
+
+
+def _debt_clean_date(raw):
+    text = (str(raw or "").strip() or _today_iso())
+    try:
+        datetime.strptime(text, "%Y-%m-%d")
+    except ValueError:
+        raise ValueError("Дата должна быть в формате ГГГГ-ММ-ДД.")
+    return text
+
+
+def _debt_user_total_locked(user_id):
+    total = 0
+    for entry in debts_data["entries"]:
+        if entry.get("user_id") != user_id:
+            continue
+        amount = int(entry.get("amount_cents") or 0)
+        total += amount if entry.get("kind") == "debt" else -amount
+    return total
+
+
+def _debt_entry_public_locked(entry):
+    user = next((u for u in debts_data["users"] if u.get("id") == entry.get("user_id")), None)
+    return {
+        "id": entry.get("id"),
+        "user_id": entry.get("user_id"),
+        "user_name": user.get("name", "Должник") if user else "Должник",
+        "date": entry.get("date") or _today_iso(),
+        "kind": entry.get("kind") if entry.get("kind") in ("debt", "return") else "debt",
+        "amount_cents": int(entry.get("amount_cents") or 0),
+        "comment": entry.get("comment") or "—",
+        "created": entry.get("created") or "",
+    }
+
+
+def _debt_user_public_locked(user):
+    user_id = user.get("id")
+    entries = [e for e in debts_data["entries"] if e.get("user_id") == user_id]
+    return {
+        "id": user_id,
+        "name": user.get("name", "Должник"),
+        "password": user.get("password_plain") or "",
+        "total_cents": _debt_user_total_locked(user_id),
+        "entry_count": len(entries),
+        "created": user.get("created") or "",
+    }
+
+
+def _debts_snapshot_locked(user_id=None):
+    users = [_debt_user_public_locked(u) for u in debts_data["users"]]
+    users.sort(key=lambda u: u["name"].lower())
+    entries = [_debt_entry_public_locked(e) for e in debts_data["entries"] if user_id is None or e.get("user_id") == user_id]
+    entries.sort(key=lambda e: (e["date"], e["created"]), reverse=True)
+    total = sum(u["total_cents"] for u in users if user_id is None or u["id"] == user_id)
+    return {"users": users, "entries": entries, "total_cents": total, "today": _today_iso()}
+
+
+def _debts_owner_unlocked():
+    return bool(session.get("debts_owner_authenticated") and session.get("debts_owner_day") == _today_iso())
+
+
+def debts_owner_required(view):
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if not session.get("authenticated"):
+            fresh = _device_check(request.cookies.get(DEVICE_COOKIE))
+            if not fresh:
+                return jsonify(error="Нужен вход в кабинет."), 403
+            session["authenticated"] = True
+            g.new_device_cookie = fresh
+            _log_login("доверенное устройство")
+        if not _debts_owner_unlocked():
+            return jsonify(error="Нужен ежедневный пароль."), 403
+        return view(*args, **kwargs)
+    return wrapped
+
+
+def debtor_required(view):
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if not session.get("debtor_id"):
+            return redirect(url_for("home"))
+        return view(*args, **kwargs)
+    return wrapped
+
+
+_debts_load()
+
+
 def ping_once(ip):
     if platform.system().lower() == "windows":
         command = ["ping", "-n", "1", "-w", str(PING_TIMEOUT_SECONDS * 1000), ip]
@@ -1349,17 +1509,430 @@ def login():
 
     payload = request.get_json(silent=True) or {}
     password = payload.get("password", "")
-    if not isinstance(password, str) or not password_matches(password):
-        _rate_hit(login_attempts, login_attempts_lock, client)
-        _log_login("неверный пароль", kind="fail")
-        return jsonify(error="Неверный пароль."), 401
+    if isinstance(password, str) and password_matches(password):
+        _rate_clear(login_attempts, login_attempts_lock, client)
+        session.clear()
+        session["authenticated"] = True
+        session.permanent = False
+        _log_login()
+        return jsonify(redirect=url_for("cabinet"))
 
-    _rate_clear(login_attempts, login_attempts_lock, client)
-    session.clear()
-    session["authenticated"] = True
-    session.permanent = False
-    _log_login()
-    return jsonify(redirect=url_for("cabinet"))
+    debtor = _debt_find_user_by_password(password)
+    if debtor:
+        _rate_clear(login_attempts, login_attempts_lock, client)
+        session.clear()
+        session["debtor_id"] = debtor["id"]
+        session.permanent = False
+        _log_login(f"вход должника: {debtor['name']}")
+        return jsonify(redirect=url_for("debts_me_page"))
+
+    _rate_hit(login_attempts, login_attempts_lock, client)
+    _log_login("неверный пароль", kind="fail")
+    return jsonify(error="Неверный пароль."), 401
+
+
+@app.post("/api/debts/unlock")
+def debts_unlock_api():
+    if not session.get("authenticated"):
+        fresh = _device_check(request.cookies.get(DEVICE_COOKIE))
+        if not fresh:
+            return jsonify(error="Нужен вход в кабинет."), 403
+        session["authenticated"] = True
+        g.new_device_cookie = fresh
+        _log_login("доверенное устройство")
+
+    client = _client_ip()
+    if _rate_blocked(console_login_attempts, console_login_attempts_lock, client,
+                     CONSOLE_LOGIN_WINDOW_SECONDS, CONSOLE_LOGIN_MAX_ATTEMPTS):
+        return jsonify(error="Слишком много попыток. Попробуйте через 5 минут."), 429
+
+    payload = request.get_json(silent=True) or {}
+    password = payload.get("password", "")
+    if not isinstance(password, str) or not hmac.compare_digest(
+        password.encode(), console_password_today().encode()
+    ):
+        _rate_hit(console_login_attempts, console_login_attempts_lock, client)
+        return jsonify(error="Неверный ежедневный пароль."), 401
+
+    _rate_clear(console_login_attempts, console_login_attempts_lock, client)
+    session["debts_owner_authenticated"] = True
+    session["debts_owner_day"] = _today_iso()
+    return jsonify(ok=True)
+
+
+@app.get("/api/debts")
+@debts_owner_required
+def debts_api():
+    with debts_lock:
+        return jsonify(_debts_snapshot_locked())
+
+
+@app.post("/api/debts/users")
+@debts_owner_required
+def debts_user_create_api():
+    payload = request.get_json(silent=True) or {}
+    name = str(payload.get("name") or "").strip()
+    password = payload.get("password", "")
+    if not name:
+        return jsonify(error="Введите имя."), 400
+    if len(name) > 60:
+        return jsonify(error="Имя слишком длинное."), 400
+    if not isinstance(password, str) or len(password.strip()) < 3:
+        return jsonify(error="Пароль должен быть хотя бы 3 символа."), 400
+    password = password.strip()
+    if password_matches(password):
+        return jsonify(error="Не используй пароль владельца для должника."), 400
+
+    salt, password_hash = _debt_hash_password(password)
+    now = datetime.now(ZoneInfo("Europe/Moscow")).isoformat(timespec="seconds")
+    user_id = uuid.uuid4().hex
+    with debts_lock:
+        if any(u.get("name", "").lower() == name.lower() for u in debts_data["users"]):
+            return jsonify(error="Такой человек уже есть."), 400
+        if any(_debt_password_matches(u, password) for u in debts_data["users"]):
+            return jsonify(error="Такой пароль уже занят."), 400
+        debts_data["users"].append({
+            "id": user_id,
+            "name": name,
+            "password_plain": password,
+            "salt": salt,
+            "password_hash": password_hash,
+            "created": now,
+        })
+        _debts_write_locked()
+        snapshot = _debts_snapshot_locked()
+        snapshot["selected_id"] = user_id
+        return jsonify(snapshot)
+
+
+@app.post("/api/debts/entries")
+@debts_owner_required
+def debts_entry_create_api():
+    payload = request.get_json(silent=True) or {}
+    user_id = str(payload.get("user_id") or "")
+    kind = str(payload.get("kind") or "debt")
+    if kind not in ("debt", "return"):
+        return jsonify(error="Неверный тип записи."), 400
+    try:
+        amount_cents = _debt_amount_cents(payload.get("amount"))
+        entry_date = _debt_clean_date(payload.get("date"))
+    except ValueError as err:
+        return jsonify(error=str(err)), 400
+    comment = str(payload.get("comment") or "").strip()[:220] or "—"
+    now = datetime.now(ZoneInfo("Europe/Moscow")).isoformat(timespec="seconds")
+
+    with debts_lock:
+        if not any(u.get("id") == user_id for u in debts_data["users"]):
+            return jsonify(error="Выберите человека."), 400
+        debts_data["entries"].append({
+            "id": uuid.uuid4().hex,
+            "user_id": user_id,
+            "kind": kind,
+            "date": entry_date,
+            "amount_cents": amount_cents,
+            "comment": comment,
+            "created": now,
+        })
+        _debts_write_locked()
+        return jsonify(_debts_snapshot_locked())
+
+
+@app.delete("/api/debts/entries/<entry_id>")
+@debts_owner_required
+def debts_entry_delete_api(entry_id):
+    with debts_lock:
+        before = len(debts_data["entries"])
+        debts_data["entries"] = [e for e in debts_data["entries"] if e.get("id") != entry_id]
+        if len(debts_data["entries"]) == before:
+            return jsonify(error="Запись не найдена."), 404
+        _debts_write_locked()
+        return jsonify(_debts_snapshot_locked())
+
+
+@app.get("/api/debts/me")
+def debts_me_api():
+    user_id = session.get("debtor_id")
+    if not user_id:
+        return jsonify(error="Нужен вход."), 403
+    with debts_lock:
+        user = next((u for u in debts_data["users"] if u.get("id") == user_id), None)
+        if not user:
+            session.pop("debtor_id", None)
+            return jsonify(error="Пользователь не найден."), 404
+        snapshot = _debts_snapshot_locked(user_id)
+        snapshot["me"] = _debt_user_public_locked(user)
+        return jsonify(snapshot)
+
+
+@app.delete("/api/debts/users/<user_id>")
+@debts_owner_required
+def debts_user_delete_api(user_id):
+    with debts_lock:
+        before = len(debts_data["users"])
+        debts_data["users"] = [u for u in debts_data["users"] if u.get("id") != user_id]
+        if len(debts_data["users"]) == before:
+            return jsonify(error="Пользователь не найден."), 404
+        debts_data["entries"] = [e for e in debts_data["entries"] if e.get("user_id") != user_id]
+        _debts_write_locked()
+        return jsonify(_debts_snapshot_locked())
+
+
+@app.post("/api/debts/users/<user_id>/password")
+@debts_owner_required
+def debts_user_password_api(user_id):
+    payload = request.get_json(silent=True) or {}
+    password = payload.get("password", "")
+    if not isinstance(password, str) or len(password.strip()) < 3:
+        return jsonify(error="Пароль должен быть хотя бы 3 символа."), 400
+    password = password.strip()
+    if password_matches(password):
+        return jsonify(error="Не используй пароль владельца для должника."), 400
+    salt, password_hash = _debt_hash_password(password)
+    with debts_lock:
+        user = next((u for u in debts_data["users"] if u.get("id") == user_id), None)
+        if not user:
+            return jsonify(error="Пользователь не найден."), 404
+        if any(u.get("id") != user_id and _debt_password_matches(u, password) for u in debts_data["users"]):
+            return jsonify(error="Такой пароль уже занят."), 400
+        user["password_plain"] = password
+        user["salt"] = salt
+        user["password_hash"] = password_hash
+        _debts_write_locked()
+        return jsonify(_debts_snapshot_locked())
+
+
+@app.get("/debts/me")
+@debtor_required
+def debts_me_page():
+    return _debts_page_html(owner=False)
+
+
+@app.get("/debts")
+@login_required
+def debts_page():
+    return _debts_page_html(owner=True)
+
+
+def _debts_page_html(owner=True):
+    mode = "owner" if owner else "debtor"
+    title = "Долги" if owner else "Мои долги"
+    back_href = "/cabinet" if owner else "/"
+    owner_unlocked = owner and _debts_owner_unlocked()
+    return f"""<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>{title} · vitazgio.ru</title>
+  <style>
+    :root{{--bg:#08111f;--panel:#0c1628;--line:#1d3151;--text:#f4fbff;--muted:#8aa2c7;--cyan:#35e0f0;--green:#63f5ad;--pink:#ff4fb3;--yellow:#f6c04a;}}
+    *{{box-sizing:border-box}} body{{margin:0;min-height:100vh;background:radial-gradient(circle at 20% 0,#142947 0,#08111f 46%,#060b14 100%);color:var(--text);font:15px/1.45 "Segoe UI",Arial,sans-serif;}}
+    body::before{{content:"";position:fixed;inset:0;pointer-events:none;background:linear-gradient(transparent 96%,rgba(53,224,240,.08) 97%);background-size:100% 4px;opacity:.45}}
+    a{{color:inherit}} button,input,select{{font:inherit}} .wrap{{width:min(1480px,calc(100vw - 56px));margin:0 auto;padding:36px 0 54px;position:relative;z-index:1}}
+    .head{{display:flex;align-items:center;gap:18px;margin-bottom:28px}} .back{{width:44px;height:44px;border-radius:50%;border:1px solid rgba(53,224,240,.55);display:grid;place-items:center;text-decoration:none;color:var(--cyan);background:rgba(53,224,240,.08);font-size:25px}}
+    h1{{margin:0;font-size:clamp(34px,4vw,58px);line-height:1;font-weight:900;letter-spacing:0}} h1 span{{color:var(--cyan);text-shadow:0 0 22px rgba(53,224,240,.35)}} .tag{{margin-left:auto;color:var(--green);font-weight:800;text-transform:uppercase;letter-spacing:.08em;font-size:12px}}
+    .unlock{{max-width:520px;border:1px solid var(--line);background:rgba(12,22,40,.82);padding:26px;margin-top:58px;box-shadow:inset 3px 0 0 var(--cyan)}} .unlock h2,.panel h2{{margin:0 0 10px;font-size:22px}} .muted{{color:var(--muted)}} .hidden{{display:none!important}}
+    .grid{{display:grid;grid-template-columns:330px 1fr;gap:18px}} .panel{{border:1px solid var(--line);background:rgba(12,22,40,.78);padding:20px;min-width:0}} .panel.accent{{box-shadow:inset 3px 0 0 var(--cyan)}}
+    .total{{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-bottom:18px}} .stat{{border:1px solid var(--line);background:rgba(7,14,27,.82);padding:16px}} .stat b{{display:block;font-size:28px;color:var(--cyan)}} .stat i{{font-style:normal;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.08em}}
+    form{{display:grid;gap:10px}} label{{display:grid;gap:6px;color:#b8c8e8;font-weight:800;font-size:12px;text-transform:uppercase;letter-spacing:.06em}} input,select{{width:100%;border:1px solid #28405f;background:#071021;color:var(--text);padding:11px 12px;outline:none}} input:focus,select:focus{{border-color:var(--cyan);box-shadow:0 0 0 2px rgba(53,224,240,.14)}} .row{{display:grid;grid-template-columns:1fr 1fr;gap:10px}}
+    .btn{{border:1px solid rgba(53,224,240,.7);background:rgba(53,224,240,.16);color:var(--text);padding:11px 14px;font-weight:900;cursor:pointer}} .btn:hover{{background:rgba(53,224,240,.24)}} .btn.danger{{border-color:rgba(255,79,179,.55);background:rgba(255,79,179,.12)}} .btn.small{{padding:7px 9px;font-size:12px}}
+    .people{{display:grid;gap:8px;margin:16px 0}} .person{{border:1px solid #223956;background:#081427;color:var(--text);padding:12px;text-align:left;cursor:pointer;display:grid;gap:4px}} .person.active{{border-color:var(--cyan);box-shadow:inset 3px 0 0 var(--cyan)}} .person b{{font-size:16px}} .person i{{font-style:normal;color:var(--muted);font-size:12px}}
+    .pass-box{{border-top:1px solid #1a2d49;margin-top:14px;padding-top:14px;display:grid;gap:10px}}
+    .entry-form{{grid-template-columns:1.1fr .8fr .8fr 1.4fr auto;align-items:end;margin-bottom:18px}} .history{{width:100%;border-collapse:collapse}} .history th,.history td{{border-bottom:1px solid #1a2d49;padding:11px 8px;text-align:left;vertical-align:top}} .history th{{color:#86a1cc;font-size:12px;text-transform:uppercase;letter-spacing:.08em}} .sum{{font-weight:900;color:var(--cyan);white-space:nowrap}} .sum.minus{{color:var(--green)}} .empty{{padding:28px;border:1px dashed #294260;color:var(--muted);text-align:center}}
+    .err{{min-height:20px;color:#ff7aa9;font-weight:800}} .ok{{color:var(--green)}} .debtor-card{{max-width:960px;margin:auto}} .debtor-card .history{{margin-top:16px}}
+    @media (max-width:980px){{.wrap{{width:min(100vw - 24px,760px);padding-top:20px}}.grid{{grid-template-columns:1fr}}.total{{grid-template-columns:1fr}}.entry-form{{grid-template-columns:1fr}}.tag{{display:none}}}}
+  </style>
+</head>
+<body data-mode="{mode}">
+  <main class="wrap">
+    <header class="head"><a class="back" href="{back_href}" aria-label="Назад">‹</a><h1>{title.split()[0]} <span>{' '.join(title.split()[1:])}</span></h1><div class="tag">vitazgio.ru</div></header>
+
+    <section class="unlock" id="unlock" {'hidden' if not owner or owner_unlocked else ''}>
+      <h2>Ежедневный пароль</h2>
+      <p class="muted">Вход в управление долгами закрыт тем же дневным паролем, что и запоминание устройств.</p>
+      <form id="unlock-form"><input id="unlock-pass" type="password" autocomplete="off" placeholder="Пароль на сегодня"><button class="btn" type="submit">Открыть</button><div class="err" id="unlock-err"></div></form>
+    </section>
+
+    <section id="owner-app" class="grid {'hidden' if not owner or not owner_unlocked else ''}">
+      <aside class="panel accent">
+        <h2>Люди</h2>
+        <form id="user-form">
+          <label>Имя<input id="user-name" maxlength="60" autocomplete="off"></label>
+          <label>Пароль для входа<input id="user-pass" type="password" autocomplete="new-password"></label>
+          <button class="btn" type="submit">Создать</button>
+          <div class="err" id="user-err"></div>
+        </form>
+        <div class="people" id="people"></div>
+        <form class="pass-box" id="pass-form" hidden>
+          <label>Пароль выбранного<input id="edit-pass" autocomplete="off" placeholder="старый скрыт — задай новый"></label>
+          <button class="btn small" type="submit">Сохранить пароль</button>
+          <div class="err" id="pass-err"></div>
+        </form>
+        <button class="btn danger small" id="delete-user" type="button">Удалить выбранного</button>
+      </aside>
+      <section>
+        <div class="total">
+          <div class="stat"><i>общий долг</i><b id="total-all">0</b></div>
+          <div class="stat"><i>выбранный</i><b id="total-user">0</b></div>
+          <div class="stat"><i>записей</i><b id="entry-count">0</b></div>
+        </div>
+        <div class="panel">
+          <h2>Добавить строку</h2>
+          <form class="entry-form" id="entry-form">
+            <label>Дата<input id="entry-date" type="date"></label>
+            <label>Тип<select id="entry-kind"><option value="debt">Долг</option><option value="return">Вернул</option></select></label>
+            <label>Сумма<input id="entry-amount" inputmode="decimal" placeholder="450"></label>
+            <label>Комментарий<input id="entry-comment" maxlength="220" placeholder="если пусто — прочерк"></label>
+            <button class="btn" type="submit">Записать</button>
+          </form>
+          <div class="err" id="entry-err"></div>
+          <div id="history"></div>
+        </div>
+      </section>
+    </section>
+
+    <section id="debtor-app" class="panel accent debtor-card {'hidden' if owner else ''}">
+      <div class="total">
+        <div class="stat"><i>к оплате</i><b id="me-total">0</b></div>
+        <div class="stat"><i>записей</i><b id="me-count">0</b></div>
+        <div class="stat"><i>режим</i><b>просмотр</b></div>
+      </div>
+      <h2 id="me-name">История</h2>
+      <div id="me-history"></div>
+    </section>
+  </main>
+  <script>
+  (() => {{
+    "use strict";
+    const mode = document.body.dataset.mode;
+    const $ = id => document.getElementById(id);
+    const esc = s => String(s ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+    const money = cents => {{
+      const sign = cents < 0 ? "-" : "";
+      const value = Math.abs(cents || 0) / 100;
+      return sign + value.toLocaleString("ru-RU", {{minimumFractionDigits: 0, maximumFractionDigits: 2}}) + " ₽";
+    }};
+    let data = {{users:[],entries:[],total_cents:0,today:""}};
+    let selected = null;
+
+    async function api(path, opts={{}}) {{
+      const response = await fetch(path, {{
+        credentials: "same-origin",
+        headers: {{"Content-Type":"application/json"}},
+        ...opts
+      }});
+      const result = await response.json().catch(() => ({{}}));
+      if (!response.ok) throw new Error(result.error || "Ошибка сервера.");
+      return result;
+    }}
+
+    function rowHtml(entry, canDelete) {{
+      const cls = entry.kind === "return" ? "sum minus" : "sum";
+      const label = entry.kind === "return" ? "вернул" : "долг";
+      return `<tr><td>${{esc(entry.date)}}</td><td>${{esc(entry.user_name)}}</td><td>${{label}}</td><td class="${{cls}}">${{money(entry.kind === "return" ? -entry.amount_cents : entry.amount_cents)}}</td><td>${{esc(entry.comment || "—")}}</td><td>${{canDelete ? `<button class="btn danger small" data-del="${{esc(entry.id)}}">удалить</button>` : ""}}</td></tr>`;
+    }}
+
+    function tableHtml(entries, canDelete) {{
+      if (!entries.length) return `<div class="empty">Пока нет записей.</div>`;
+      return `<table class="history"><thead><tr><th>Дата</th><th>Кто</th><th>Тип</th><th>Сумма</th><th>Комментарий</th><th></th></tr></thead><tbody>${{entries.map(e => rowHtml(e, canDelete)).join("")}}</tbody></table>`;
+    }}
+
+    function renderOwner() {{
+      if (!selected && data.users.length) selected = data.users[0].id;
+      if (selected && !data.users.some(u => u.id === selected)) selected = data.users[0]?.id || null;
+      $("total-all").textContent = money(data.total_cents);
+      $("entry-count").textContent = String(data.entries.length);
+      const active = data.users.find(u => u.id === selected);
+      $("total-user").textContent = active ? money(active.total_cents) : "0 ₽";
+      $("people").innerHTML = data.users.length ? data.users.map(u => `<button class="person ${{u.id === selected ? "active" : ""}}" data-user="${{esc(u.id)}}" type="button"><b>${{esc(u.name)}}</b><i>${{money(u.total_cents)}} · пароль: ${{esc(u.password || "скрыт")}} · записей: ${{u.entry_count}}</i></button>`).join("") : `<div class="empty">Создай первого человека.</div>`;
+      $("pass-form").hidden = !active;
+      if (active) $("edit-pass").value = active.password || "";
+      const shown = selected ? data.entries.filter(e => e.user_id === selected) : data.entries;
+      $("history").innerHTML = tableHtml(shown, true);
+      $("entry-date").value = data.today || new Date().toISOString().slice(0,10);
+    }}
+
+    async function loadOwner() {{
+      data = await api("/api/debts");
+      renderOwner();
+    }}
+
+    async function loadDebtor() {{
+      const me = await api("/api/debts/me");
+      $("me-total").textContent = money(me.me.total_cents);
+      $("me-count").textContent = String(me.entries.length);
+      $("me-name").textContent = me.me.name;
+      $("me-history").innerHTML = tableHtml(me.entries, false);
+    }}
+
+    if (mode === "owner") {{
+      $("unlock-form")?.addEventListener("submit", async e => {{
+        e.preventDefault();
+        $("unlock-err").textContent = "";
+        try {{
+          await api("/api/debts/unlock", {{method:"POST", body:JSON.stringify({{password:$("unlock-pass").value}})}});
+          $("unlock").classList.add("hidden");
+          $("owner-app").classList.remove("hidden");
+          await loadOwner();
+        }} catch (err) {{
+          $("unlock-err").textContent = err.message;
+        }}
+      }});
+      $("user-form").addEventListener("submit", async e => {{
+        e.preventDefault();
+        $("user-err").textContent = "";
+        try {{
+          data = await api("/api/debts/users", {{method:"POST", body:JSON.stringify({{name:$("user-name").value, password:$("user-pass").value}})}});
+          $("user-name").value = ""; $("user-pass").value = "";
+          selected = data.selected_id || selected;
+          renderOwner();
+        }} catch (err) {{ $("user-err").textContent = err.message; }}
+      }});
+      $("entry-form").addEventListener("submit", async e => {{
+        e.preventDefault();
+        $("entry-err").textContent = "";
+        try {{
+          data = await api("/api/debts/entries", {{method:"POST", body:JSON.stringify({{user_id:selected, date:$("entry-date").value, kind:$("entry-kind").value, amount:$("entry-amount").value, comment:$("entry-comment").value}})}});
+          $("entry-amount").value = ""; $("entry-comment").value = ""; $("entry-kind").value = "debt";
+          renderOwner();
+        }} catch (err) {{ $("entry-err").textContent = err.message; }}
+      }});
+      $("people").addEventListener("click", e => {{
+        const btn = e.target.closest("[data-user]");
+        if (!btn) return;
+        selected = btn.dataset.user;
+        renderOwner();
+      }});
+      $("pass-form").addEventListener("submit", async e => {{
+        e.preventDefault();
+        if (!selected) return;
+        $("pass-err").textContent = "";
+        try {{
+          data = await api("/api/debts/users/" + encodeURIComponent(selected) + "/password", {{method:"POST", body:JSON.stringify({{password:$("edit-pass").value}})}});
+          renderOwner();
+        }} catch (err) {{ $("pass-err").textContent = err.message; }}
+      }});
+      $("history").addEventListener("click", async e => {{
+        const btn = e.target.closest("[data-del]");
+        if (!btn) return;
+        data = await api("/api/debts/entries/" + encodeURIComponent(btn.dataset.del), {{method:"DELETE"}});
+        renderOwner();
+      }});
+      $("delete-user").addEventListener("click", async () => {{
+        if (!selected || !confirm("Удалить человека и всю его историю?")) return;
+        data = await api("/api/debts/users/" + encodeURIComponent(selected), {{method:"DELETE"}});
+        selected = null;
+        renderOwner();
+      }});
+      if (!$("owner-app").classList.contains("hidden")) loadOwner().catch(err => $("entry-err").textContent = err.message);
+    }} else {{
+      loadDebtor().catch(err => $("me-history").innerHTML = `<div class="empty">${{esc(err.message)}}</div>`);
+    }}
+  }})();
+  </script>
+</body>
+</html>"""
 
 
 @app.post("/logout")
@@ -4677,6 +5250,63 @@ def cabinet():
                   <b>Резервная копия</b>
                 </span>
                 <span class="zbot"><i>скачать всё архивом и вернуть обратно</i><em aria-hidden="true">⌄</em></span>
+              </button>
+            </div>
+
+            <!-- Третий ряд: долги и будущие разделы -->
+            <div class="zrow c4">
+              <a class="z" href="/debts" style="--a:#7dd3fc">
+                <span class="ztop">
+                  <span class="z-ic">
+                    <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
+                      <path d="M6 20h36L24 8 6 20Z" fill="#7dd3fc" fill-opacity=".18" stroke="#7dd3fc" stroke-width="2.5" stroke-linejoin="round"/>
+                      <path d="M11 20v17M18 20v17M30 20v17M37 20v17" stroke="#b8ecff" stroke-width="2.5" stroke-linecap="round"/>
+                      <path d="M7 37h34M5 42h38" stroke="#7dd3fc" stroke-width="2.5" stroke-linecap="round"/>
+                      <path d="M24 14v1" stroke="#35e0f0" stroke-width="3" stroke-linecap="round"/>
+                    </svg>
+                  </span>
+                  <b>Долги</b>
+                </span>
+                <span class="zbot"><i>кто сколько должен, когда вернул и за что</i><em aria-hidden="true">⟶</em></span>
+              </a>
+
+              <button class="z reserve" type="button" style="--a:#f97316" aria-disabled="true">
+                <span class="ztop">
+                  <span class="z-ic">
+                    <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
+                      <rect x="11" y="10" width="26" height="28" rx="4" stroke="#f97316" stroke-width="2.6"/>
+                      <path d="M17 18h14M17 25h14M17 32h8" stroke="#ffd0a8" stroke-width="2.4" stroke-linecap="round"/>
+                    </svg>
+                  </span>
+                  <b>Резерв 1</b>
+                </span>
+                <span class="zbot"><i>свободное место под новый раздел</i><em aria-hidden="true">⟶</em></span>
+              </button>
+
+              <button class="z reserve" type="button" style="--a:#a78bfa" aria-disabled="true">
+                <span class="ztop">
+                  <span class="z-ic">
+                    <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
+                      <path d="M12 14h24v22H12z" stroke="#a78bfa" stroke-width="2.6"/>
+                      <path d="M18 10v8M30 10v8M12 22h24" stroke="#ddd6fe" stroke-width="2.4" stroke-linecap="round"/>
+                    </svg>
+                  </span>
+                  <b>Резерв 2</b>
+                </span>
+                <span class="zbot"><i>свободное место под новый раздел</i><em aria-hidden="true">⟶</em></span>
+              </button>
+
+              <button class="z reserve" type="button" style="--a:#22c55e" aria-disabled="true">
+                <span class="ztop">
+                  <span class="z-ic">
+                    <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
+                      <path d="M12 35V14h24v21" stroke="#22c55e" stroke-width="2.6" stroke-linejoin="round"/>
+                      <path d="M17 20h14M17 27h14M10 35h28" stroke="#bbf7d0" stroke-width="2.4" stroke-linecap="round"/>
+                    </svg>
+                  </span>
+                  <b>Резерв 3</b>
+                </span>
+                <span class="zbot"><i>свободное место под новый раздел</i><em aria-hidden="true">⟶</em></span>
               </button>
             </div>
 
@@ -19397,7 +20027,7 @@ def home():
                 password.select();
                 return;
               }
-              window.location.assign(authDest);
+              window.location.assign(result.redirect || authDest);
             } catch {
               error.textContent = "Сервер недоступен. Повторите попытку.";
             } finally {
