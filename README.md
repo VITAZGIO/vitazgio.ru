@@ -176,6 +176,9 @@ service worker (`/sw.js`), складывает файлы в Cache Storage и �
 | `BIND_HOST` | да на VPS | `127.0.0.1`, чтобы снаружи попасть можно было только через реверс-прокси, а не напрямую по IP без TLS |
 | `SSH_GATE_PASSWORD_PREFIX` | для консолей | Префикс суточного пароля. Без него консоли и доверие устройствам отвечают 503 |
 | `GUACD_HOST` / `GUACD_PORT` | для RDP/VNC | Где живёт `guacd`. Сайт в Амстердаме, guacd дома — сюда ставится NetBird-адрес домашнего сервера |
+| `SEBASTIAN_OLLAMA` | для Себастьяна | Ollama на домашней Ubuntu-VM через NetBird: `http://<netbird-ip-ubuntu>:11434` |
+| `SEBASTIAN_MODEL` | необязательно | Имя уже загруженной модели в Ollama. По умолчанию `sebastian` |
+| `SEBASTIAN_PUBLIC` | необязательно | `0` временно выключает публичный чат Себастьяна |
 | `METRICS_ORANGEPI_USER` / `_PASS` | для метрик | Доступ к orangepizero3 |
 | `METRICS_UBUNTUSERVER_USER` / `_PASS` | для метрик | Доступ к ubuntu-server |
 | `METRICS_UBUNTUVITAZ1_USER` / `_PASS` | для метрик | Доступ к ubuntuvitaz1 |
@@ -189,6 +192,58 @@ service worker (`/sw.js`), складывает файлы в Cache Storage и �
 расходится только по своей подсети. Приложение живёт в Амстердаме, домашний ПК —
 дома, поэтому пакет отправляет постоянно включённая машина в домашней сети
 (`_wol_relay` заходит на неё по SSH и шлёт пакет оттуда).
+
+### Себастьян через NetBird
+
+Сайт не поднимает модель сам: он только зовёт уже работающую Ollama дома.
+На Ubuntu-VM с видеокартой Ollama должна слушать не только localhost, а весь
+сетевой интерфейс:
+
+```bash
+sudo systemctl edit ollama
+```
+
+```ini
+[Service]
+Environment="OLLAMA_HOST=0.0.0.0:11434"
+```
+
+Затем:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart ollama
+ollama list
+```
+
+Модель с именем из `SEBASTIAN_MODEL` должна уже быть в Ollama. По умолчанию
+сайт просит `sebastian`; новую модель сайт не грузит, чтобы не занимать лишнюю
+видеопамять.
+
+На VPS в `.env`:
+
+```env
+SEBASTIAN_OLLAMA=http://<netbird-ip-ubuntu>:11434
+SEBASTIAN_MODEL=sebastian
+```
+
+После изменения `.env` пересоздать контейнер:
+
+```bash
+docker compose up -d --force-recreate web
+```
+
+Проверка с VPS:
+
+```bash
+curl "$SEBASTIAN_OLLAMA/api/tags"
+curl -s http://127.0.0.1:5000/api/sebastian/state
+```
+
+Карточка на главной загорится, когда `/api/sebastian/state` увидит
+`SEBASTIAN_OLLAMA`. Сам разговор идёт через `/api/sebastian/ask`, а дальше сайт
+передаёт запрос в Ollama `/api/chat`. Через этот чат Себастьян только болтает:
+свет, розетки и техника остаются в домашнем контуре.
 
 ### Пароль кабинета
 
