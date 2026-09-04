@@ -38,6 +38,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from blueprints.debts import create_debts_blueprint
 from blueprints.diy import create_diy_blueprint
 from blueprints.home import create_home_blueprint
+from blueprints.music import create_music_blueprint
 from blueprints.notebook import create_notebook_blueprint
 from blueprints.pwa import ICON_LINKS, create_pwa_blueprint
 
@@ -2431,268 +2432,11 @@ def music_editor_required(view):
     return wrapped
 
 
-@app.get("/api/music")
-@music_editor_required
-def music_list_api():
-    with music_lock:
-        _music_scan()
-        _music_write_index()
-        used = _music_used()
-        tracks = [
-            {"id": k, "artist": v["artist"], "title": v["title"],
-             "size": v["size"], "added": v["added"], "folder": v.get("folder", "")}
-            for k, v in sorted(music_items.items(),
-                               key=lambda x: (x[1]["artist"].lower(), x[1]["title"].lower()))
-        ]
-        folders = [
-            {"id": k, "name": v["name"], "parent": v.get("parent", ""),
-             "fav": bool(v.get("fav"))}
-            for k, v in sorted(music_folders.items(), key=lambda x: x[1]["name"].lower())
-        ]
-        fav_folder = next((k for k, v in music_folders.items() if v.get("fav")), "")
-    # Место общее с дропом: показываем занятое всем хранилищем из 30 ГБ.
-    drop_used = _drop_used_safe()
-    return jsonify(tracks=tracks, folders=folders,
-                   used=drop_used + used, music=used, quota=DROP_QUOTA,
-                   limit=MUSIC_MAX_SIZE, fav_folder=fav_folder,
-                   can_edit=bool(session.get("authenticated")))
-
-
-@app.post("/api/music")
-@music_editor_required
-def music_upload_api():
-    f = request.files.get("file")
-    if not f:
-        return jsonify(error="Файл не выбран."), 400
-    name = _music_safe_name(f.filename)
-    ext = os.path.splitext(name)[1].lower()
-    if ext not in MUSIC_EXTS:
-        return jsonify(error="Это не музыка."), 415
-    if request.content_length and request.content_length > MUSIC_MAX_SIZE + 8192:
-        return jsonify(error="Трек больше 40 МБ."), 413
-
-    folder = (request.form.get("folder") or "").strip()
-    drop_used = _drop_used_safe()          # место общее с дропом (30 ГБ)
-    with music_lock:
-        _music_scan()
-        if drop_used + _music_used() > DROP_QUOTA:
-            return jsonify(error="В хранилище больше нет места."), 507
-        if folder and folder not in music_folders:
-            folder = ""
-        taken = {t["file"] for t in music_items.values()}
-
-    stem, suffix = os.path.splitext(name)
-    candidate, counter = name, 2
-    while candidate in taken or os.path.exists(os.path.join(MUSIC_DIR, candidate)):
-        candidate = f"{stem} ({counter}){suffix}"
-        counter += 1
-
-    # Пишем во временный файл и считаем отпечаток на лету: если такой трек уже
-    # лежит, лишние байты на диск не попадут вовсе.
-    temp = os.path.join(MUSIC_DIR, f".upload-{uuid.uuid4().hex}")
-    digest = hashlib.sha256()
-    size = 0
-    try:
-        with open(temp, "wb") as out:
-            while True:
-                chunk = f.stream.read(MUSIC_CHUNK)
-                if not chunk:
-                    break
-                size += len(chunk)
-                if size > MUSIC_MAX_SIZE:
-                    raise ValueError("big")
-                digest.update(chunk)
-                out.write(chunk)
-    except ValueError:
-        _music_unlink(temp)
-        return jsonify(error="Трек больше 40 МБ."), 413
-    except OSError as e:
-        _music_unlink(temp)
-        return jsonify(error=f"Не удалось сохранить: {e}"), 500
-
-    artist, title = _music_split(os.path.splitext(candidate)[0])
-    track_id = str(uuid.uuid4())
-    with music_lock:
-        twin = _music_twin(size, digest.hexdigest())
-        if twin:
-            _music_unlink(temp)
-            candidate = twin
-        else:
-            try:
-                os.replace(temp, os.path.join(MUSIC_DIR, candidate))
-            except OSError as e:
-                _music_unlink(temp)
-                return jsonify(error=f"Не удалось сохранить: {e}"), 500
-        music_items[track_id] = {"file": candidate, "artist": artist, "title": title,
-                                 "size": size, "added": time.time(),
-                                 "folder": folder, "hash": digest.hexdigest()}
-        _music_write_index()
-    return jsonify(id=track_id, artist=artist, title=title, folder=folder, twin=bool(twin))
-
-
 def _music_unlink(path):
     try:
         os.remove(path)
     except OSError:
         pass
-
-
-@app.patch("/api/music/<track_id>")
-@music_editor_required
-def music_rename_api(track_id):
-    payload = request.get_json(silent=True) or {}
-    with music_lock:
-        track = music_items.get(track_id)
-        if not track:
-            return jsonify(error="Трек не найден."), 404
-        if "artist" in payload:
-            track["artist"] = (payload.get("artist") or "").strip()[:80]
-        if "title" in payload:
-            title = (payload.get("title") or "").strip()[:120]
-            if not title:
-                return jsonify(error="Название пустое."), 400
-            track["title"] = title
-        if "folder" in payload:
-            folder = (payload.get("folder") or "").strip()
-            track["folder"] = folder if folder in music_folders else ""
-        _music_write_index()
-        return jsonify(ok=True, artist=track["artist"], title=track["title"],
-                       folder=track.get("folder", ""))
-
-
-@app.delete("/api/music/<track_id>")
-@music_editor_required
-def music_delete_api(track_id):
-    with music_lock:
-        track = music_items.pop(track_id, None)
-        if track:
-            _music_drop_file(track["file"])
-            _music_write_index()
-    return jsonify(ok=True)
-
-
-@app.post("/api/music/folder")
-@music_editor_required
-def music_folder_create_api():
-    payload = request.get_json(silent=True) or {}
-    name = (payload.get("name") or "").strip()[:60] or "Новая папка"
-    parent = (payload.get("parent") or "").strip()
-    with music_lock:
-        if parent and parent not in music_folders:
-            parent = ""
-        if _music_folder_depth(parent) >= MUSIC_MAX_DEPTH:
-            return jsonify(error="Глубже вкладывать некуда."), 400
-        folder_id = str(uuid.uuid4())
-        music_folders[folder_id] = {"name": name, "parent": parent, "added": time.time()}
-        _music_write_index()
-    return jsonify(id=folder_id, name=name, parent=parent)
-
-
-@app.patch("/api/music/folder/<folder_id>")
-@music_editor_required
-def music_folder_patch_api(folder_id):
-    payload = request.get_json(silent=True) or {}
-    with music_lock:
-        folder = music_folders.get(folder_id)
-        if not folder:
-            return jsonify(error="Папка не найдена."), 404
-        if "name" in payload:
-            name = (payload.get("name") or "").strip()[:60]
-            if not name:
-                return jsonify(error="Имя пустое."), 400
-            folder["name"] = name
-        if "parent" in payload:
-            parent = (payload.get("parent") or "").strip()
-            if parent and parent not in music_folders:
-                parent = ""
-            # Папку нельзя убрать внутрь самой себя — дерево бы замкнулось.
-            if parent in _music_subtree(folder_id):
-                return jsonify(error="Папку нельзя вложить в саму себя."), 400
-            folder["parent"] = parent
-        if "fav" in payload:
-            # Избранная папка одна на всю фонотеку: ставим звезду этой,
-            # снимаем со всех остальных. Она открывается при заходе и она же
-            # играет в мини-плеере кабинета.
-            if payload.get("fav"):
-                for f in music_folders.values():
-                    f["fav"] = False
-                folder["fav"] = True
-            else:
-                folder["fav"] = False
-        _music_write_index()
-        return jsonify(ok=True, name=folder["name"], parent=folder.get("parent", ""),
-                       fav=bool(folder.get("fav")))
-
-
-@app.delete("/api/music/folder/<folder_id>")
-@music_editor_required
-def music_folder_delete_api(folder_id):
-    with music_lock:
-        if folder_id not in music_folders:
-            return jsonify(error="Папка не найдена."), 404
-        doomed = _music_subtree(folder_id)
-        gone = [k for k, v in music_items.items() if v.get("folder") in doomed]
-        files = {music_items[k]["file"] for k in gone}
-        for k in gone:
-            music_items.pop(k, None)
-        for k in doomed:
-            music_folders.pop(k, None)
-        for fname in files:
-            _music_drop_file(fname)
-        _music_write_index()
-    return jsonify(ok=True, tracks=len(gone), folders=len(doomed))
-
-
-@app.post("/api/music/op")
-@music_editor_required
-def music_op_api():
-    """Пачкой: скопировать, перенести или удалить треки.
-
-    Копия — это новая запись на тот же файл, поэтому она мгновенная и места
-    не занимает. Никакой очереди с полосой тут не нужно."""
-    payload = request.get_json(silent=True) or {}
-    op = payload.get("op")
-    ids = [str(i) for i in (payload.get("ids") or [])][:2000]
-    target = (payload.get("target") or "").strip()
-    if op not in {"copy", "move", "delete"}:
-        return jsonify(error="Неизвестное действие."), 400
-
-    done = 0
-    with music_lock:
-        if op != "delete" and target and target not in music_folders:
-            return jsonify(error="Папка не найдена."), 404
-        for track_id in ids:
-            track = music_items.get(track_id)
-            if not track:
-                continue
-            if op == "copy":
-                twin = dict(track)
-                twin["folder"] = target
-                twin["added"] = time.time()
-                music_items[str(uuid.uuid4())] = twin
-            elif op == "move":
-                track["folder"] = target
-            else:
-                music_items.pop(track_id, None)
-                _music_drop_file(track["file"])
-            done += 1
-        _music_write_index()
-    return jsonify(ok=True, done=done)
-
-
-@app.get("/api/music/file/<track_id>")
-@music_editor_required
-def music_file_api(track_id):
-    with music_lock:
-        track = music_items.get(track_id)
-    if not track:
-        return "", 404
-    # Имя берём только из индекса — из адреса в путь не попадает ничего.
-    path = os.path.join(MUSIC_DIR, track["file"])
-    if not os.path.exists(path):
-        return "", 404
-    ext = os.path.splitext(track["file"])[1].lower()
-    return send_file(path, mimetype=MUSIC_MIMES.get(ext, "audio/mpeg"), conditional=True)
 
 
 @app.post("/api/devices/trust")
@@ -5207,107 +4951,6 @@ def _soon_page(name, kicker, headline, lead, points):
                 .replace("__ITEMS__", items))
 
 
-@app.get("/api/player/tracks")
-@login_required
-def player_tracks():
-    """Единый список для плеера: фонотека (/music) плюс всё аудио, что лежит
-    в папке MUSIK личного дропа. У каждого трека свой адрес потока.
-
-    Выбор папки: без параметра играет избранная папка (звезда) или вся
-    музыка. `?folder=<id>` — конкретная папка фонотеки с подпапками;
-    `?folder=__all__` — вся музыка вопреки избранному. В ответе ещё и всё
-    дерево папок (`folders`) — по нему плеер рисует выбор папок."""
-    pick = (request.args.get("folder") or "").strip()
-    tracks = []
-    with music_lock:
-        _music_scan()
-        folder_name = {k: v["name"] for k, v in music_folders.items()}
-        folders = [{"id": k, "name": v["name"], "parent": v.get("parent", "")}
-                   for k, v in sorted(music_folders.items(), key=lambda x: x[1]["name"].lower())]
-        fav_id = next((k for k, v in music_folders.items() if v.get("fav")), "")
-        if pick and pick in music_folders:
-            allowed = _music_subtree(pick)          # выбрали конкретную папку
-        elif pick == "__all__":
-            allowed = None                          # вся музыка
-        elif fav_id:
-            allowed = _music_subtree(fav_id)        # избранная по умолчанию
-        else:
-            allowed = None                          # избранной нет — вся музыка
-        for k, v in sorted(music_items.items(),
-                           key=lambda x: (str(x[1].get("artist", "")).lower(),
-                                          str(x[1].get("title", "")).lower())):
-            if allowed is not None and v.get("folder", "") not in allowed:
-                continue
-            tracks.append({
-                "id": "m_" + k, "title": v["title"], "artist": v["artist"],
-                "folder": folder_name.get(v.get("folder", ""), ""),
-                "url": "/api/music/file/" + k,
-            })
-    # Папку MUSIK из дропа (аудио, лежащее прямо в дропе) добавляем только
-    # когда показываем всю музыку — при выборе конкретной папки её не мешаем.
-    if allowed is None:
-        with drop_lock:
-            tracks.extend(_drop_musik_tracks())
-    return jsonify(tracks=tracks, folders=folders, fav=fav_id, pick=pick)
-
-
-@app.get("/vg-player.js")
-def vg_player_js():
-    """Единый плеер сайта: один звук, одно состояние, красивый виджет.
-
-    Раньше плееров было три — в кабинете, на странице музыки и во всплывающем
-    окне, — и они друг о друге не знали. Теперь звук один на весь сайт: этот
-    файл держит единственный <audio>, хранит состояние в localStorage и сам
-    подхватывает трек с той же секунды на следующей странице. Виджет висит
-    поверх всего, складывается в кружок с кольцом прогресса и таскается мышью.
-
-    Страница музыки подключает тот же движок без своего оверлея (VGP_HEADLESS)
-    и рулит им своей большой панелью — поэтому панель и виджет всегда показывают
-    одно и то же."""
-    js = _template("vg_player.js.tpl")
-    response = Response(js, mimetype="application/javascript; charset=utf-8")
-    # Движок ОБЯЗАН перепроверяться при каждой загрузке страницы, а не жить
-    # своей жизнью в кэше. Раньше стояло max-age=300 без ETag: после деплоя
-    # страница приезжала новая (её кнопки зовут VGP.popOut), а движок браузер
-    # ещё пять минут брал старый, из кэша, где popOut ещё не было. Кнопка
-    # «вынести в окно» при этом молча падала с «popOut is not a function».
-    # no-cache — это не «не кэшировать», а «кэшируй, но каждый раз спрашивай»:
-    # ETag не изменился — прилетает пустой 304, трафика столько же.
-    response.set_etag(hashlib.md5(js.encode("utf-8")).hexdigest())
-    response.headers["Cache-Control"] = "private, no-cache"
-    return response.make_conditional(request)
-
-
-@app.get("/player/pop")
-@login_required
-def player_pop_page():
-    """Плеер в настоящем отдельном окне браузера — «вынести» из виджета.
-
-    Раньше «вынести поверх экрана» значило Document Picture-in-Picture:
-    красиво, но окно живёт вместе со вкладкой-открывашкой и закрывается
-    (а с ним и звук), стоит там перейти на другую страницу сайта — обычная
-    многостраничная навигация именно так и работает. Здесь — обычное
-    window.open на отдельный адрес: это настоящее отдельное окно, вкладка
-    его не касается, что бы там дальше ни открывали. Тот же движок
-    (vg-player.js), просто с флагом VGP_POPUP — сам разворачивается на весь
-    вьюпорт окна и всегда виден, без сворачивания в кружок."""
-    html = """<!doctype html>
-<html><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Плеер · vitazgio.ru</title>
-<link rel="icon" href="/icon-32.png">
-<style>
-  html, body { margin: 0; height: 100%; background: #0b0f18; overflow: hidden; }
-</style>
-</head>
-<body>
-<script>window.VGP_POPUP = true;</script>
-<script src="/vg-player.js"></script>
-</body>
-</html>"""
-    return Response(html, mimetype="text/html; charset=utf-8")
-
-
 @app.get("/claude")
 @login_required
 def claude_page():
@@ -6400,27 +6043,6 @@ def ai_page():
     return html.replace("__ICONLINKS__", ICON_LINKS).replace("%%PRESET%%", _preset.replace("\"", "\\\"")).replace("%%NET%%", _net)
 
 
-@app.get("/music")
-@login_required
-def music_page():
-    """Фонотека. Вся под паролем кабинета — и слушать, и менять.
-
-    Саму страницу теперь тоже держим под паролем (login_required): без входа
-    открыть нельзя, как кабинет. С незнакомого устройства — редирект на
-    главную, где карточка «Музыка» показывает окно авторизации.
-
-
-    Открытой её делать не стали: выкладывать в общий доступ скачанную музыку
-    — это раздача чужого, и претензии прилетают именно за раздачу.
-
-    Сама страница отдаётся кому угодно, но без пароля она пуста: список и
-    файлы сервер не выдаёт. Кнопки правки появляются, только когда сервер в
-    ответе на список сказал can_edit — запрет живёт на сервере, здесь лишь
-    чтобы не мозолить глаза."""
-    html = _template("music.html")
-    return html.replace("__ICONLINKS__", ICON_LINKS)
-
-
 app.register_blueprint(create_home_blueprint(
     template=_template,
     icon_links=ICON_LINKS,
@@ -6529,6 +6151,36 @@ app.register_blueprint(create_diy_blueprint(
     diy_safe_name=_diy_safe_name,
     diy_card=_diy_card,
     diy_head=_diy_head,
+))
+
+app.register_blueprint(create_music_blueprint(
+    template=_template,
+    icon_links=ICON_LINKS,
+    login_required=login_required,
+    music_editor_required=music_editor_required,
+    music_items=music_items,
+    music_folders=music_folders,
+    music_lock=music_lock,
+    music_scan=_music_scan,
+    music_write_index=_music_write_index,
+    music_used=_music_used,
+    drop_used_safe=_drop_used_safe,
+    drop_quota=DROP_QUOTA,
+    music_max_size=MUSIC_MAX_SIZE,
+    music_safe_name=_music_safe_name,
+    music_exts=MUSIC_EXTS,
+    music_dir=lambda: MUSIC_DIR,
+    music_chunk=MUSIC_CHUNK,
+    music_unlink=_music_unlink,
+    music_twin=_music_twin,
+    music_split=_music_split,
+    music_folder_depth=_music_folder_depth,
+    music_max_depth=MUSIC_MAX_DEPTH,
+    music_subtree=_music_subtree,
+    music_drop_file=_music_drop_file,
+    music_mimes=MUSIC_MIMES,
+    drop_lock=drop_lock,
+    drop_musik_tracks=_drop_musik_tracks,
 ))
 
 app.register_blueprint(create_pwa_blueprint(
