@@ -26,7 +26,6 @@ from collections import defaultdict, deque
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from functools import wraps
-from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import paramiko
@@ -4601,7 +4600,2427 @@ def cabinet():
         + "</li>"
         for device in NETBIRD_DEVICES
     )
-    html = (Path(__file__).parent / "templates" / "cabinet.html").read_text(encoding="utf-8")
+    html = """
+    <!DOCTYPE html>
+    <html lang="ru">
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <meta name="robots" content="noindex, nofollow">
+      <title>Личный кабинет · vitazgio.ru</title>
+      __ICONLINKS__
+      <link rel="manifest" href="/manifest.webmanifest">
+      <meta name="theme-color" content="#0d1321">
+      <style>
+        * { box-sizing: border-box; }
+        body { margin: 0; min-height: 100svh; color: #e9fbff; font-family: "Cascadia Code", Consolas, monospace; background: radial-gradient(circle at top left, #192a44, #0d1321 55%); }
+        .cabinet { min-height: 100svh; padding: clamp(24px, 4vw, 54px); background: linear-gradient(135deg, rgba(10,18,32,.25), transparent 60%); display: flex; flex-direction: column; }
+        .cabinet-header { display: flex; align-items: center; gap: 20px; }
+        .cabinet-header .back { width: 44px; height: 44px; flex: none; display: grid; place-items: center;
+          color: #2de2ff; text-decoration: none; border: 1px solid rgba(45,226,255,.3); border-radius: 50%;
+          background: rgba(45,226,255,.07); transition: all .18s; }
+        .cabinet-header .back:hover { color: #fff; border-color: #2de2ff; background: rgba(45,226,255,.18); }
+        .cabinet-header .back svg { width: 20px; height: 20px; display: block; }
+        h1 { margin: 0; font-size: clamp(1.7rem, 3.6vw, 2.6rem); font-weight: 700; letter-spacing: -.02em;
+             color: #eaf6ff; text-shadow: 0 0 22px rgba(45,226,255,.35); }
+        h1 span { color: #2de2ff; text-shadow: 0 0 22px rgba(45,226,255,.5); }
+        .logout-form { margin: 0; }
+        .logout-button { padding: 10px 16px; color: #dffaff; font: 700 .78rem "Cascadia Code", Consolas, monospace; border: 1px solid rgba(45,226,255,.28); background: rgba(45,226,255,.07); cursor: pointer; }
+        .logout-button:hover { border-color: #2de2ff; background: rgba(45,226,255,.14); }
+        .install-button { margin-left: auto; color: #1a0d04; border: 0; background: linear-gradient(90deg, #ff782f, #ffb35c); }
+        .install-button:hover { border: 0; background: linear-gradient(90deg, #ff8f4f, #ffc379); }
+        [hidden] { display: none !important; }
+        .workspace { flex: 1 1 auto; min-width: 0; margin-top: clamp(22px, 3.5vw, 40px);
+                     display: flex; flex-direction: column; min-height: 0; }
+        /* Панель метрик — по содержимому, а не на всю высоту колонки: иначе
+           под карточками зияла пустая тёмная плашка на высоком экране. */
+        .workspace > .dash { flex: none; }
+        .workspace > .cab { flex: none; }
+        .device-list { container-type: inline-size; margin: 0; padding: 8px 18px 18px; list-style: none; border-top: 1px solid rgba(255,255,255,.07); }
+        .device { min-height: 48px; display: grid; grid-template-columns: 150px 1fr 70px 36px 116px 82px; align-items: center; gap: 12px; border-bottom: 1px solid rgba(255,255,255,.06); }
+        .device:last-child { border-bottom: 0; }
+        .copy-ip { padding: 7px 8px; color: #69e8ff; text-align: left; border: 0; background: transparent; }
+        .copy-ip:hover, .copy-ip:focus-visible { color: #fff; border: 0; outline: 1px solid rgba(45,226,255,.28); background: rgba(45,226,255,.08); }
+        .device-name { min-width: 0; color: #c4cad5; font-size: .84rem; overflow-wrap: break-word; }
+        .device-status { color: #6b7385; font-size: .76rem; text-align: right; white-space: nowrap; }
+        .device-status::before { content: "● "; }
+        .device-status.online { color: #63f5ad; }
+        .device-status.offline { color: #ff6b81; }
+        .connect-btn { padding: 6px 10px; color: #ff782f; font: 700 .7rem "Cascadia Code", Consolas, monospace; letter-spacing: .04em; text-transform: uppercase; border: 1px solid rgba(255,120,47,.35); background: rgba(255,120,47,.07); cursor: pointer; }
+        .connect-btn:hover, .connect-btn:focus-visible { color: #fff; background: rgba(255,120,47,.22); outline: none; }
+        .connect-btn.btn-offline { color: #4a5060; border-color: rgba(100,100,110,.2); background: rgba(60,65,75,.06); cursor: not-allowed; pointer-events: none; }
+        .connect-btn-empty { display: block; }
+        .wol-btn { padding: 5px 7px; color: #fbbf24; font-size: .9rem; border: 1px solid rgba(251,191,36,.3); background: rgba(251,191,36,.07); cursor: pointer; transition: all .2s; }
+        .wol-btn:hover { background: rgba(251,191,36,.18); border-color: #fbbf24; }
+        .wol-btn.wol-online { color: #ff6b81; border-color: rgba(255,107,129,.3); background: rgba(255,107,129,.07); }
+        .wol-btn.wol-online:hover { background: rgba(255,107,129,.18); border-color: #ff6b81; }
+        .wol-btn.wol-sent { color: #63f5ad; border-color: rgba(99,245,173,.4); background: rgba(99,245,173,.1); }
+        .wol-empty { display: block; }
+        .copy-status { color: #63f5ad; font-size: .7rem; opacity: 0; transition: opacity .18s ease; }
+        .copy-status.visible { opacity: 1; }
+        @media (max-width: 900px) {
+          .workspace { width: 100%; min-width: 0; }
+        }
+        @media (max-width: 560px) {
+          .cabinet { padding-inline: 20px; }
+          .cabinet-header { align-items: flex-start; justify-content: space-between; gap: 12px; }
+        }
+        /* Считаем ширину самого списка, а не окна: в две колонки кабинет
+           бывает узким и при широком экране — тогда имя устройства сжималось
+           в ноль и рассыпалось по одной букве в строку. */
+        @container (max-width: 640px) {
+          .device { grid-template-columns: 1fr auto; gap: 4px 10px; padding: 8px 0; }
+          .device-name { grid-column: 1; grid-row: 2; padding-left: 8px; }
+          .device-status { grid-column: 2; grid-row: 1; }
+          .connect-btn, .connect-btn-empty { grid-column: 1; grid-row: 3; justify-self: start; margin-left: 8px; }
+          .wol-btn, .wol-empty { grid-column: 2; grid-row: 3; justify-self: end; }
+          .copy-status { grid-column: 2; grid-row: 2; text-align: right; }
+        }
+
+        .gate-modal { position: fixed; z-index: 100; inset: 0; display: grid; place-items: center; padding: 20px; }
+        .gate-backdrop { position: absolute; inset: 0; background: rgba(3, 6, 13, .82); backdrop-filter: blur(12px); }
+        .gate-panel { position: relative; width: min(380px, 100%); padding: 30px; color: #e8fbff; border: 1px solid rgba(255,120,47,.3); background: linear-gradient(145deg, rgba(16, 30, 47, .98), rgba(20, 16, 37, .98)); box-shadow: 0 32px 100px rgba(0,0,0,.65); }
+        .gate-panel h2 { margin: 0 0 18px; font-size: 1.3rem; }
+        .gate-panel input { width: 100%; height: 46px; padding: 0 14px; color: #f4fbff; font: 700 1rem "Cascadia Code", Consolas, monospace; border: 1px solid rgba(255,255,255,.12); outline: none; background: rgba(4,10,20,.65); }
+        .gate-panel input:focus { border-color: #ff782f; }
+        .gate-panel input + input { margin-top: 10px; }
+        .gate-select { width: 100%; height: 46px; margin-top: 10px; padding: 0 12px; color: #f4fbff;
+                       font: 600 .8rem "Cascadia Code", Consolas, monospace; border: 1px solid rgba(255,255,255,.12);
+                       outline: none; background: rgba(4,10,20,.65); cursor: pointer; }
+        .gate-select:focus { border-color: #ff782f; }
+        .gate-select option { background: #101a2b; }
+        .gate-submit { width: 100%; height: 46px; margin-top: 12px; color: #1a0d04; font: 800 .8rem "Cascadia Code", Consolas, monospace; letter-spacing: .06em; text-transform: uppercase; border: 0; background: linear-gradient(90deg, #ff782f, #ffb35c); cursor: pointer; }
+        .gate-error { min-height: 18px; margin: 10px 0 0; color: #ff6ba8; font-size: .78rem; }
+        .gate-close { position: absolute; top: 12px; right: 14px; padding: 5px; color: #7d8799; font-size: 1.3rem; border: 0; background: none; cursor: pointer; }
+
+        /* Высота задаётся переменной, а не inset:0. На телефоне экранная
+           клавиатура ужимает видимую область, но макетная остаётся прежней —
+           и шапка с рядом кнопок уезжала под клавиатуру. Теперь окно живёт
+           ровно в видимой части, а сжимается только тело терминала. */
+        .term-overlay { position: fixed; z-index: 100; left: 0; right: 0; top: 0;
+                        height: var(--term-h, 100%); display: flex; flex-direction: column;
+                        background: #05070c; transform: translateY(var(--term-top, 0px)); }
+        .term-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 18px; color: #c4cad5; font-size: .82rem; background: rgba(255,255,255,.04); border-bottom: 1px solid rgba(255,255,255,.08); }
+        .term-close { padding: 7px 12px; color: #dffaff; font: 700 .76rem "Cascadia Code", Consolas, monospace; border: 1px solid rgba(255,255,255,.16); background: transparent; cursor: pointer; }
+        .term-close:hover { background: rgba(255,255,255,.08); }
+        .term-body { flex: 1 1 auto; min-height: 0; padding: 10px; overflow: hidden; }
+        .term-header, .term-tools { flex: none; }
+        .term-tools { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 12px; flex: none;
+                      background: rgba(255,255,255,.03); border-bottom: 1px solid rgba(255,255,255,.07); }
+        .term-key { min-width: 46px; padding: 9px 12px; color: #c4cad5;
+                    font: 600 .74rem "Cascadia Code", Consolas, monospace;
+                    border: 1px solid rgba(255,255,255,.14); border-radius: 5px;
+                    background: linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,.02));
+                    cursor: pointer; touch-action: manipulation; user-select: none; -webkit-user-select: none; }
+        .term-key:active { color: #2de2ff; border-color: rgba(45,226,255,.5); background: rgba(45,226,255,.14); }
+        .term-key-wide { min-width: 96px; color: #1a0d04; border: 0;
+                         background: linear-gradient(90deg, #ff782f, #ffb35c); font-weight: 800; }
+        .term-key-go { color: #04121c; border: 0; background: linear-gradient(90deg, #2de2ff, #7df9ff); font-weight: 800; }
+        .term-toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+                      z-index: 120; padding: 9px 16px; color: #04121c; font: 700 .74rem "Cascadia Code", Consolas, monospace;
+                      background: #2de2ff; }
+        .rdp-overlay { position: fixed; z-index: 100; inset: 0; display: flex; flex-direction: column; background: #000; }
+        .rdp-content { display: flex; flex: 1; min-height: 0; overflow: hidden; }
+        .rdp-display { flex: 1; overflow: hidden; cursor: none; position: relative; min-width: 0; }
+        .rdp-display > div { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); }
+        .rdp-header-actions { display: flex; align-items: center; gap: 8px; }
+        .rdp-toolbar { display: flex; flex-direction: column; flex-wrap: nowrap; gap: 4px; padding: 6px; background: rgba(16,24,38,.96); border-left: 1px solid rgba(255,255,255,.07); flex-shrink: 0; overflow-y: auto; align-items: stretch; }
+        .rdp-lock-hint { position: absolute; inset: 0; display: grid; place-items: center; color: rgba(140,150,168,.6); font: .78rem "Cascadia Code", Consolas, monospace; pointer-events: none; z-index: 1; }
+        .rdp-key { padding: 7px 10px; min-width: 38px; color: #c4cad5; font: 600 .72rem "Cascadia Code", Consolas, monospace; text-align: center; border: 1px solid rgba(255,255,255,.13); background: rgba(255,255,255,.05); cursor: pointer; touch-action: manipulation; user-select: none; -webkit-user-select: none; }
+        .rdp-key:active, .rdp-key.active { color: #ff782f; border-color: rgba(255,120,47,.55); background: rgba(255,120,47,.13); }
+        .rdp-key-combo { padding: 7px 10px; color: #ff6b81; font: 600 .7rem "Cascadia Code", Consolas, monospace; border: 1px solid rgba(255,107,129,.28); background: rgba(255,107,129,.06); cursor: pointer; touch-action: manipulation; user-select: none; -webkit-user-select: none; }
+        .rdp-key-combo:active { background: rgba(255,107,129,.2); }
+        .rdp-kbd-input { position: fixed; left: -9999px; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
+        .conn-quality { display: inline-block; padding: 2px 7px; border-radius: 3px; font: 600 .7rem "Cascadia Code", Consolas, monospace; background: rgba(255,255,255,.07); color: #8f99ab; pointer-events: none; transition: color .3s; vertical-align: middle; margin-left: 8px; }
+        .conn-quality:empty { display: none; }
+        .conn-quality.good { color: #4ade80; }
+        .conn-quality.warn { color: #fbbf24; }
+        .conn-quality.bad  { color: #f87171; }
+        @media (max-width: 900px) {
+          .term-header { padding: 8px 12px; }
+          .rdp-display > div { top: 0; left: 0; transform: none; }
+        }
+
+        /* ── Панели кабинета ── */
+        .widget-empty { color: #4a5060; font-size: .8rem; margin: 0; padding: 4px 0; }
+
+        /* Колонка фиксированного размера: не тянется за левой стороной,
+           сколько бы панелей там ни развернули. */
+        .cabinet-cols { display: flex; align-items: stretch; gap: 20px; max-width: 1900px; flex: 1 1 auto; min-height: 0; }
+        .rail { width: 268px; flex: none; align-self: flex-start; display: flex;
+                flex-direction: column; gap: 12px; margin-top: clamp(22px, 3.5vw, 40px); }
+        /* Высоту плееру ставит скрипт — по спокойному виду страницы, и дальше
+           она не меняется, чем бы ни раскрывали панели слева. */
+        .rail .player { flex: none; min-height: 320px; display: flex;
+                        flex-direction: column; }
+        /* Узкий экран или половина окна — правой колонки просто нет. */
+        @media (max-width: 1220px) { .rail { display: none; } }
+
+        .rail-card { position: relative; padding: 13px 15px; border: 1px solid rgba(45,226,255,.18);
+                     background: linear-gradient(160deg, rgba(12,20,36,.95), rgba(10,14,26,.95)); overflow: hidden; }
+        .rail-corner { position: absolute; width: 12px; height: 12px; pointer-events: none; }
+        .rail-corner--tl { top: -1px; left: -1px; border-top: 2px solid #2de2ff; border-left: 2px solid #2de2ff; }
+        .rail-corner--tr { top: -1px; right: -1px; border-top: 2px solid #ff3fa4; border-right: 2px solid #ff3fa4; }
+        .rail-corner--bl { bottom: -1px; left: -1px; border-bottom: 2px solid #ff3fa4; border-left: 2px solid #ff3fa4; }
+        .rail-corner--br { bottom: -1px; right: -1px; border-bottom: 2px solid #2de2ff; border-right: 2px solid #2de2ff; }
+
+        /* Часы */
+        .clock { text-align: center; }
+        .clock-time { display: flex; align-items: baseline; justify-content: center; gap: 2px;
+                      font: 800 2.25rem "Cascadia Code", Consolas, monospace; letter-spacing: -.04em; color: #2de2ff;
+                      text-shadow: 0 0 14px rgba(45,226,255,.55), 0 0 42px rgba(45,226,255,.22); }
+        .clock-time em { font-style: normal; color: #ff3fa4; text-shadow: 0 0 14px rgba(255,63,164,.6); animation: blink 2s steps(1) infinite; }
+        .clock-time small { margin-left: 5px; font-size: .88rem; color: #ff3fa4; text-shadow: 0 0 12px rgba(255,63,164,.5); }
+        @keyframes blink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: .25; } }
+        .clock-date { margin-top: 5px; color: #6b7385; font-size: .62rem; letter-spacing: .18em; text-transform: uppercase; }
+        .clock-scan { position: absolute; inset: 0; pointer-events: none;
+                      background: repeating-linear-gradient(180deg, rgba(45,226,255,.05) 0 1px, transparent 1px 4px); }
+
+        /* Плеер */
+        .pl-head { display: flex; align-items: center; justify-content: space-between; }
+        .pl-label { color: #8f99ab; font-size: .66rem; letter-spacing: .22em; text-transform: uppercase; }
+        .pl-actions { display: flex; gap: 6px; }
+        .pl-icon { width: 24px; height: 24px; display: grid; place-items: center; color: #2de2ff; font-size: .9rem; line-height: 1;
+                   border: 1px solid rgba(45,226,255,.3); background: rgba(45,226,255,.06); cursor: pointer; transition: all .16s; }
+        .pl-icon:hover { color: #061018; border-color: #2de2ff; background: #2de2ff; }
+        .pl-eq { flex: none; display: flex; align-items: flex-end; justify-content: center; gap: 2px;
+                 height: 26px; min-height: 26px; max-height: 26px; margin: 11px 0 8px;
+                 overflow: hidden; line-height: 0; contain: layout paint; }
+        .pl-eq span { flex: none; width: 2px; height: 26px; transform: scaleY(.12);
+                      transform-origin: bottom center; background: linear-gradient(180deg, #ff3fa4, #2de2ff);
+                      opacity: .35; transition: transform .12s, opacity .12s; will-change: transform; }
+        .player.on .pl-eq span { opacity: 1; }
+        .pl-now { flex: none; min-height: 33px; text-align: center; contain: layout paint; }
+        .pl-title { display: block; height: 16px; line-height: 16px; color: #eaf6ff; font-size: .79rem; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .pl-artist { display: block; height: 15px; line-height: 15px; margin-top: 2px; color: #6b7385; font-size: .66rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .pl-seek { position: relative; height: 3px; margin: 10px 0 4px; background: rgba(255,255,255,.09); }
+        .pl-seek-fill { height: 100%; width: 0; background: linear-gradient(90deg, #ff3fa4, #2de2ff); }
+        .pl-seek-input { position: absolute; inset: -7px 0; width: 100%; height: 18px; margin: 0; opacity: 0; cursor: pointer; }
+        .pl-times { display: flex; justify-content: space-between; color: #55607a; font-size: .64rem; }
+        .pl-controls { display: flex; align-items: center; gap: 6px; margin-top: 9px; }
+        .pl-btn { padding: 5px 7px; color: #9fb0c6; font: 700 .66rem "Cascadia Code", Consolas, monospace;
+                  border: 1px solid rgba(255,255,255,.12); background: transparent; cursor: pointer; transition: all .16s; }
+        .pl-btn:hover { color: #fff; border-color: rgba(45,226,255,.5); background: rgba(45,226,255,.1); }
+        .pl-play { flex: none; min-width: 36px; color: #061018; border-color: transparent; background: linear-gradient(90deg, #2de2ff, #7fe9ff); }
+        .pl-play:hover { color: #061018; background: linear-gradient(90deg, #7fe9ff, #2de2ff); }
+        .pl-vol { flex: 1; min-width: 0; height: 3px; accent-color: #ff3fa4; cursor: pointer; }
+        .player.over { border-color: #2de2ff; }
+        .pl-list { margin-top: 11px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,.08);
+                    flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+        .pl-list-head { display: flex; justify-content: space-between; color: #55607a; font-size: .64rem; letter-spacing: .1em; text-transform: uppercase; }
+        /* Высота списка постоянная — колонка не «дышит» вслед за левой стороной. */
+        #pl-tracks { flex: 1 1 auto; min-height: 0; margin-top: 4px; overflow-y: auto; scrollbar-width: thin;
+                     scrollbar-color: rgba(45,226,255,.35) transparent; overscroll-behavior: contain; }
+        #pl-tracks::-webkit-scrollbar { width: 6px; }
+        #pl-tracks::-webkit-scrollbar-thumb { background: rgba(45,226,255,.3); }
+        #pl-tracks::-webkit-scrollbar-track { background: transparent; }
+        .pl-track { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 2px 6px; padding: 7px 0; border-bottom: 1px solid rgba(255,255,255,.05); }
+        .pl-track:last-of-type { border-bottom: 0; }
+        .pl-track-name { min-width: 0; color: #c4cad5; font-size: .71rem; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .pl-track-name:hover { color: #2de2ff; }
+        .pl-track.current .pl-track-name { color: #2de2ff; }
+        .pl-track-sub { grid-column: 1 / -1; color: #55607a; font-size: .64rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .pl-mini { padding: 3px 5px; color: #55607a; font-size: .7rem; line-height: 1; border: 1px solid rgba(255,255,255,.1); background: transparent; cursor: pointer; }
+        .pl-mini:hover { color: #fff; border-color: rgba(45,226,255,.4); }
+        .pl-mini.rm:hover { color: #ff6b81; border-color: rgba(255,107,129,.45); }
+        .pl-edit { width: 100%; height: 24px; padding: 0 6px; color: #f4fbff; font: 600 .72rem "Cascadia Code", Consolas, monospace;
+                   border: 1px solid rgba(45,226,255,.4); outline: none; background: rgba(4,10,20,.7); }
+
+        /* Верхний блок: метрики во всю ширину */
+        .dash { padding: 20px 22px 22px; border: 1px solid rgba(45,226,255,.16); background: rgba(10,17,30,.72); display: flex; flex-direction: column; }
+        .dash-title { margin: 0 0 16px; color: #8f99ab; font: 700 .82rem "Cascadia Code", Consolas, monospace; letter-spacing: .12em; text-transform: uppercase; flex: none; }
+
+        /* Панель с логотипом. Модификатор --right зеркалит: логотип справа. */
+        /* ── Сервисы кабинета ──────────────────────────────────────────
+           Форма говорит о поведении: что разворачивается прямо здесь —
+           обычный прямоугольник со стрелкой вниз; что открывается своей
+           страницей — плитка-замок, сцепленная с соседями ступенькой.
+           Раскладка: NetBird строкой, ниже четыре плитки, потом две
+           разворачивающиеся, внизу темы и копия. */
+        .cab { display: grid; gap: 20px; grid-template-columns: repeat(4, 1fr); margin-top: 14px; }
+        .c4 { grid-column: span 4; } .c2 { grid-column: span 2; }
+
+        /* разворачивающиеся */
+        .cabp { --a: #2de2ff; position: relative; border: 1px solid rgba(255,255,255,.1);
+                border-radius: 11px; overflow: hidden; transform-origin: center;
+                background: linear-gradient(100deg, color-mix(in srgb, var(--a) 9%, transparent),
+                            rgba(255,255,255,.022) 55%);
+                transition: border-color .17s, transform .17s ease; }
+        .cabp:hover { border-color: color-mix(in srgb, var(--a) 50%, transparent);
+                      transform: scale(1.012); z-index: 3; }
+        .ex-head { position: relative; width: 100%; display: flex; align-items: center; gap: 13px;
+                   padding: 19px 72px 19px 36px; cursor: pointer; color: inherit; text-align: left;
+                   border: 0; background: none; font: inherit; }
+        .ex-head::before { content: ""; position: absolute; left: 0; top: 11px; bottom: 11px; width: 2px;
+                           border-radius: 2px; background: var(--a); box-shadow: 0 0 12px var(--a); }
+        .ex-ic { width: 56px; height: 56px; flex: none; display: grid; place-items: center; }
+        .ex-ic svg, .ex-ic img { width: 100%; height: 100%; object-fit: contain; display: block; }
+        .ex-tx { flex: 1; min-width: 0; }
+        .ex-tx b { display: block; color: #f8fbff; font-size: 1.34rem; font-weight: 800; }
+        .ex-tx i { display: block; margin-top: 5px; font-style: normal; color: #9fadc2; font-size: .92rem; }
+        .ex-ar { flex: none; color: var(--a); font-size: 1rem; opacity: .75; transition: transform .25s; }
+        .ex-head[aria-expanded="true"] .ex-ar { transform: rotate(180deg); }
+
+        /* плитки-замок: сцепляются ступенькой, как детали в пазу */
+        .zrow { display: flex; }
+        .z { --a: #2de2ff; --s: 56px; --g: 11px; position: relative; flex: 1 1 0; min-width: 0; min-height: 172px;
+             display: flex; flex-direction: column; color: inherit; text-decoration: none;
+             margin-left: calc(var(--s) * -1); cursor: pointer; border: 0; font: inherit;
+             padding: 0; text-align: left; transform-origin: center;
+             transition: filter .18s, transform .18s ease;
+             background: none; }
+        /* Цвет и ступенчатая форма живут на подложке. Так плитка сама остаётся
+           необрезанной, и свет по периметру не срезается своим же контуром. */
+        .z::before { content: ""; position: absolute; inset: 0; z-index: 0;
+             background: linear-gradient(150deg, color-mix(in srgb, var(--a) 30%, #0b1020),
+                         color-mix(in srgb, var(--a) 7%, #0b1020));
+             clip-path: polygon(calc(var(--s) + var(--g) / 2) 0, calc(100% - var(--g) / 2) 0,
+                        calc(100% - var(--g) / 2) calc(50% - var(--g) / 2),
+                        calc(100% - var(--s) - var(--g) / 2) calc(50% - var(--g) / 2),
+                        calc(100% - var(--s) - var(--g) / 2) 100%, calc(var(--g) / 2) 100%,
+                        calc(var(--g) / 2) calc(50% + var(--g) / 2),
+                        calc(var(--s) + var(--g) / 2) calc(50% + var(--g) / 2)); }
+        .z > * { position: relative; z-index: 1; }
+        .z:first-child { margin-left: 0; }
+        .z:first-child::before {
+             clip-path: polygon(0 0, calc(100% - var(--g) / 2) 0,
+                        calc(100% - var(--g) / 2) calc(50% - var(--g) / 2),
+                        calc(100% - var(--s) - var(--g) / 2) calc(50% - var(--g) / 2),
+                        calc(100% - var(--s) - var(--g) / 2) 100%, 0 100%); }
+        .z:last-child::before {
+             clip-path: polygon(calc(var(--s) + var(--g) / 2) 0, 100% 0, 100% 100%,
+                        calc(var(--g) / 2) 100%, calc(var(--g) / 2) calc(50% + var(--g) / 2),
+                        calc(var(--s) + var(--g) / 2) calc(50% + var(--g) / 2)); }
+        .z:hover { filter: brightness(1.35) saturate(1.1); transform: scale(1.02); z-index: 3; }
+        .z .ztop { flex: 0 0 50%; display: flex; align-items: center; gap: 13px;
+                   padding: 0 72px 0 calc(var(--s) + 36px); }
+        .z:first-child .ztop { padding-left: 36px; }
+        .z-ic { width: 50px; height: 50px; flex: none; display: grid; place-items: center; }
+        .z-ic svg, .z-ic img { width: 100%; height: 100%; object-fit: contain; display: block; }
+        .z .ztop b { color: #f8fbff; font-size: 1.3rem; font-weight: 800; line-height: 1.2; }
+        .z .zbot { flex: 1; display: flex; align-items: center; justify-content: space-between; gap: 10px;
+                   padding: 0 calc(var(--s) + 30px) 0 36px; }
+        .z:last-child .zbot { padding-right: 30px; }
+        .z .zbot i { font-style: normal; color: #b3c0d4; font-size: .92rem; line-height: 1.4;
+                     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+                     overflow: hidden; line-height: 1.25; }
+        .z .zbot em { font-style: normal; flex: none; color: var(--a); font-size: 1.1rem; opacity: .85;
+                      transition: transform .25s; }
+        .z[aria-expanded="true"] .zbot em { transform: rotate(180deg); }
+
+        /* тело панели, которая живёт в ряду плиток */
+        .zbody { border: 1px solid rgba(255,255,255,.1); border-radius: 11px;
+                 background: rgba(255,255,255,.025); }
+        .zbody > .panel-body { padding: 14px 16px; }
+
+        /* На широком мониторе не оставляем пустое поле справа: колонки
+           раздаются, правая полоса и плитки становятся крупнее. */
+        @media (min-width: 2200px) {
+          .cabinet-cols { max-width: none; gap: 30px; }
+          .rail { width: 340px; }
+          .cab { gap: 24px; }
+          .z { --s: 68px; --g: 13px; min-height: 200px; }
+          .z-ic { width: 58px; height: 58px; }
+          .z .ztop b { font-size: 1.48rem; }
+          .z .zbot i { font-size: 1rem; }
+          .z .ztop { padding: 0 88px 0 calc(var(--s) + 44px); gap: 17px; }
+          .z:first-child .ztop { padding-left: 44px; }
+          .z .zbot { padding: 0 calc(var(--s) + 40px) 0 44px; }
+          .z:last-child .zbot { padding-right: 40px; }
+          .ex-head { padding: 24px 88px 24px 44px; gap: 17px; }
+          .ex-ic { width: 56px; height: 56px; }
+          .ex-tx b { font-size: 1.36rem; } .ex-tx i { font-size: 1rem; }
+        }
+
+
+        /* Раскрытая карточка становится чуть больше — как при наведении —
+           и получает чёткий розовый контур с рассеянной тенью, которые дышат
+           вдох-выдох. Плитку изнутри мы не трогаем: только по её периметру. */
+        .z[aria-expanded="true"] { z-index: 3; transform: scale(1.02);
+                                   animation: cab-halo 2.6s ease-in-out infinite; }
+        @keyframes cab-halo {
+          0%, 100% { filter:
+              drop-shadow( 1px 0 0 rgba(255,63,164,.55)) drop-shadow(-1px 0 0 rgba(255,63,164,.55))
+              drop-shadow(0  1px 0 rgba(255,63,164,.55)) drop-shadow(0 -1px 0 rgba(255,63,164,.55))
+              drop-shadow(0 0 6px rgba(255,63,164,.28)); }
+          50%      { filter:
+              drop-shadow( 1px 0 0 rgba(255,92,180,.8)) drop-shadow(-1px 0 0 rgba(255,92,180,.8))
+              drop-shadow(0  1px 0 rgba(255,92,180,.8)) drop-shadow(0 -1px 0 rgba(255,92,180,.8))
+              drop-shadow(0 0 12px rgba(255,63,164,.45)); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .z[aria-expanded="true"] { animation: none;
+              filter: drop-shadow(1px 0 0 rgba(255,63,164,.6)) drop-shadow(-1px 0 0 rgba(255,63,164,.6))
+                      drop-shadow(0 1px 0 rgba(255,63,164,.6)) drop-shadow(0 -1px 0 rgba(255,63,164,.6))
+                      drop-shadow(0 0 8px rgba(255,63,164,.3)); }
+        }
+
+        @media (max-width: 620px) {
+          .cab { grid-template-columns: repeat(2, 1fr); gap: 9px; }
+          .c4, .c2 { grid-column: span 2; }
+          .zrow { flex-wrap: wrap; gap: 9px 0; }
+          .z { --s: 34px; --g: 9px; flex: 1 1 calc(50%); min-height: 148px; }
+          .z:nth-child(3) { margin-left: 0; }
+          .z:nth-child(3)::before {
+             clip-path: polygon(0 0, calc(100% - var(--g) / 2) 0,
+                        calc(100% - var(--g) / 2) calc(50% - var(--g) / 2),
+                        calc(100% - var(--s) - var(--g) / 2) calc(50% - var(--g) / 2),
+                        calc(100% - var(--s) - var(--g) / 2) 100%, 0 100%); }
+          .z:nth-child(3) .ztop { padding-left: 9px; }
+          .z:nth-child(2)::before {
+             clip-path: polygon(calc(var(--s) + var(--g) / 2) 0, 100% 0, 100% 100%,
+                        calc(var(--g) / 2) 100%, calc(var(--g) / 2) calc(50% + var(--g) / 2),
+                        calc(var(--s) + var(--g) / 2) calc(50% + var(--g) / 2)); }
+          .z:nth-child(2) .zbot { padding-right: 9px; }
+          .z .ztop { padding: 0 32px 0 calc(var(--s) + 16px); gap: 9px; }
+          .z:first-child .ztop, .z:nth-child(3) .ztop { padding-left: 16px; }
+          .z .zbot { padding: 0 calc(var(--s) + 14px) 0 16px; }
+          .z-ic { width: 30px; height: 30px; }
+          .z .ztop b { font-size: .86rem; }
+          .z .zbot i { font-size: .68rem; -webkit-line-clamp: 3; line-height: 1.32; }
+          .ex-head { padding: 13px 30px 13px 16px; gap: 11px; }
+          .ex-ic { width: 36px; height: 36px; }
+          .ex-tx b { font-size: .92rem; } .ex-tx i { font-size: .68rem; }
+        }
+        .log-more { width: 100%; margin-top: 8px; padding: 9px 12px; cursor: pointer;
+                    color: #9fd8ff; font: 700 .76rem "Cascadia Code", Consolas, monospace;
+                    border: 1px solid rgba(45,226,255,.28); border-radius: 9px;
+                    background: rgba(45,226,255,.07); transition: .16s; }
+        .log-more:hover { color: #fff; border-color: rgba(45,226,255,.6); background: rgba(45,226,255,.16); }
+        .panel-body { padding: 0 18px 16px; }
+        /* Резервная копия */
+        .bk-note { margin: 0 0 12px; color: #8f99ab; font-size: .78rem; line-height: 1.6; }
+        .bk-note.dim { color: #5d6a7d; font-size: .72rem; }
+        .bk-note b { color: #cfe2ee; }
+        .bk-keys { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+        .btn-line { display: inline-flex; align-items: center; justify-content: center;
+                    height: 38px; padding: 0 16px; cursor: pointer; text-decoration: none;
+                    color: #dffaff; font: 700 .76rem "Cascadia Code", Consolas, monospace;
+                    border: 1px solid rgba(45,226,255,.28); border-radius: 10px;
+                    background: rgba(45,226,255,.07); transition: .16s; }
+        .btn-line:hover { color: #fff; border-color: #2de2ff; background: rgba(45,226,255,.16); }
+        .btn-line.warn { color: #ffd0a0; border-color: rgba(255,140,60,.35);
+                         background: rgba(255,140,60,.08); }
+        .btn-line.warn:hover { color: #fff; border-color: #ff8c3c; background: rgba(255,140,60,.18); }
+
+        /* Метрики */
+        /* flex:none + align-content:start — карточки естественной высоты, а
+           не растянутые на всю высоту колонки (на узком/высоком экране они
+           разъезжались, а содержимое центровалось внизу с пустотой сверху). */
+        .metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 14px; flex: none; align-content: start; }
+        .metrics-host { border: 1px solid rgba(255,255,255,.07); padding: 22px 24px; display: flex; flex-direction: column; gap: 18px; justify-content: flex-start; }
+        .metrics-host-name { font: 700 1.06rem "Cascadia Code", Consolas, monospace; color: #dfe6f2; margin: 0; }
+        .metrics-bars { display: grid; grid-template-columns: 48px 1fr 52px; align-items: center; gap: 14px 12px; font-size: .92rem; }
+        .metrics-label { color: #6b7385; }
+        .metrics-track { height: 12px; background: rgba(255,255,255,.07); border-radius: 6px; overflow: hidden; }
+        .metrics-fill { height: 100%; border-radius: 3px; transition: width .4s ease; }
+        .fill-cpu  { background: linear-gradient(90deg,#2de2ff,#69e8ff); }
+        .fill-ram  { background: linear-gradient(90deg,#ff782f,#ffb35c); }
+        .fill-disk { background: linear-gradient(90deg,#a855f7,#c084fc); }
+        .metrics-val { color: #e8fbff; text-align: right; white-space: nowrap; }
+        .metrics-extra { display: flex; gap: 20px; margin: 0; font-size: .88rem; color: #8592a7; }
+        .metrics-offline { color: #4a5060; font-size: 1rem; font-style: italic; text-align: center; }
+
+
+        /* Деплой */
+        .deploy-item { display: grid; grid-template-columns: 64px 1fr auto; gap: 6px 10px; align-items: baseline; padding: 9px 0; border-bottom: 1px solid rgba(255,255,255,.06); font-size: .78rem; }
+        .deploy-item:last-child { border-bottom: 0; }
+        .deploy-sha { color: #69e8ff; font-family: Consolas, monospace; white-space: nowrap; }
+        .deploy-msg { color: #c4cad5; word-break: break-word; }
+        .deploy-meta { color: #6b7385; font-size: .7rem; white-space: nowrap; text-align: right; }
+        .ds { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
+        .ds-ok { background: #63f5ad; } .ds-fail { background: #ff6b81; } .ds-run { background: #fbbf24; } .ds-none { background: #4a5060; }
+
+        /* Журнал входов */
+        .log-row { display: grid; grid-template-columns: 150px 1fr; gap: 4px 10px; padding: 7px 0; border-bottom: 1px solid rgba(255,255,255,.06); font-size: .76rem; }
+        .log-row:last-child { border-bottom: 0; }
+        .log-ts { color: #6b7385; white-space: nowrap; }
+        .log-ip { color: #69e8ff; }
+        .log-ua { color: #4a5060; font-size: .68rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; grid-column: 1 / -1; }
+        .log-bad .log-ip { color: #ff6b81; }
+        .log-bad .log-ip::before { content: "✕ "; }
+        .log-alarm { margin: 0 0 8px; padding: 6px 9px; color: #ffb35c; font-size: .72rem; border-left: 2px solid #ff6b81; background: rgba(255,107,129,.07); }
+
+        /* Запомненные устройства */
+        .dev-remember { display: flex; align-items: center; gap: 9px; padding: 4px 0 2px; color: #c4cad5; font-size: .82rem; cursor: pointer; }
+        .dev-remember input { width: 15px; height: 15px; accent-color: #ff782f; cursor: pointer; }
+        .dev-hint { margin: 0 0 10px; color: #6b7385; font-size: .7rem; }
+        .dev-confirm { display: flex; gap: 8px; margin-bottom: 10px; }
+        .dev-confirm input { flex: 1; min-width: 0; height: 34px; padding: 0 10px; color: #f4fbff; font: 600 .8rem "Cascadia Code", Consolas, monospace; border: 1px solid rgba(255,120,47,.35); outline: none; background: rgba(4,10,20,.65); }
+        .dev-confirm input:focus { border-color: #ff782f; }
+        .dev-confirm-btn { padding: 0 14px; color: #1a0d04; font: 800 .7rem "Cascadia Code", Consolas, monospace; text-transform: uppercase; border: 0; background: linear-gradient(90deg, #ff782f, #ffb35c); cursor: pointer; }
+        .dev-error { min-height: 16px; margin: 0 0 8px; color: #ff6ba8; font-size: .72rem; }
+        .dev-row { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 4px 8px; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,.06); }
+        .dev-row:last-child { border-bottom: 0; }
+        .dev-name { min-width: 0; color: #c4cad5; font-size: .8rem; overflow-wrap: break-word; }
+        .dev-name.is-current::after { content: " · это устройство"; color: #63f5ad; font-size: .68rem; }
+        .dev-meta { grid-column: 1 / -1; color: #6b7385; font-size: .68rem; }
+        .dev-act { padding: 4px 7px; color: #6b7385; font-size: .85rem; line-height: 1; border: 1px solid rgba(255,255,255,.1); background: transparent; cursor: pointer; transition: all .18s; }
+        .dev-act:hover { color: #fff; border-color: rgba(45,226,255,.4); background: rgba(45,226,255,.08); }
+        .dev-act.dev-del:hover { color: #ff6b81; border-color: rgba(255,107,129,.45); background: rgba(255,107,129,.1); }
+        .dev-rename { min-width: 0; height: 28px; padding: 0 8px; color: #f4fbff; font: 600 .78rem "Cascadia Code", Consolas, monospace; border: 1px solid rgba(45,226,255,.4); outline: none; background: rgba(4,10,20,.65); }
+      </style>
+    </head>
+    <body>
+      <main class="cabinet">
+        <header class="cabinet-header">
+          <a class="back" href="/" title="На главную" aria-label="На главную">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M19 12H5m0 0 6-6m-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </a>
+          <h1>Личный <span>кабинет</span></h1>
+          <button class="logout-button install-button" id="install" type="button" hidden>Установить приложение</button>
+        </header>
+        <div class="cabinet-cols">
+        <div class="workspace">
+
+          <!-- Метрики: наверху, во всю ширину -->
+          <section class="dash">
+            <div class="dash-title">Метрики машин</div>
+            <div class="metrics-grid" id="metrics-grid"><p class="widget-empty">Загрузка…</p></div>
+          </section>
+
+          <!-- Сервисы. Разворачивающиеся — прямоугольником, открывающиеся
+               страницей — плитками-замком, сцепленными ступенькой. -->
+          <div class="cab">
+
+            <!-- NetBird: разворачивается прямо здесь -->
+            <section class="cabp c4" style="--a:#ff7026">
+              <button id="netbird-toggle" class="ex-head panel-head" type="button"
+                      aria-expanded="false" aria-controls="netbird-devices">
+                <span class="ex-ic"><img src="/static/netbird-official.png" alt=""></span>
+                <span class="ex-tx"><b>NetBird</b><i>домашняя сеть · 9 устройств</i></span>
+                <span class="ex-ar" aria-hidden="true">⌄</span>
+              </button>
+              <div id="netbird-devices" hidden>
+                <ul class="device-list">{{DEVICE_ITEMS}}</ul>
+              </div>
+            </section>
+
+            <!-- Четыре двери наружу: сцеплены замком -->
+            <div class="zrow c4">
+              <a class="z" href="/drop" style="--a:#f5c344">
+                <span class="ztop">
+                  <span class="z-ic">
+                    <svg viewBox="0 0 48 40" aria-hidden="true">
+                      <defs>
+                        <linearGradient id="fold-back" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0" stop-color="#ffd772"/><stop offset="1" stop-color="#e8a521"/>
+                        </linearGradient>
+                        <linearGradient id="fold-front" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0" stop-color="#ffe9a8"/><stop offset="1" stop-color="#f5bb3c"/>
+                        </linearGradient>
+                      </defs>
+                      <path d="M2 8a4 4 0 0 1 4-4h11.2a3 3 0 0 1 2.3 1.1L23 9h19a4 4 0 0 1 4 4v19a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8Z" fill="url(#fold-back)"/>
+                      <path d="M2 15h44v17a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V15Z" fill="url(#fold-front)"/>
+                      <path d="M2 15h44" stroke="#fff" stroke-opacity=".45" stroke-width="1.4"/>
+                    </svg>
+                  </span>
+                  <b>Личный дроп</b>
+                </span>
+                <span class="zbot"><i>перебросить файлы и текст между машинами</i><em aria-hidden="true">⟶</em></span>
+              </a>
+
+              <a class="z" href="/neuro" style="--a:#9aa3c9">
+                <span class="ztop">
+                  <span class="z-ic">
+                    <svg viewBox="0 0 48 40" aria-hidden="true">
+                      <defs>
+                        <linearGradient id="neuro-cloud" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0" stop-color="#ff3d9a"/><stop offset="1" stop-color="#76c900"/>
+                        </linearGradient>
+                      </defs>
+                      <path d="M22 7c-6 0-9 3.4-9 7.6 0 1.4.4 2.6 1.1 3.7-1.9 1-3.1 2.8-3.1 5 0 3.5 3 6.2 7 6.2"
+                            fill="none" stroke="url(#neuro-cloud)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+                      <path d="M26 7c6 0 9 3.4 9 7.6 0 1.4-.4 2.6-1.1 3.7 1.9 1 3.1 2.8 3.1 5 0 3.5-3 6.2-7 6.2"
+                            fill="none" stroke="#d97757" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+                      <path d="M24 8v24" stroke="#cdd6ee" stroke-width="2" stroke-opacity=".4"/>
+                      <circle cx="15" cy="14" r="1.8" fill="#ff3d9a"/>
+                      <circle cx="33" cy="14" r="1.8" fill="#f0a184"/>
+                      <circle cx="15" cy="26" r="1.8" fill="#76c900"/>
+                      <circle cx="33" cy="26" r="1.8" fill="#d97757"/>
+                    </svg>
+                  </span>
+                  <b>Нейронки</b>
+                </span>
+                <span class="zbot"><i>MiniMax, NVIDIA в облаке, Claude дома</i><em aria-hidden="true">⟶</em></span>
+              </a>
+
+              <a class="z" href="/notebook" style="--a:#0a7ce0">
+                <span class="ztop">
+                  <span class="z-ic">
+                    <svg viewBox="0 0 40 48" aria-hidden="true">
+                      <defs>
+                        <linearGradient id="nb-cover" x1="0" y1="0" x2="1" y2="1">
+                          <stop offset="0" stop-color="#3aa0f5"/><stop offset="1" stop-color="#0a63c4"/>
+                        </linearGradient>
+                        <linearGradient id="nb-page" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#dce9f9"/>
+                        </linearGradient>
+                      </defs>
+                      <rect x="3" y="2" width="34" height="44" rx="5" fill="url(#nb-cover)"/>
+                      <path d="M9 7h16l7 7v25a2.5 2.5 0 0 1-2.5 2.5h-20A2.5 2.5 0 0 1 7 39V9.5A2.5 2.5 0 0 1 9.5 7Z"
+                            fill="url(#nb-page)"/>
+                      <path d="M25 7v5a2 2 0 0 0 2 2h5Z" fill="#9dc7ef"/>
+                      <path d="M12 21h16M12 27h16M12 33h10" stroke="#1668c4" stroke-width="2.2"
+                            stroke-linecap="round"/>
+                    </svg>
+                  </span>
+                  <b>Блокнот</b>
+                </span>
+                <span class="zbot"><i>заметки, ссылки и файлы по вкладкам</i><em aria-hidden="true">⟶</em></span>
+              </a>
+
+              <a class="z" href="/music" style="--a:#35e0f0">
+                <span class="ztop">
+                  <span class="z-ic">
+                    <svg viewBox="0 0 48 40" aria-hidden="true">
+                      <path d="M18 30V8l20-4v22" fill="none" stroke="#35e0f0" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+                      <circle cx="13" cy="30" r="6" fill="#35e0f0" fill-opacity=".2" stroke="#35e0f0" stroke-width="3"/>
+                      <circle cx="33" cy="26" r="6" fill="#35e0f0" fill-opacity=".2" stroke="#35e0f0" stroke-width="3"/>
+                    </svg>
+                  </span>
+                  <b>Музыка</b>
+                </span>
+                <span class="zbot"><i>фонотека и плеер в отдельном окне</i><em aria-hidden="true">⟶</em></span>
+              </a>
+            </div>
+
+            <!-- Второй ряд замком: две разворачиваются панелью снизу,
+                 темы уходят своей страницей, копия тоже разворачивается. -->
+            <div class="zrow c4">
+              <button class="z panel-head" id="devices-toggle" type="button"
+                      aria-expanded="false" aria-controls="devices-body" style="--a:#63f5ad">
+                <span class="ztop">
+                  <span class="z-ic">
+                    <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
+                      <rect x="4" y="10" width="28" height="19" rx="2.5" stroke="#63f5ad" stroke-width="2.6"/>
+                      <path d="M2 33h32" stroke="#63f5ad" stroke-width="2.6" stroke-linecap="round"/>
+                      <rect x="30" y="20" width="14" height="22" rx="2.5" fill="#0d1321" stroke="#a8ffd6" stroke-width="2.6"/>
+                      <path d="M35 38h4" stroke="#a8ffd6" stroke-width="2.2" stroke-linecap="round"/>
+                    </svg>
+                  </span>
+                  <b>Запомнить устройства</b>
+                </span>
+                <span class="zbot"><i>вход без пароля на 90 дней на своих</i><em aria-hidden="true">⌄</em></span>
+              </button>
+
+              <button class="z panel-head" id="loginlog-toggle" type="button"
+                      aria-expanded="false" aria-controls="loginlog-body" style="--a:#2de2ff">
+                <span class="ztop">
+                  <span class="z-ic">
+                    <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
+                      <circle cx="24" cy="24" r="17" stroke="#2de2ff" stroke-width="2.6" stroke-opacity=".55"/>
+                      <path d="M24 13v11l7.5 4.5" stroke="#7fe9ff" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>
+                      <path d="M24 7a17 17 0 0 1 14.6 25.7" stroke="#2de2ff" stroke-width="2.6" stroke-linecap="round"/>
+                      <circle cx="24" cy="24" r="2.6" fill="#7fe9ff"/>
+                    </svg>
+                  </span>
+                  <b>Журнал входов</b>
+                </span>
+                <span class="zbot"><i>кто и когда заходил, за две недели</i><em aria-hidden="true">⌄</em></span>
+              </button>
+
+              <a class="z" href="/themes" style="--a:#ff3fa4">
+                <span class="ztop">
+                  <span class="z-ic">
+                    <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
+                      <path d="M24 6c8 0 13 5.5 13 13v7c0 3.5-2 5.5-4.5 6.5L31 38H17l-1.5-5.5C13 31.5 11 29.5 11 26v-7C11 11.5 16 6 24 6Z" stroke="#ff3fa4" stroke-width="2.4"/>
+                      <path d="M24 14v18M17 20h14M18 27h12" stroke="#2de2ff" stroke-width="1.8" stroke-linecap="round"/>
+                      <circle cx="24" cy="14" r="2.6" fill="#2de2ff"/>
+                      <path d="M17 41h14" stroke="#ff3fa4" stroke-width="2.4" stroke-linecap="round"/>
+                    </svg>
+                  </span>
+                  <b>Тестовые темы</b>
+                </span>
+                <span class="zbot"><i>витрина оформления · киберпанк</i><em aria-hidden="true">⟶</em></span>
+              </a>
+
+              <button class="z panel-head" id="backup-toggle" type="button"
+                      aria-expanded="false" aria-controls="backup-body" style="--a:#4ade80">
+                <span class="ztop">
+                  <span class="z-ic">
+                    <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
+                      <path d="M8 14c0-3.3 7.2-6 16-6s16 2.7 16 6-7.2 6-16 6-16-2.7-16-6Z" stroke="#63f5ad" stroke-width="2.4"/>
+                      <path d="M8 14v10c0 3.3 7.2 6 16 6s16-2.7 16-6V14" stroke="#63f5ad" stroke-width="2.4"/>
+                      <path d="M8 24v10c0 3.3 7.2 6 16 6s16-2.7 16-6V24" stroke="#2de2ff" stroke-width="2.4"/>
+                    </svg>
+                  </span>
+                  <b>Резервная копия</b>
+                </span>
+                <span class="zbot"><i>скачать всё архивом и вернуть обратно</i><em aria-hidden="true">⌄</em></span>
+              </button>
+            </div>
+
+            <!-- Третий ряд: долги и будущие разделы -->
+            <div class="zrow c4">
+              <a class="z" href="/debts" style="--a:#7dd3fc">
+                <span class="ztop">
+                  <span class="z-ic">
+                    <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
+                      <path d="M6 20h36L24 8 6 20Z" fill="#7dd3fc" fill-opacity=".18" stroke="#7dd3fc" stroke-width="2.5" stroke-linejoin="round"/>
+                      <path d="M11 20v17M18 20v17M30 20v17M37 20v17" stroke="#b8ecff" stroke-width="2.5" stroke-linecap="round"/>
+                      <path d="M7 37h34M5 42h38" stroke="#7dd3fc" stroke-width="2.5" stroke-linecap="round"/>
+                      <path d="M24 14v1" stroke="#35e0f0" stroke-width="3" stroke-linecap="round"/>
+                    </svg>
+                  </span>
+                  <b>Долги</b>
+                </span>
+                <span class="zbot"><i>кто сколько должен, когда вернул и за что</i><em aria-hidden="true">⟶</em></span>
+              </a>
+
+              <button class="z reserve" type="button" style="--a:#f97316" aria-disabled="true">
+                <span class="ztop">
+                  <span class="z-ic">
+                    <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
+                      <rect x="11" y="10" width="26" height="28" rx="4" stroke="#f97316" stroke-width="2.6"/>
+                      <path d="M17 18h14M17 25h14M17 32h8" stroke="#ffd0a8" stroke-width="2.4" stroke-linecap="round"/>
+                    </svg>
+                  </span>
+                  <b>Резерв 1</b>
+                </span>
+                <span class="zbot"><i>свободное место под новый раздел</i><em aria-hidden="true">⟶</em></span>
+              </button>
+
+              <button class="z reserve" type="button" style="--a:#a78bfa" aria-disabled="true">
+                <span class="ztop">
+                  <span class="z-ic">
+                    <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
+                      <path d="M12 14h24v22H12z" stroke="#a78bfa" stroke-width="2.6"/>
+                      <path d="M18 10v8M30 10v8M12 22h24" stroke="#ddd6fe" stroke-width="2.4" stroke-linecap="round"/>
+                    </svg>
+                  </span>
+                  <b>Резерв 2</b>
+                </span>
+                <span class="zbot"><i>свободное место под новый раздел</i><em aria-hidden="true">⟶</em></span>
+              </button>
+
+              <button class="z reserve" type="button" style="--a:#22c55e" aria-disabled="true">
+                <span class="ztop">
+                  <span class="z-ic">
+                    <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
+                      <path d="M12 35V14h24v21" stroke="#22c55e" stroke-width="2.6" stroke-linejoin="round"/>
+                      <path d="M17 20h14M17 27h14M10 35h28" stroke="#bbf7d0" stroke-width="2.4" stroke-linecap="round"/>
+                    </svg>
+                  </span>
+                  <b>Резерв 3</b>
+                </span>
+                <span class="zbot"><i>свободное место под новый раздел</i><em aria-hidden="true">⟶</em></span>
+              </button>
+            </div>
+
+            <!-- Панели этого ряда раскрываются снизу, во всю ширину -->
+            <div class="zbody c4" id="devices-body" hidden>
+              <div class="panel-body">
+                <label class="dev-remember">
+                  <input type="checkbox" id="dev-remember-cb">
+                  <span>Запомнить это устройство</span>
+                </label>
+                <p class="dev-hint" id="dev-hint">Вход в кабинет без пароля на 90 дней. Снять галку — устройство забудется.</p>
+                <div class="dev-confirm" id="dev-confirm" hidden>
+                  <input type="password" id="dev-daily" placeholder="Суточный пароль" autocomplete="off">
+                  <button class="dev-confirm-btn" id="dev-confirm-btn" type="button">Подтвердить</button>
+                </div>
+                <p class="dev-error" id="dev-error"></p>
+                <div id="devices-list"><p class="widget-empty">Загрузка…</p></div>
+              </div>
+            </div>
+
+            <div class="zbody c4" id="loginlog-body" hidden>
+              <div class="panel-body">
+                <div id="loginlog-list"><p class="widget-empty">Загрузка…</p></div>
+              </div>
+            </div>
+
+            <div class="zbody c4" id="backup-body" hidden style="margin-bottom:32px">
+              <div class="panel-body">
+                <p class="bk-note" id="bk-size">считаю, сколько всего накопилось…</p>
+                <div class="bk-keys">
+                  <a class="btn-line" id="bk-light" href="/api/backup/export?kind=light">
+                    Скачать записи</a>
+                  <a class="btn-line" id="bk-full" href="/api/backup/export?kind=full">
+                    Скачать всё целиком</a>
+                  <button class="btn-line warn" id="bk-restore" type="button">Загрузить копию</button>
+                  <input type="file" id="bk-file" accept=".zip,application/zip" hidden>
+                </div>
+                <p class="bk-note" id="bk-msg"></p>
+                <p class="bk-note dim" id="bk-robot"></p>
+              </div>
+            </div>
+
+          </div>
+
+        </div>
+
+        <!-- Правая колонка: прячется, когда места мало -->
+        <aside class="rail">
+
+          <div class="rail-card clock">
+            <span class="rail-corner rail-corner--tl"></span><span class="rail-corner rail-corner--tr"></span>
+            <span class="rail-corner rail-corner--bl"></span><span class="rail-corner rail-corner--br"></span>
+            <div class="clock-time"><span id="clk-h">--</span><em id="clk-sep">:</em><span id="clk-m">--</span><small id="clk-s">--</small></div>
+            <div class="clock-date" id="clk-date">—</div>
+            <div class="clock-scan"></div>
+          </div>
+
+          <div class="rail-card player" id="player">
+            <span class="rail-corner rail-corner--tl"></span><span class="rail-corner rail-corner--tr"></span>
+            <span class="rail-corner rail-corner--bl"></span><span class="rail-corner rail-corner--br"></span>
+
+            <div class="pl-head">
+              <span class="pl-label">Аудио</span>
+              <span class="pl-actions">
+                <button class="pl-icon" id="pl-pop" type="button"
+                        title="Отдельное окно: свой звук, не закрывается при переходах по сайту">⧉</button>
+                <button class="pl-icon" id="pl-add" type="button" title="Добавить треки">+</button>
+                <button class="pl-icon" id="pl-toggle-list" type="button" title="Список треков">☰</button>
+              </span>
+            </div>
+
+            <div class="pl-eq" id="pl-eq" aria-hidden="true"></div>
+
+            <div class="pl-now">
+              <div class="pl-title" id="pl-title">ничего не играет</div>
+              <div class="pl-artist" id="pl-artist">плеер выключен</div>
+            </div>
+
+            <div class="pl-seek"><div class="pl-seek-fill" id="pl-seek-fill"></div>
+              <input class="pl-seek-input" id="pl-seek" type="range" min="0" max="1000" value="0" aria-label="Перемотка">
+            </div>
+            <div class="pl-times"><span id="pl-cur">0:00</span><span id="pl-dur">0:00</span></div>
+
+            <div class="pl-controls">
+              <button class="pl-btn" id="pl-prev" type="button" title="Предыдущий">◀◀</button>
+              <button class="pl-btn pl-play" id="pl-play" type="button" title="Играть">▶</button>
+              <button class="pl-btn" id="pl-next" type="button" title="Следующий">▶▶</button>
+              <input class="pl-vol" id="pl-vol" type="range" min="0" max="100" value="70" aria-label="Громкость">
+            </div>
+
+            <div class="pl-list" id="pl-list">
+              <div class="pl-list-head">
+                <span id="pl-count">0 треков</span>
+                <span id="pl-used"></span>
+              </div>
+              <div id="pl-tracks"></div>
+              <input type="file" id="pl-file" accept="audio/*,.mp3,.m4a,.flac,.ogg,.opus,.wav,.aac" multiple hidden>
+            </div>
+
+            <audio id="pl-audio" preload="none"></audio>
+            <!-- Общий движок сайта. Подключаем синхронно и до скрипта кабинета:
+                 плеер тут берёт его звук, поэтому трек не обрывается, когда
+                 уходишь в дроп или блокнот. -->
+            <script src="/vg-player.js"></script>
+          </div>
+
+        </aside>
+        </div>
+      </main>
+
+      <div id="gate-modal" class="gate-modal" hidden>
+        <div class="gate-backdrop" data-gate-close></div>
+        <section class="gate-panel" role="dialog" aria-modal="true" aria-labelledby="gate-title">
+          <button class="gate-close" type="button" data-gate-close aria-label="Закрыть">×</button>
+          <h2 id="gate-title">Пароль консоли</h2>
+          <form id="gate-form">
+            <input id="gate-password" name="password" type="password" autocomplete="off" required>
+            <button class="gate-submit" type="submit">Войти</button>
+            <p id="gate-error" class="gate-error" role="alert"></p>
+          </form>
+        </section>
+      </div>
+
+      <div id="ssh-login-modal" class="gate-modal" hidden>
+        <div class="gate-backdrop" data-ssh-login-close></div>
+        <section class="gate-panel" role="dialog" aria-modal="true" aria-labelledby="ssh-login-title">
+          <button class="gate-close" type="button" data-ssh-login-close aria-label="Закрыть">×</button>
+          <h2 id="ssh-login-title">SSH-логин</h2>
+          <form id="ssh-login-form">
+            <input id="ssh-login-username" name="username" type="text" autocomplete="off" placeholder="Имя пользователя" required>
+            <input id="ssh-login-password" name="password" type="password" autocomplete="off" placeholder="Пароль" required>
+            <button class="gate-submit" type="submit">Подключиться</button>
+            <p id="ssh-login-error" class="gate-error" role="alert"></p>
+          </form>
+        </section>
+      </div>
+
+      <div id="vnc-login-modal" class="gate-modal" hidden>
+        <div class="gate-backdrop" data-vnc-login-close></div>
+        <section class="gate-panel" role="dialog" aria-modal="true" aria-labelledby="vnc-login-title">
+          <button class="gate-close" type="button" data-vnc-login-close aria-label="Закрыть">×</button>
+          <h2 id="vnc-login-title">VNC</h2>
+          <form id="vnc-login-form">
+            <input id="vnc-login-password" name="password" type="password" autocomplete="off" placeholder="Пароль (если задан)" required>
+            <button class="gate-submit" type="submit">Подключиться</button>
+            <p id="vnc-login-error" class="gate-error" role="alert"></p>
+          </form>
+        </section>
+      </div>
+
+      <div id="rdp-login-modal" class="gate-modal" hidden>
+        <div class="gate-backdrop" data-rdp-login-close></div>
+        <section class="gate-panel" role="dialog" aria-modal="true" aria-labelledby="rdp-login-title">
+          <button class="gate-close" type="button" data-rdp-login-close aria-label="Закрыть">×</button>
+          <h2 id="rdp-login-title">Windows RDP</h2>
+          <form id="rdp-login-form">
+            <input id="rdp-login-username" name="username" type="text" autocomplete="off" placeholder="Имя пользователя" required>
+            <input id="rdp-login-password" name="password" type="password" autocomplete="off" placeholder="Пароль" required>
+            <select id="rdp-login-quality" class="gate-select">
+              <option value="high">Качество: высокое — 32 бита, все эффекты</option>
+              <option value="medium" selected>Качество: среднее — 16 бит, без обоев</option>
+              <option value="low">Качество: низкое — 8 бит, для слабой связи</option>
+            </select>
+            <button class="gate-submit" type="submit">Подключиться</button>
+            <p id="rdp-login-error" class="gate-error" role="alert"></p>
+          </form>
+        </section>
+      </div>
+
+      <div id="rdp-overlay" class="rdp-overlay" hidden>
+        <div class="term-header">
+          <span id="rdp-title"></span><span id="rdp-quality" class="conn-quality"></span>
+          <div class="rdp-header-actions">
+            <button id="rdp-toolbar-toggle" class="term-close" type="button" hidden>☰</button>
+            <button id="rdp-touch-toggle" class="term-close" type="button" hidden>Touchpad</button>
+            <button id="rdp-close" class="term-close" type="button">Закрыть</button>
+          </div>
+        </div>
+        <div class="rdp-content">
+          <div id="rdp-display" class="rdp-display"></div>
+          <div id="rdp-toolbar" class="rdp-toolbar" hidden>
+            <button class="rdp-key" data-keysym="65307">Esc</button>
+            <button class="rdp-key" data-keysym="65289">Tab</button>
+            <button class="rdp-key" data-mod="65507">Ctrl</button>
+            <button class="rdp-key" data-mod="65513">Alt</button>
+            <button class="rdp-key" data-mod="65515">Win</button>
+            <button class="rdp-key" data-keysym="65288">⌫</button>
+            <button class="rdp-key" data-keysym="65361">◀</button>
+            <button class="rdp-key" data-keysym="65362">▲</button>
+            <button class="rdp-key" data-keysym="65364">▼</button>
+            <button class="rdp-key" data-keysym="65363">▶</button>
+            <button class="rdp-key-combo" data-combo="65507,65513,65535">C+A+D</button>
+            <button class="rdp-key-combo" data-combo="65507,65505">C+Shift</button>
+            <button class="rdp-key-combo" data-combo="65513,65505">A+Shift</button>
+            <button class="rdp-key-combo" data-combo="65515,65513">Win+A</button>
+            <button id="rdp-kbd-btn" class="rdp-key" type="button" hidden>⌨</button>
+          </div>
+        </div>
+        <input id="rdp-kbd-input" class="rdp-kbd-input" type="text" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" inputmode="text">
+      </div>
+
+      <div id="term-overlay" class="term-overlay" hidden>
+        <div class="term-header">
+          <span id="term-title"></span><span id="ssh-quality" class="conn-quality"></span>
+          <button id="term-close" class="term-close" type="button">Закрыть</button>
+        </div>
+        <!-- Ряд кнопок для телефона: с экранной клавиатуры ни стрелок, ни Tab,
+             ни Ctrl нет, а вставку буфера браузер сам в терминал не отдаёт. -->
+        <div class="term-tools" id="term-tools">
+          <button class="term-key term-key-wide" type="button" data-paste>Вставить</button>
+          <button class="term-key term-key-go" type="button" data-key="enter">Enter ⏎</button>
+          <button class="term-key" type="button" data-key="up">↑</button>
+          <button class="term-key" type="button" data-key="down">↓</button>
+          <button class="term-key" type="button" data-key="tab">Tab</button>
+          <button class="term-key" type="button" data-key="ctrlc">Ctrl+C</button>
+          <button class="term-key" type="button" data-key="esc">Esc</button>
+        </div>
+        <div id="term-body" class="term-body"></div>
+      </div>
+
+      <!-- Библиотеки лежат в static/vendor, а не на CDN: когда jsdelivr
+           недоступен, консоль и RDP переставали открываться вообще без
+           объяснений. Адрес CDN оставлен запасным на случай, если файл
+           почему-то не отдался.
+
+           Грузим их ПО ТРЕБОВАНИЮ, а не при открытии кабинета: xterm тянет
+           277 КБ, guacamole ещё 73 КБ, и раньше они приезжали на каждый заход,
+           хотя нужны только когда реально открываешь консоль или удалённый
+           рабочий стол. Кабинет из-за них весил втрое больше нужного. -->
+      <script>
+        window.vendorReady = (() => {
+          const PARTS = {
+            xterm: {
+              css: "/static/vendor/xterm.css",
+              js: [
+                ["/static/vendor/xterm.js",
+                 "https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"],
+                ["/static/vendor/xterm-addon-fit.js",
+                 "https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"],
+              ],
+            },
+            guac: {
+              js: [
+                ["/static/vendor/guacamole-common.min.js",
+                 "https://cdn.jsdelivr.net/npm/guacamole-common-js@1.5.0/dist/cjs/guacamole-common.min.js"],
+              ],
+            },
+          };
+          // Своя копия, при осечке — CDN. Порядок внутри набора важен:
+          // аддон xterm ждёт, пока определится сам Terminal.
+          const one = (local, cdn) => new Promise((ok, fail) => {
+            const add = (src, last) => {
+              const s = document.createElement("script");
+              s.src = src;
+              s.onload = ok;
+              s.onerror = () => last ? fail(new Error(src)) : add(cdn, true);
+              document.head.appendChild(s);
+            };
+            add(local, false);
+          });
+          const done = {};                 // грузим один раз, дальше — из кэша
+          return (name) => {
+            if (done[name]) return done[name];
+            const part = PARTS[name];
+            if (!part) return Promise.resolve();
+            if (part.css) {
+              const link = document.createElement("link");
+              link.rel = "stylesheet";
+              link.href = part.css;
+              document.head.appendChild(link);
+            }
+            done[name] = part.js.reduce(
+              (chain, [local, cdn]) => chain.then(() => one(local, cdn)),
+              Promise.resolve());
+            return done[name];
+          };
+        })();
+      </script>
+      <script>
+        (() => {
+          // Раскрытием занимается общий обработчик .panel-head[aria-controls]
+          // ниже по странице — свой здесь дал бы двойное срабатывание.
+          const devices = document.getElementById("netbird-devices");
+          const timers = new WeakMap();
+
+          const copyFallback = (text) => {
+            const input = document.createElement("textarea");
+            input.value = text;
+            input.style.position = "fixed";
+            input.style.opacity = "0";
+            document.body.appendChild(input);
+            input.select();
+            document.execCommand("copy");
+            input.remove();
+          };
+
+          document.querySelectorAll(".copy-ip").forEach((button) => {
+            button.addEventListener("click", async () => {
+              try {
+                if (navigator.clipboard && window.isSecureContext) {
+                  await navigator.clipboard.writeText(button.dataset.ip);
+                } else {
+                  copyFallback(button.dataset.ip);
+                }
+                const message = button.parentElement.querySelector(".copy-status");
+                message.classList.add("visible");
+                clearTimeout(timers.get(message));
+                timers.set(message, setTimeout(() => message.classList.remove("visible"), 1800));
+              } catch {
+                const message = button.parentElement.querySelector(".copy-status");
+                message.textContent = "Ошибка";
+                message.classList.add("visible");
+                setTimeout(() => { message.classList.remove("visible"); message.textContent = "Скопировано"; }, 1800);
+              }
+            });
+          });
+        })();
+
+        (() => {
+          const refreshStatus = async () => {
+            let data;
+            try {
+              const response = await fetch("/api/netbird/status", { credentials: "same-origin" });
+              if (!response.ok) return;
+              data = await response.json();
+            } catch {
+              return;
+            }
+            document.querySelectorAll(".device").forEach((item) => {
+              const info = data[item.dataset.ip];
+              const statusEl = item.querySelector(".device-status");
+              if (!info) return;
+              const btn = item.querySelector(".connect-btn");
+              const wolBtn = item.querySelector(".wol-btn");
+              if (info.online) {
+                statusEl.textContent = info.latency_ms != null ? `${Math.round(info.latency_ms)} ms` : "онлайн";
+                statusEl.className = "device-status online";
+                if (btn) btn.classList.remove("btn-offline");
+                if (wolBtn) { wolBtn.classList.add("wol-online"); wolBtn.title = "Выключить ПК"; wolBtn.textContent = "⏻"; }
+              } else {
+                statusEl.textContent = "офлайн";
+                statusEl.className = "device-status offline";
+                if (btn) btn.classList.add("btn-offline");
+                if (wolBtn) { wolBtn.classList.remove("wol-online"); wolBtn.title = "Wake-on-LAN"; wolBtn.textContent = "⚡"; }
+              }
+            });
+          };
+          refreshStatus();
+          setInterval(refreshStatus, 10000);
+        })();
+
+        (() => {
+          document.querySelectorAll(".wol-btn").forEach(btn => {
+            btn.addEventListener("click", async () => {
+              const isOnline = btn.classList.contains("wol-online");
+              btn.disabled = true;
+              const origText = btn.textContent;
+              try {
+                if (isOnline) {
+                  if (!confirm("Выключить ПК?")) { btn.disabled = false; return; }
+                  const r = await fetch("/api/pc/shutdown", { method: "POST", credentials: "same-origin" });
+                  if (!r.ok) throw new Error((await r.json()).error);
+                } else {
+                  const r = await fetch("/api/wol", {
+                    method: "POST", credentials: "same-origin",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ mac: btn.dataset.mac }),
+                  });
+                  if (!r.ok) throw new Error((await r.json()).error);
+                }
+                btn.textContent = "✓";
+                btn.classList.add("wol-sent");
+                setTimeout(() => { btn.textContent = origText; btn.classList.remove("wol-sent"); btn.disabled = false; }, 4000);
+              } catch (e) {
+                btn.textContent = "✗";
+                setTimeout(() => { btn.textContent = origText; btn.disabled = false; }, 2000);
+              }
+            });
+          });
+        })();
+
+        (() => {
+          const gateModal = document.getElementById("gate-modal");
+          const gateForm = document.getElementById("gate-form");
+          const gatePassword = document.getElementById("gate-password");
+          const gateError = document.getElementById("gate-error");
+          const sshLoginModal = document.getElementById("ssh-login-modal");
+          const sshLoginForm = document.getElementById("ssh-login-form");
+          const sshLoginUsername = document.getElementById("ssh-login-username");
+          const sshLoginPassword = document.getElementById("ssh-login-password");
+          const sshLoginError = document.getElementById("ssh-login-error");
+          const termOverlay = document.getElementById("term-overlay");
+          const termTitle = document.getElementById("term-title");
+          const termBody = document.getElementById("term-body");
+
+          /* Подгоняем окно консоли под видимую часть экрана. На телефоне при
+             появлении клавиатуры visualViewport становится ниже, а обычный
+             resize при этом может вообще не сработать — поэтому слушаем
+             именно его. Пересчёт откладываем на кадр: во время анимации
+             выезда клавиатуры размеры меняются десятки раз подряд. */
+          let kbdWatching = false;
+          const watchKeyboard = (onFit) => {
+            const vv = window.visualViewport;
+            const apply = () => {
+              const root = termOverlay.style;
+              if (!vv) { root.removeProperty("--term-h"); root.removeProperty("--term-top"); }
+              else {
+                root.setProperty("--term-h", vv.height + "px");
+                root.setProperty("--term-top", vv.offsetTop + "px");
+              }
+              if (onFit) onFit();
+            };
+            apply();
+            if (!vv || kbdWatching) return;
+            kbdWatching = true;
+            let pending = 0;
+            const later = () => {
+              cancelAnimationFrame(pending);
+              pending = requestAnimationFrame(apply);
+            };
+            vv.addEventListener("resize", later);
+            vv.addEventListener("scroll", later);
+          };
+          const termClose = document.getElementById("term-close");
+
+          let consoleAuthenticated = false;
+          let pendingDevice = null;
+          let term = null;
+          let fitAddon = null;
+          let ws = null;
+
+          const rdpLoginModal = document.getElementById("rdp-login-modal");
+          const rdpLoginForm = document.getElementById("rdp-login-form");
+          const rdpLoginUsername = document.getElementById("rdp-login-username");
+          const rdpLoginPassword = document.getElementById("rdp-login-password");
+          const rdpLoginError = document.getElementById("rdp-login-error");
+          const rdpLoginQuality = document.getElementById("rdp-login-quality");
+          const rdpOverlay = document.getElementById("rdp-overlay");
+          const rdpTitleEl = document.getElementById("rdp-title");
+          const rdpDisplay = document.getElementById("rdp-display");
+          const rdpCloseBtn = document.getElementById("rdp-close");
+          let rdpClient = null;
+          let rdpKeyboard = null;
+          let toolbarAbort = null;
+          let rdpKeepalive = null;
+          let rdpNopSentAt = null;
+
+          const rdpQuality = document.getElementById("rdp-quality");
+          const sshQuality = document.getElementById("ssh-quality");
+          const updateQuality = (el, rtt) => {
+            el.textContent = `● ${rtt} ms`;
+            el.className = "conn-quality " + (rtt < 80 ? "good" : rtt < 250 ? "warn" : "bad");
+          };
+
+          // ── VNC login modal ───────────────────────────────────────────
+          const vncLoginModal    = document.getElementById("vnc-login-modal");
+          const vncLoginForm     = document.getElementById("vnc-login-form");
+          const vncLoginPassword = document.getElementById("vnc-login-password");
+          const vncLoginError    = document.getElementById("vnc-login-error");
+
+          const closeVncLogin = () => {
+            vncLoginModal.hidden = true;
+            vncLoginForm.reset();
+            vncLoginError.textContent = "";
+          };
+          document.querySelectorAll("[data-vnc-login-close]").forEach(el => el.addEventListener("click", () => {
+            closeVncLogin(); pendingDevice = null;
+          }));
+
+          const openVncLogin = () => {
+            document.getElementById("vnc-login-title").textContent = pendingDevice ? `VNC — ${pendingDevice.name}` : "VNC";
+            vncLoginModal.hidden = false;
+            requestAnimationFrame(() => vncLoginPassword.focus());
+          };
+
+          vncLoginForm.addEventListener("submit", (event) => {
+            event.preventDefault();
+            const device = pendingDevice;
+            const password = vncLoginPassword.value;
+            closeVncLogin();
+            if (device) openRdp(device.ip, device.name, "", password, "vnc");
+          });
+
+          // ── RDP helpers ──────────────────────────────────────────────
+          function GuacAuthTunnel(ip, authPayload, protocol) {
+            Guacamole.Tunnel.call(this);
+            const self = this;
+            let ws = null;
+            let guacBuf = "";
+            this.connect = function() {
+              const proto = location.protocol === "https:" ? "wss:" : "ws:";
+              ws = new WebSocket(`${proto}//${location.host}/ws/${protocol ?? "rdp"}/${ip}`);
+              self.state = Guacamole.Tunnel.State.CONNECTING;
+              if (self.onstatechange) self.onstatechange(self.state);
+              ws.onopen = () => {
+                ws.send(JSON.stringify(authPayload));
+                self.state = Guacamole.Tunnel.State.OPEN;
+                if (self.onstatechange) self.onstatechange(self.state);
+              };
+              ws.onmessage = (event) => {
+                guacBuf += event.data;
+                let pos = 0;
+                outer: while (pos < guacBuf.length) {
+                  const instrStart = pos;
+                  const parts = [];
+                  while (true) {
+                    let dot = pos;
+                    while (dot < guacBuf.length && guacBuf[dot] !== ".") dot++;
+                    if (dot >= guacBuf.length) { pos = instrStart; break outer; }
+                    const len = parseInt(guacBuf.slice(pos, dot), 10);
+                    if (isNaN(len)) { pos = dot + 1; break; }
+                    pos = dot + 1;
+                    if (pos + len >= guacBuf.length) { pos = instrStart; break outer; }
+                    parts.push(guacBuf.slice(pos, pos + len));
+                    pos += len;
+                    const sep = guacBuf[pos++];
+                    if (sep === ";") break;
+                  }
+                  if (parts.length) {
+                    if (parts[0] === "nop") {
+                      ws.send("3.nop;");
+                      if (rdpNopSentAt !== null) {
+                        updateQuality(rdpQuality, Math.round(performance.now() - rdpNopSentAt));
+                        rdpNopSentAt = null;
+                      }
+                    } else if (self.oninstruction) {
+                      self.oninstruction(parts[0], parts.slice(1));
+                    }
+                  }
+                }
+                guacBuf = guacBuf.slice(pos);
+              };
+              ws.onclose = () => {
+                self.state = Guacamole.Tunnel.State.CLOSED;
+                if (self.onstatechange) self.onstatechange(self.state);
+              };
+              ws.onerror = () => { if (self.onerror) self.onerror({ code: 0, message: "WebSocket error" }); };
+            };
+            this.sendMessage = function(...args) {
+              if (!ws || ws.readyState !== WebSocket.OPEN) return;
+              ws.send(args.map(v => { const s = String(v); return `${s.length}.${s}`; }).join(",") + ";");
+            };
+            this.disconnect = function() { if (ws) { ws.close(); ws = null; } };
+          }
+          const closeRdpLogin = () => {
+            rdpLoginModal.hidden = true;
+            rdpLoginForm.reset();
+            rdpLoginError.textContent = "";
+          };
+          document.querySelectorAll("[data-rdp-login-close]").forEach(el => el.addEventListener("click", () => {
+            closeRdpLogin();
+            pendingDevice = null;
+          }));
+
+          const openRdpLogin = () => {
+            document.getElementById("rdp-login-title").textContent = pendingDevice ? `RDP — ${pendingDevice.name}` : "Windows RDP";
+            if (rdpLoginQuality) rdpLoginQuality.value = localStorage.getItem("rdpQuality") || "medium";
+            rdpLoginModal.hidden = false;
+            requestAnimationFrame(() => rdpLoginUsername.focus());
+          };
+
+          const closeRdp = () => {
+            rdpOverlay.hidden = true;
+            rdpOverlay.style.height = "";
+            rdpOverlay.style.top = "";
+            rdpNopSentAt = null;
+            rdpQuality.textContent = "";
+            rdpQuality.className = "conn-quality";
+            if (document.pointerLockElement) document.exitPointerLock();
+            if (toolbarAbort) { toolbarAbort.abort(); toolbarAbort = null; }
+            if (rdpKeepalive) { clearInterval(rdpKeepalive); rdpKeepalive = null; }
+            if (rdpClient) { rdpClient.disconnect(); rdpClient = null; }
+            if (rdpKeyboard) { rdpKeyboard.onkeydown = rdpKeyboard.onkeyup = null; rdpKeyboard = null; }
+            document.getElementById("rdp-toolbar").querySelectorAll(".rdp-key.active").forEach(el => el.classList.remove("active"));
+            rdpDisplay.innerHTML = "";
+          };
+          rdpCloseBtn.addEventListener("click", closeRdp);
+
+          const openRdp = async (ip, name, username, password, protocol = "rdp", quality = "medium") => {
+            // guacamole тоже приезжает только сейчас — на кабинет он не влияет.
+            try { await window.vendorReady("guac"); } catch (e) {}
+            if (typeof Guacamole === "undefined") {
+              alert("Не удалось загрузить guacamole-common-js — проверьте сеть/CDN.");
+              return;
+            }
+            GuacAuthTunnel.prototype = Object.create(Guacamole.Tunnel.prototype);
+            GuacAuthTunnel.prototype.constructor = GuacAuthTunnel;
+            const isMobile = window.innerWidth <= 900 || navigator.maxTouchPoints > 0 ||
+                             /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+            rdpTitleEl.textContent = name + " — " + ip;
+            rdpOverlay.hidden = false;
+
+            const toolbar            = document.getElementById("rdp-toolbar");
+            const touchToggleBtn     = document.getElementById("rdp-touch-toggle");
+            const kbdBtn             = document.getElementById("rdp-kbd-btn");
+            const kbdInput           = document.getElementById("rdp-kbd-input");
+            const toolbarToggleBtn   = document.getElementById("rdp-toolbar-toggle");
+            toolbar.hidden           = isMobile;
+            kbdBtn.hidden            = !isMobile;
+            touchToggleBtn.hidden    = !isMobile;
+            toolbarToggleBtn.hidden  = !isMobile;
+            toolbarToggleBtn.onclick = () => { toolbar.hidden = !toolbar.hidden; };
+
+            const displayRect = rdpDisplay.getBoundingClientRect();
+            const width  = Math.round(displayRect.width)  || window.innerWidth;
+            const height = Math.round(displayRect.height) || (window.innerHeight - 45);
+
+            // ── tunnel + client ─────────────────────────────────────────
+            const tunnel = new GuacAuthTunnel(ip, { type: "auth", username, password, width, height, quality }, protocol);
+            rdpClient = new Guacamole.Client(tunnel);
+            const displayEl = rdpClient.getDisplay().getElement();
+            rdpDisplay.innerHTML = "";
+            rdpDisplay.appendChild(displayEl);
+
+            // ── mouse / touch ────────────────────────────────────────────
+            let touchMode = "touchpad";
+            let inputHandler = null;
+            const scaleMouseState = (e) => {
+              const st = e.state ?? e;
+              const sc = rdpClient?.getDisplay()?.getScale() ?? 1;
+              return (sc && sc !== 1)
+                ? { ...st, x: Math.round(st.x / sc), y: Math.round(st.y / sc) }
+                : st;
+            };
+            const attachInput = () => {
+              if (inputHandler) { inputHandler.onmousedown = inputHandler.onmouseup = inputHandler.onmousemove = null; }
+              const Ctor = !isMobile              ? Guacamole.Mouse
+                         : touchMode === "touchpad" ? Guacamole.Mouse.Touchpad
+                         : Guacamole.Mouse.Touchscreen;
+              inputHandler = new Ctor(displayEl);
+              inputHandler.onmousedown = inputHandler.onmouseup = inputHandler.onmousemove =
+                (e) => rdpClient?.sendMouseState(scaleMouseState(e));
+            };
+            attachInput();
+
+            touchToggleBtn.textContent = "Touchpad";
+            touchToggleBtn.onclick = () => {
+              touchMode = touchMode === "touchpad" ? "touchscreen" : "touchpad";
+              touchToggleBtn.textContent = touchMode === "touchpad" ? "Touchpad" : "Touchscreen";
+              attachInput();
+            };
+
+            // ── AbortController (shared by pointer lock + toolbar) ───────
+            if (toolbarAbort) toolbarAbort.abort();
+            toolbarAbort = new AbortController();
+            const sig = toolbarAbort.signal;
+
+            // ── pointer lock (desktop only) ──────────────────────────────
+            if (!isMobile && rdpDisplay.requestPointerLock) {
+              let plLocked = false, plX = width / 2, plY = height / 2;
+              const lockHint = document.createElement("div");
+              lockHint.className = "rdp-lock-hint";
+              lockHint.textContent = "Кликни для захвата мыши · Esc — отпустить";
+              rdpDisplay.appendChild(lockHint);
+              const plSend = (x, y, btns) => rdpClient?.sendMouseState({
+                x, y,
+                left:   (btns & 1) !== 0,
+                middle: (btns & 4) !== 0,
+                right:  (btns & 2) !== 0,
+                up: false, down: false
+              });
+              // До захвата: клик на displayEl запрашивает lock
+              displayEl.addEventListener("mousedown", (e) => {
+                if (!plLocked) {
+                  if (inputHandler) inputHandler.onmousedown = inputHandler.onmouseup = inputHandler.onmousemove = null;
+                  rdpDisplay.requestPointerLock();
+                  e.stopImmediatePropagation();
+                }
+              }, { signal: sig, capture: true });
+              // После захвата: все события идут на rdpDisplay (locked element)
+              rdpDisplay.addEventListener("mousedown", (e) => { if (plLocked) plSend(plX, plY, e.buttons); }, { signal: sig });
+              rdpDisplay.addEventListener("mouseup",   (e) => { if (plLocked) plSend(plX, plY, e.buttons); }, { signal: sig });
+              rdpDisplay.addEventListener("mousemove", (e) => {
+                if (!plLocked) return;
+                const d = rdpClient?.getDisplay();
+                const nW = d?.getWidth()  || width;
+                const nH = d?.getHeight() || height;
+                plX = Math.max(0, Math.min(nW - 1, plX + e.movementX));
+                plY = Math.max(0, Math.min(nH - 1, plY + e.movementY));
+                plSend(plX, plY, e.buttons);
+              }, { signal: sig });
+              rdpDisplay.addEventListener("wheel", (e) => {
+                if (!plLocked) return;
+                e.preventDefault();
+                const up = e.deltaY < 0;
+                rdpClient?.sendMouseState({ x: plX, y: plY, left: false, middle: false, right: false, up, down: !up });
+                rdpClient?.sendMouseState({ x: plX, y: plY, left: false, middle: false, right: false, up: false, down: false });
+              }, { signal: sig, passive: false });
+              document.addEventListener("pointerlockchange", () => {
+                plLocked = document.pointerLockElement === rdpDisplay;
+                lockHint.hidden = plLocked;
+                if (!plLocked) attachInput();
+              }, { signal: sig });
+            }
+
+            // ── hardware keyboard ────────────────────────────────────────
+            rdpKeyboard = new Guacamole.Keyboard(document);
+            rdpKeyboard.onkeydown = (k) => { if (!rdpOverlay.hidden && rdpClient) rdpClient.sendKeyEvent(1, k); };
+            rdpKeyboard.onkeyup   = (k) => { if (!rdpOverlay.hidden && rdpClient) rdpClient.sendKeyEvent(0, k); };
+            // Intercept Win/Meta key — prevents Start menu on host when RDP is open
+            document.addEventListener("keydown", (e) => {
+              if (!rdpOverlay.hidden && (e.key === "Meta" || e.key === "OS" || e.code === "MetaLeft" || e.code === "MetaRight")) {
+                e.preventDefault();
+              }
+            }, { capture: true, signal: sig });
+
+            // ── toolbar ──────────────────────────────────────────────────
+            const activeModifiers = new Set();
+
+            const clearMods = () => {
+              activeModifiers.forEach(k => rdpClient?.sendKeyEvent(0, k));
+              activeModifiers.clear();
+              toolbar.querySelectorAll(".rdp-key.active").forEach(el => el.classList.remove("active"));
+            };
+
+            toolbar.addEventListener("pointerdown", (e) => {
+              const btn = e.target.closest("[data-keysym],[data-mod],[data-combo]");
+              if (!btn) return;
+              e.preventDefault();
+              if (btn.dataset.keysym) {
+                const k = parseInt(btn.dataset.keysym, 10);
+                activeModifiers.forEach(m => rdpClient?.sendKeyEvent(1, m));
+                rdpClient?.sendKeyEvent(1, k);
+                rdpClient?.sendKeyEvent(0, k);
+                clearMods();
+              } else if (btn.dataset.mod) {
+                const k = parseInt(btn.dataset.mod, 10);
+                if (activeModifiers.has(k)) { activeModifiers.delete(k); btn.classList.remove("active"); }
+                else                         { activeModifiers.add(k);    btn.classList.add("active"); }
+              } else if (btn.dataset.combo) {
+                clearMods();
+                const keys = btn.dataset.combo.split(",").map(Number);
+                keys.forEach(k => rdpClient?.sendKeyEvent(1, k));
+                [...keys].reverse().forEach(k => rdpClient?.sendKeyEvent(0, k));
+              }
+            }, { signal: sig });
+
+            // ── virtual (soft) keyboard ──────────────────────────────────
+            kbdBtn.onclick = () => { kbdInput.value = ""; kbdInput.focus(); };
+            kbdInput.addEventListener("input", (e) => {
+              for (const ch of (e.data ?? "")) {
+                const k = ch.codePointAt(0);
+                rdpClient?.sendKeyEvent(1, k);
+                rdpClient?.sendKeyEvent(0, k);
+              }
+              kbdInput.value = "";
+            }, { signal: sig });
+            kbdInput.addEventListener("keydown", (e) => {
+              const map = { Backspace: 65288, Enter: 65293, Tab: 65289, Escape: 65307 };
+              if (e.key in map) { e.preventDefault(); rdpClient?.sendKeyEvent(1, map[e.key]); rdpClient?.sendKeyEvent(0, map[e.key]); }
+            }, { signal: sig });
+
+            // ── mobile: 2-finger scroll + keyboard resize ────────────────
+            if (isMobile) {
+              // Track RDP cursor position from single-touch moves
+              let lastRdpX = Math.round(width / 2), lastRdpY = Math.round(height / 2);
+              displayEl.addEventListener("touchmove", (e) => {
+                if (e.touches.length === 1) {
+                  const rect = displayEl.getBoundingClientRect();
+                  const sc = rdpClient?.getDisplay()?.getScale() ?? 1;
+                  lastRdpX = Math.round((e.touches[0].clientX - rect.left) / sc);
+                  lastRdpY = Math.round((e.touches[0].clientY - rect.top)  / sc);
+                }
+              }, { signal: sig });
+
+              // 2-finger drag = scroll wheel
+              let scrollStart = null;
+              displayEl.addEventListener("touchstart", (e) => {
+                if (e.touches.length === 2) {
+                  scrollStart = { y: (e.touches[0].clientY + e.touches[1].clientY) / 2 };
+                  e.preventDefault();
+                  e.stopImmediatePropagation();
+                }
+              }, { passive: false, capture: true, signal: sig });
+
+              displayEl.addEventListener("touchmove", (e) => {
+                if (e.touches.length !== 2 || !scrollStart || !rdpClient) return;
+                const cy = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+                const dy = cy - scrollStart.y;
+                if (Math.abs(dy) >= 8) {
+                  const up = dy > 0;
+                  const st = { x: lastRdpX, y: lastRdpY, left: false, middle: false, right: false, up, down: !up };
+                  rdpClient.sendMouseState(st);
+                  rdpClient.sendMouseState({ ...st, up: false, down: false });
+                  scrollStart.y = cy;
+                }
+                e.preventDefault();
+                e.stopImmediatePropagation();
+              }, { passive: false, capture: true, signal: sig });
+
+              displayEl.addEventListener("touchend", (e) => {
+                if (e.touches.length < 2) scrollStart = null;
+              }, { capture: true, signal: sig });
+
+              // Shrink overlay when software keyboard opens
+              if (window.visualViewport) {
+                const vvHandler = () => {
+                  rdpOverlay.style.height = window.visualViewport.height + "px";
+                  rdpOverlay.style.top    = window.visualViewport.offsetTop + "px";
+                  fitDisplay();
+                };
+                window.visualViewport.addEventListener("resize", vvHandler, { signal: sig });
+              }
+            }
+
+            const fitDisplay = () => {
+              if (!rdpClient) return;
+              const d = rdpClient.getDisplay();
+              if (!d.getWidth() || !d.getHeight()) return;
+              const s = Math.min(
+                rdpDisplay.clientWidth  / d.getWidth(),
+                rdpDisplay.clientHeight / d.getHeight()
+              );
+              d.scale(s);
+            };
+            rdpClient.getDisplay().onresize = fitDisplay;
+            window.addEventListener("resize", fitDisplay, { signal: sig });
+
+            rdpClient.onerror = (err) => {
+              rdpDisplay.innerHTML = `<p style="color:#ff6b81;padding:20px;font-family:monospace">Ошибка RDP: ${err?.message ?? JSON.stringify(err)}</p>`;
+            };
+            tunnel.onstatechange = (state) => {
+              if (state === Guacamole.Tunnel.State.CLOSED && !rdpOverlay.hidden)
+                rdpDisplay.insertAdjacentHTML("beforeend", '<p style="color:#8f99ab;padding:10px 20px;font-family:monospace;position:absolute;bottom:0">Соединение закрыто.</p>');
+            };
+            rdpClient.connect();
+            rdpQuality.textContent = "● …";
+            rdpQuality.className = "conn-quality";
+            rdpKeepalive = setInterval(() => {
+              if (tunnel.state === Guacamole.Tunnel.State.OPEN) {
+                rdpNopSentAt = performance.now();
+                tunnel.sendMessage("nop");
+              }
+            }, 10000);
+          };
+
+          rdpLoginForm.addEventListener("submit", (event) => {
+            event.preventDefault();
+            const device = pendingDevice;
+            const username = rdpLoginUsername.value;
+            const password = rdpLoginPassword.value;
+            const quality = rdpLoginQuality ? rdpLoginQuality.value : "medium";
+            if (rdpLoginQuality) localStorage.setItem("rdpQuality", quality);
+            closeRdpLogin();
+            if (device) openRdp(device.ip, device.name, username, password, "rdp", quality);
+          });
+          // ─────────────────────────────────────────────────────────────
+
+          const closeGate = () => {
+            gateModal.hidden = true;
+            gateForm.reset();
+            gateError.textContent = "";
+          };
+
+          document.querySelectorAll("[data-gate-close]").forEach((el) => el.addEventListener("click", () => {
+            closeGate();
+            pendingDevice = null;
+          }));
+
+          gateForm.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            gateError.textContent = "";
+            try {
+              const response = await fetch("/api/console/login", {
+                method: "POST",
+                credentials: "same-origin",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ password: gatePassword.value }),
+              });
+              if (!response.headers.get("content-type")?.includes("application/json")) {
+                gateError.textContent = "Сессия истекла, обновите страницу и войдите заново.";
+                return;
+              }
+              const result = await response.json();
+              if (!response.ok) {
+                gateError.textContent = result.error || "Не удалось войти.";
+                return;
+              }
+              consoleAuthenticated = true;
+              closeGate();
+              if (pendingDevice?.type === "rdp") openRdpLogin();
+              else if (pendingDevice?.type === "vnc") openVncLogin();
+              else openSshLogin();
+            } catch {
+              gateError.textContent = "Сервер недоступен.";
+            }
+          });
+
+          const closeSshLogin = () => {
+            sshLoginModal.hidden = true;
+            sshLoginForm.reset();
+            sshLoginError.textContent = "";
+            pendingDevice = null;
+          };
+
+          document.querySelectorAll("[data-ssh-login-close]").forEach((el) => el.addEventListener("click", closeSshLogin));
+
+          const openSshLogin = () => {
+            document.getElementById("ssh-login-title").textContent = pendingDevice ? `SSH — ${pendingDevice.name}` : "SSH-логин";
+            sshLoginModal.hidden = false;
+            requestAnimationFrame(() => sshLoginUsername.focus());
+          };
+
+          sshLoginForm.addEventListener("submit", (event) => {
+            event.preventDefault();
+            const device = pendingDevice;
+            const username = sshLoginUsername.value;
+            const password = sshLoginPassword.value;
+            sshLoginModal.hidden = true;
+            sshLoginForm.reset();
+            sshLoginError.textContent = "";
+            pendingDevice = null;
+            if (device) openTerminal(device.ip, device.name, username, password);
+          });
+
+          const closeTerminal = () => {
+            termOverlay.hidden = true;
+            if (ws) { ws.close(); ws = null; }
+            if (term) { term.dispose(); term = null; }
+            termBody.innerHTML = "";
+          };
+          termClose.addEventListener("click", closeTerminal);
+
+          // ── Кнопки консоли ───────────────────────────────────────────
+          // Всё уходит в тот же канал, что и набор с клавиатуры, поэтому
+          // сервер про эти кнопки ничего не знает и знать не должен.
+          const termSend = (data) => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({ type: "data", data }));
+            }
+            if (term) term.focus();
+          };
+
+          const termToast = (text) => {
+            const el = document.createElement("div");
+            el.className = "term-toast";
+            el.textContent = text;
+            document.body.appendChild(el);
+            setTimeout(() => el.remove(), 1800);
+          };
+
+          // Коды держим здесь, а не в атрибутах разметки: в атрибуте «\\r» так и
+          // остался бы двумя символами, и терминал получал бы текст вместо Enter.
+          const TERM_KEYS = {
+            enter: "\\r", up: "\\x1b[A", down: "\\x1b[B",
+            tab: "\\t", ctrlc: "\\x03", esc: "\\x1b",
+          };
+          document.querySelectorAll("#term-tools [data-key]").forEach(btn => {
+            btn.addEventListener("click", () => termSend(TERM_KEYS[btn.dataset.key] || ""));
+          });
+
+          document.querySelector("#term-tools [data-paste]").addEventListener("click", async () => {
+            let text = null;
+            try {
+              // Работает только по HTTPS и только по жесту пользователя —
+              // нажатие кнопки как раз им и является.
+              text = await navigator.clipboard.readText();
+            } catch (e) {
+              // Firefox и старые браузеры чтение буфера не дают: спрашиваем руками.
+              text = window.prompt("Вставьте команды сюда (браузер не даёт прочитать буфер сам):", "");
+            }
+            if (!text) { termToast("Буфер пуст"); return; }
+            termSend(text);
+            const lines = text.split("\\n").filter(l => l.trim()).length;
+            termToast(lines > 1 ? `Вставлено строк: ${lines}` : "Вставлено");
+          });
+
+          const openTerminal = async (ip, name, username, password) => {
+            termTitle.textContent = name + " — " + ip;
+            termOverlay.hidden = false;
+            // xterm приезжает только сейчас, при первом открытии консоли.
+            termBody.textContent = "Загружаю терминал…";
+            try { await window.vendorReady("xterm"); } catch (e) {}
+            termBody.textContent = "";
+            if (typeof Terminal === "undefined" || typeof FitAddon === "undefined") {
+              termBody.textContent = "Не удалось загрузить библиотеку терминала (xterm.js) — проверьте сеть/CDN.";
+              return;
+            }
+            term = new Terminal({ convertEol: true, fontFamily: "Cascadia Code, Consolas, monospace", fontSize: 14, theme: { background: "#05070c" } });
+            fitAddon = new FitAddon.FitAddon();
+            term.loadAddon(fitAddon);
+            term.open(termBody);
+            fitAddon.fit();
+
+            const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+            let gotData = false;
+            ws = new WebSocket(`${protocol}//${location.host}/ws/console/${ip}`);
+
+            ws.addEventListener("open", () => {
+              ws.send(JSON.stringify({ type: "auth", username, password }));
+              fitAddon.fit();
+              ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
+            });
+
+            let sshPingTime = null;
+            sshQuality.textContent = "● …";
+            sshQuality.className = "conn-quality";
+            const pingInterval = setInterval(() => {
+              if (ws && ws.readyState === WebSocket.OPEN) {
+                sshPingTime = performance.now();
+                ws.send(JSON.stringify({ type: "ping" }));
+              }
+            }, 10000);
+
+            ws.addEventListener("message", (event) => {
+              gotData = true;
+              try {
+                const payload = JSON.parse(event.data);
+                if (payload.type === "data") term.write(payload.data);
+                else if (payload.type === "pong" && sshPingTime !== null) {
+                  updateQuality(sshQuality, Math.round(performance.now() - sshPingTime));
+                  sshPingTime = null;
+                }
+              } catch {}
+            });
+
+            ws.addEventListener("close", () => {
+              clearInterval(pingInterval);
+              sshQuality.textContent = "";
+              sshQuality.className = "conn-quality";
+              term.write("\\r\\nСоединение закрыто.\\r\\n");
+            });
+
+            term.onData((data) => {
+              if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "data", data }));
+            });
+
+            const sendResize = () => {
+              fitAddon.fit();
+              if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
+              }
+            };
+            term.onResize(() => sendResize());
+            window.addEventListener("resize", () => fitAddon.fit());
+            watchKeyboard(sendResize);
+          };
+
+          document.querySelectorAll(".connect-btn").forEach((button) => {
+            button.addEventListener("click", () => {
+              pendingDevice = { ip: button.dataset.ip, name: button.dataset.name, type: button.dataset.type || "ssh" };
+              if (consoleAuthenticated) {
+                if (pendingDevice.type === "rdp") openRdpLogin();
+                else if (pendingDevice.type === "vnc") openVncLogin();
+                else openSshLogin();
+              } else {
+                gateModal.hidden = false;
+                requestAnimationFrame(() => gatePassword.focus());
+              }
+            });
+          });
+        })();
+      </script>
+      <script>
+      {
+        const esc = s => String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+
+        // ── Установка приложения ──
+        // Ставится весь сайт целиком: приложение открывается на главной,
+        // оттуда вход в кабинет и дальше в дроп.
+        {
+          const button = document.getElementById("install");
+          let prompt = null;
+          if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
+
+          // Уже открыто как приложение — предлагать установку незачем.
+          const installed = window.matchMedia("(display-mode: standalone)").matches ||
+                            window.navigator.standalone === true;
+
+          // Только на телефоне и планшете. На настольном браузере поставить
+          // сайт тоже можно, но смысла в этом нет: то же самое окно и та же
+          // вкладка — кнопка там только мозолит глаза.
+          const handheld = window.matchMedia("(pointer: coarse)").matches &&
+                           "ontouchstart" in window && navigator.maxTouchPoints > 0;
+
+          // Кнопку показываем всегда, кроме этих случаев. Раньше она ждала
+          // beforeinstallprompt, а он молчит, если приложение уже поставлено
+          // или браузер решил, что показывать рано, — и кнопка исчезала
+          // насовсем без единого объяснения.
+          if (button && !installed && handheld) button.hidden = false;
+
+          window.addEventListener("beforeinstallprompt", e => {
+            e.preventDefault();
+            prompt = e;
+            if (button && handheld) button.hidden = false;
+          });
+          window.addEventListener("appinstalled", () => { if (button) button.hidden = true; });
+
+          if (button) button.addEventListener("click", async () => {
+            if (prompt) {
+              prompt.prompt();
+              await prompt.userChoice;
+              prompt = null;
+              button.hidden = true;
+              return;
+            }
+            // Своего окна установки нет — подсказываем, где оно у браузера.
+            const ios = /iPhone|iPad|iPod/.test(navigator.userAgent);
+            alert(ios
+              ? "Поделиться → «На экран Домой»."
+              : "Меню браузера (⋮) → «Установить приложение» или «Добавить на главный экран».\\n\\n" +
+                "Если пункта нет — приложение уже установлено, проверьте рабочий стол.");
+          });
+        }
+
+        // ── Часы ──
+        {
+          const pad = n => String(n).padStart(2, "0");
+          const days = ["воскресенье","понедельник","вторник","среда","четверг","пятница","суббота"];
+          const months = ["января","февраля","марта","апреля","мая","июня",
+                          "июля","августа","сентября","октября","ноября","декабря"];
+          const h = document.getElementById("clk-h");
+          const tick = () => {
+            const now = new Date();
+            h.textContent = pad(now.getHours());
+            document.getElementById("clk-m").textContent = pad(now.getMinutes());
+            document.getElementById("clk-s").textContent = pad(now.getSeconds());
+            document.getElementById("clk-date").textContent =
+              days[now.getDay()] + ", " + now.getDate() + " " + months[now.getMonth()];
+          };
+          if (h) { tick(); setInterval(tick, 1000); }
+        }
+
+        // ── Резервная копия ──
+        {
+          const head = document.getElementById("backup-toggle");
+          const body = document.getElementById("backup-body");
+          if (head && body) {
+            const size = (n) => {
+              n = n || 0;
+              if (n < 1024) return n + " Б";
+              if (n < 1048576) return (n / 1024).toFixed(0) + " КБ";
+              if (n < 1073741824) return (n / 1048576).toFixed(1) + " МБ";
+              return (n / 1073741824).toFixed(2) + " ГБ";
+            };
+            let asked = false;
+            // Показ/скрытие делает общий обработчик .panel-head[aria-controls];
+            // нам остаётся один раз подгрузить размеры при первом раскрытии.
+            head.addEventListener("widget-open", async (ev) => {
+              if (!ev.detail || asked) return;
+              asked = true;
+              try {
+                const r = await fetch("/api/backup/state", { credentials: "same-origin" });
+                const d = await r.json();
+                document.getElementById("bk-size").innerHTML =
+                  "Записи, статьи и настройки: <b>" + size(d.light.size) + "</b> (" +
+                  d.light.files + " файлов).<br>Всё вместе с дропом и музыкой: <b>" +
+                  size(d.full.size) + "</b> (" + d.full.files + " файлов).";
+                document.getElementById("bk-robot").textContent = d.robot
+                  ? "Ключ для программы задан: копию можно забирать снаружи по нему, без входа в кабинет."
+                  : "Чтобы копии забирала программа с домашнего сервера, задайте на сервере ключ BACKUP_TOKEN.";
+              } catch (e) {
+                document.getElementById("bk-size").textContent = "Не удалось посчитать размер.";
+              }
+            });
+
+            const file = document.getElementById("bk-file");
+            const msg = document.getElementById("bk-msg");
+            document.getElementById("bk-restore").addEventListener("click", () => {
+              if (!confirm("Развернуть копию поверх нынешних данных?\\n\\n" +
+                           "Файлы из архива заменят одноимённые. Лишнего не удаляем.")) return;
+              file.click();
+            });
+            file.addEventListener("change", async () => {
+              const f = file.files[0];
+              file.value = "";
+              if (!f) return;
+              msg.textContent = "Разворачиваю копию…";
+              const form = new FormData();
+              form.append("file", f);
+              try {
+                const r = await fetch("/api/backup/import",
+                  { method: "POST", credentials: "same-origin", body: form });
+                const d = await r.json().catch(() => ({}));
+                msg.textContent = r.ok
+                  ? "Готово: вернулось " + d.files + " файлов. Обновите страницу."
+                  : (d.error || "Не вышло развернуть копию.");
+              } catch (e) { msg.textContent = "Сервер не ответил."; }
+            });
+          }
+        }
+
+        // ── Плеер ──
+        {
+          const box = document.getElementById("player");
+          // Звук общий на весь сайт — берём его у движка, если тот поднялся.
+          const audio = (window.VGP && window.VGP.audio) || document.getElementById("pl-audio");
+          if (box && audio) {
+            const el = id => document.getElementById(id);
+            const eq = el("pl-eq");
+            const bars = [];
+            for (let i = 0; i < 20; i++) { const b = document.createElement("span"); eq.appendChild(b); bars.push(b); }
+
+            let tracks = [];      // в порядке воспроизведения (перемешанном)
+            let index = -1;
+            let analyser = null, freq = null, raf = null;
+
+            const fmt = s => {
+              if (!isFinite(s)) return "0:00";
+              return Math.floor(s / 60) + ":" + String(Math.floor(s % 60)).padStart(2, "0");
+            };
+            const shuffle = list => {
+              const copy = list.slice();
+              for (let i = copy.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [copy[i], copy[j]] = [copy[j], copy[i]];
+              }
+              return copy;
+            };
+
+            const drawBars = () => {
+              if (!audio.paused && analyser) {
+                analyser.getByteFrequencyData(freq);
+                const step = Math.floor(freq.length / bars.length / 2) || 1;
+                bars.forEach((b, i) => {
+                  const v = freq[i * step] / 255;
+                  b.style.transform = "scaleY(" + Math.max(.12, v) + ")";
+                });
+              } else if (!audio.paused) {
+                bars.forEach(b => { b.style.transform = "scaleY(" + (.12 + Math.random() * .78) + ")"; });
+              } else {
+                bars.forEach(b => { b.style.transform = "scaleY(.12)"; });
+              }
+              raf = requestAnimationFrame(drawBars);
+            };
+
+            const wireAnalyser = () => {
+              if (analyser) return;
+              try {
+                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                const src = ctx.createMediaElementSource(audio);
+                analyser = ctx.createAnalyser();
+                analyser.fftSize = 128;
+                freq = new Uint8Array(analyser.frequencyBinCount);
+                src.connect(analyser);
+                analyser.connect(ctx.destination);
+                if (ctx.state === "suspended") ctx.resume();
+              } catch { analyser = null; }   // не вышло — рисуем без спектра
+            };
+
+            const label = t => (t.artist ? t.artist + " — " : "") + t.title;
+
+            const renderList = () => {
+              el("pl-count").textContent = tracks.length + " треков";
+              el("pl-tracks").innerHTML = tracks.map((t, i) => `
+                <div class="pl-track${i === index ? " current" : ""}" data-id="${esc(t.id)}">
+                  <span class="pl-track-name">${esc(t.title)}</span>
+                  <button class="pl-mini" data-act="ed" title="Переименовать">✎</button>
+                  <button class="pl-mini rm" data-act="rm" title="Удалить">🗑</button>
+                  <span class="pl-track-sub">${esc(t.artist || "без исполнителя")}</span>
+                </div>`).join("");
+            };
+
+            const showNow = () => {
+              const t = tracks[index];
+              el("pl-title").textContent = t ? t.title : "ничего не играет";
+              el("pl-artist").textContent = t ? (t.artist || "без исполнителя") : "плеер выключен";
+              renderList();
+            };
+
+            const load = async (autoplay) => {
+              try {
+                const r = await fetch("/api/music", { credentials: "same-origin" });
+                const data = await r.json();
+                let list = data.tracks || [];
+                // Если хозяин отметил папку звездой — мини-плеер играет только
+                // её (с подпапками). Собираем поддерево избранной папки.
+                const fav = data.fav_folder;
+                if (fav) {
+                  const fset = new Set([fav]);
+                  let grew = true;
+                  while (grew) {
+                    grew = false;
+                    (data.folders || []).forEach((f) => {
+                      if (fset.has(f.parent) && !fset.has(f.id)) { fset.add(f.id); grew = true; }
+                    });
+                  }
+                  list = list.filter((t) => fset.has(t.folder));
+                }
+                tracks = shuffle(list);
+                const mb = (data.used / 1048576).toFixed(0);
+                el("pl-used").textContent = list.length ? mb + " МБ" : "";
+                if (index >= tracks.length) index = -1;
+                showNow();
+                if (autoplay && tracks.length) play(0);
+              } catch {}
+            };
+
+            const play = i => {
+              if (!tracks.length) return;
+              index = (i + tracks.length) % tracks.length;
+              audio.src = "/api/music/file/" + encodeURIComponent(tracks[index].id);
+              wireAnalyser();
+              audio.play().catch(() => {});
+              showNow();
+              // Отдаём очередь общему движку — тогда трек не оборвётся при
+              // уходе со страницы, а виджет поверх сайта подхватит его.
+              if (window.VGP) {
+                window.VGP.adopt(tracks.map(t => ({
+                  id: "m_" + t.id, title: t.title, artist: t.artist || "", folder: "",
+                  url: "/api/music/file/" + encodeURIComponent(t.id) })), index);
+              }
+            };
+
+            // Кнопка ⧉ — вынести звук в ОТДЕЛЬНОЕ ОКНО браузера. Раньше она
+            // звала VGP.open(), то есть показывала виджет поверх страницы —
+            // окна при этом не появлялось, а значок ⧉ обещал именно окно.
+            const pop = el("pl-pop");
+            if (pop) pop.addEventListener("click", () => {
+              // НЕЗАВИСИМОЕ окно /player/pop: свой звук, не перезагружается
+              // от переходов по сайту — потому и не лагает и не закрывается,
+              // когда листаешь вкладки. Музыка на сайте встаёт, а в окне
+              // продолжается с той же секунды. «Как в ютубе» (без рамок,
+              // поверх окон) — кнопка ⧉ уже ВНУТРИ окна: оттуда плавашка
+              // тоже переживает навигацию, ведь само окно никуда не идёт.
+              if (window.VGP && window.VGP.popOut) window.VGP.popOut();
+              else window.open("/player/pop", "vgplayer", "width=360,height=260");
+            });
+
+            el("pl-play").addEventListener("click", () => {
+              if (!tracks.length) { el("pl-list").hidden = false; return; }
+              if (audio.paused) { index < 0 ? play(0) : (wireAnalyser(), audio.play().catch(() => {})); }
+              else audio.pause();
+            });
+            el("pl-next").addEventListener("click", () => play(index + 1));
+            el("pl-prev").addEventListener("click", () => {
+              if (audio.currentTime > 3) { audio.currentTime = 0; return; }
+              play(index - 1);
+            });
+            audio.addEventListener("ended", () => play(index + 1));
+            audio.addEventListener("play", () => { box.classList.add("on"); el("pl-play").textContent = "❚❚"; });
+            audio.addEventListener("pause", () => { box.classList.remove("on"); el("pl-play").textContent = "▶"; });
+            audio.addEventListener("timeupdate", () => {
+              const d = audio.duration || 0;
+              el("pl-cur").textContent = fmt(audio.currentTime);
+              el("pl-dur").textContent = fmt(d);
+              const pct = d ? (audio.currentTime / d) * 100 : 0;
+              el("pl-seek-fill").style.width = pct + "%";
+              el("pl-seek").value = Math.round(pct * 10);
+            });
+            el("pl-seek").addEventListener("input", e => {
+              if (audio.duration) audio.currentTime = (e.target.value / 1000) * audio.duration;
+            });
+
+            const savedVol = parseInt(localStorage.getItem("plVol") || "70", 10);
+            el("pl-vol").value = savedVol;
+            audio.volume = savedVol / 100;
+            el("pl-vol").addEventListener("input", e => {
+              audio.volume = e.target.value / 100;
+              localStorage.setItem("plVol", e.target.value);
+            });
+
+            el("pl-toggle-list").addEventListener("click", () => {
+              const list = el("pl-list");
+              list.hidden = !list.hidden;
+              if (!list.hidden) load(false);
+            });
+            el("pl-add").addEventListener("click", () => { el("pl-list").hidden = false; el("pl-file").click(); });
+            el("pl-file").addEventListener("change", e => { upload(e.target.files); e.target.value = ""; });
+
+            // Приёмником служит вся карточка — отдельной надписи больше нет.
+            ["dragenter", "dragover"].forEach(ev => box.addEventListener(ev, e => {
+              if (!e.dataTransfer.types.includes("Files")) return;
+              e.preventDefault(); e.stopPropagation(); box.classList.add("over");
+            }));
+            ["dragleave", "drop"].forEach(ev => box.addEventListener(ev, e => {
+              e.preventDefault(); e.stopPropagation(); box.classList.remove("over");
+            }));
+            box.addEventListener("drop", e => upload(e.dataTransfer.files));
+
+            const upload = async files => {
+              const list = Array.from(files || []);
+              if (!list.length) return;
+              const status = el("pl-count");
+              status.textContent = "загрузка…";
+              for (const file of list) {
+                const body = new FormData();
+                body.append("file", file);
+                try {
+                  const r = await fetch("/api/music", { method: "POST", credentials: "same-origin", body });
+                  if (!r.ok) status.textContent = ((await r.json()).error || "ошибка");
+                } catch { status.textContent = "нет сети"; }
+              }
+              load(false);
+            };
+
+            el("pl-tracks").addEventListener("click", async e => {
+              const row = e.target.closest(".pl-track");
+              if (!row) return;
+              const id = row.dataset.id;
+              const at = tracks.findIndex(t => t.id === id);
+              const act = e.target.dataset.act;
+
+              if (!act) { if (at >= 0) play(at); return; }
+
+              if (act === "rm") {
+                if (!confirm("Удалить трек?")) return;
+                if (at === index) audio.pause();
+                try { await fetch("/api/music/" + encodeURIComponent(id), { method: "DELETE", credentials: "same-origin" }); } catch {}
+                load(false);
+                return;
+              }
+
+              if (act === "ed") {
+                const track = tracks[at];
+                const nameEl = row.querySelector(".pl-track-name");
+                const subEl = row.querySelector(".pl-track-sub");
+                const titleInput = document.createElement("input");
+                const artistInput = document.createElement("input");
+                titleInput.className = artistInput.className = "pl-edit";
+                titleInput.value = track.title; artistInput.value = track.artist;
+                titleInput.placeholder = "Название"; artistInput.placeholder = "Исполнитель";
+                nameEl.replaceWith(titleInput); subEl.replaceWith(artistInput);
+                titleInput.focus(); titleInput.select();
+                let saved = false;
+                const save = async () => {
+                  if (saved) return;
+                  saved = true;
+                  try {
+                    await fetch("/api/music/" + encodeURIComponent(id), {
+                      method: "PATCH", credentials: "same-origin",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ title: titleInput.value, artist: artistInput.value }),
+                    });
+                  } catch {}
+                  const keep = index >= 0 ? tracks[index].id : null;
+                  await load(false);
+                  if (keep) index = tracks.findIndex(t => t.id === keep);
+                  showNow();
+                };
+                [titleInput, artistInput].forEach(inp => {
+                  inp.addEventListener("keydown", ev => {
+                    if (ev.key === "Enter") save();
+                    if (ev.key === "Escape") { saved = true; renderList(); }
+                  });
+                });
+                artistInput.addEventListener("blur", save);
+              }
+            });
+
+            drawBars();
+            load(false);   // плеер молчит, пока не нажмут play
+          }
+        }
+
+        // ── Высота плеера ──
+        // Меряем «спокойный» вид: низ плеера совпадает с низом резервной
+        // копии. Пока что-то раскрыто — не пересчитываем, иначе колонка
+        // поедет вслед за раскрытой панелью.
+        {
+          const pl = document.getElementById("player");
+          const cab = document.querySelector(".cab");
+          const fit = () => {
+            if (!pl || !cab) return;
+            if (cab.querySelector('[aria-expanded="true"]')) return;
+            const h = Math.round(cab.getBoundingClientRect().bottom
+                               - pl.getBoundingClientRect().top);
+            if (h > 240) pl.style.height = h + "px";
+          };
+          fit();
+          window.addEventListener("resize", fit);
+          if (document.fonts && document.fonts.ready) document.fonts.ready.then(fit);
+          setTimeout(fit, 400);
+        }
+
+        // ── Раскрытие виджетов ──
+        // Открыл вторую панель — первая сама закрывается: держим открытой
+        // только одну зараз, чтобы страница не «переезжала» между кликами.
+        const _cabToggles = new Map();
+        document.querySelectorAll(".panel-head[aria-controls]").forEach(btn => {
+          const target = document.getElementById(btn.getAttribute("aria-controls"));
+          if (!target) return;
+          const inCab = !!btn.closest(".cab");
+          if (inCab) _cabToggles.set(btn, target);
+          btn.addEventListener("click", () => {
+            const opened = btn.getAttribute("aria-expanded") !== "true";
+            if (opened && inCab) {
+              _cabToggles.forEach((other, otherBtn) => {
+                if (otherBtn === btn) return;
+                if (otherBtn.getAttribute("aria-expanded") === "true") {
+                  otherBtn.setAttribute("aria-expanded", "false");
+                  other.hidden = true;
+                  otherBtn.dispatchEvent(new CustomEvent("widget-open", { detail: false, bubbles: false }));
+                }
+              });
+            }
+            btn.setAttribute("aria-expanded", String(opened));
+            target.hidden = !opened;
+            btn.dispatchEvent(new CustomEvent("widget-open", { detail: opened, bubbles: false }));
+          });
+        });
+
+        // ── Метрики ──
+        {
+          const toggle = document.getElementById("metrics-toggle");
+          const grid = document.getElementById("metrics-grid");
+          let timer = null;
+          const fmtUp = s => {
+            if (!s) return "";
+            const d = Math.floor(s/86400), h = Math.floor((s%86400)/3600), m = Math.floor((s%3600)/60);
+            return d ? `${d}д ${h}ч` : h ? `${h}ч ${m}м` : `${m}м`;
+          };
+          const bar = (cls, pct) => {
+            const w = Math.min(100, Math.max(0, pct || 0));
+            const color = pct > 85 ? "#ef4444" : pct > 60 ? "#fbbf24" : "";
+            return `<div class="metrics-track"><div class="metrics-fill ${cls}" style="width:${w}%;${color?"background:"+color:""}"></div></div>`;
+          };
+          const render = async () => {
+            try {
+              const r = await fetch("/api/metrics", { credentials: "same-origin" });
+              const items = await r.json();
+              grid.innerHTML = items.map(({ name, data: d }) => {
+                if (!d) return `<div class="metrics-host"><div class="metrics-host-name">${esc(name)}</div><div class="metrics-offline">нет данных / офлайн</div></div>`;
+                return `<div class="metrics-host">
+                  <div class="metrics-host-name">${esc(name)}</div>
+                  <div class="metrics-bars">
+                    <span class="metrics-label">CPU</span>${bar("fill-cpu",d.cpu)}<span class="metrics-val">${d.cpu!=null?d.cpu.toFixed(1)+"%" :"—"}</span>
+                    <span class="metrics-label">RAM</span>${bar("fill-ram",d.ram)}<span class="metrics-val">${d.ram!=null?d.ram.toFixed(1)+"%":"—"}</span>
+                    <span class="metrics-label">Disk</span>${bar("fill-disk",d.disk)}<span class="metrics-val">${d.disk!=null?d.disk+"%":"—"}</span>
+                  </div>
+                  <div class="metrics-extra">
+                    ${d.uptime!=null?`<span>⏱ ${fmtUp(d.uptime)}</span>`:""}
+                    ${d.temp!=null?`<span>🌡 ${d.temp.toFixed(1)}°C</span>`:""}
+                  </div>
+                </div>`;
+              }).join("");
+            } catch {}
+          };
+          // Метрики теперь всегда наверху и всегда открыты — грузим сразу.
+          if (grid) { render(); timer = setInterval(render, 32000); }
+        }
+
+        // Отдельной строки с аптаймом больше нет: у каждой из четырёх машин
+        // время работы и так подписано в своей карточке. /api/uptime жив —
+        // он ещё пригодится, просто на витрине его никто не показывает.
+
+        // ── Журнал входов ──
+        {
+          const toggle = document.getElementById("loginlog-toggle");
+          const listEl = document.getElementById("loginlog-list");
+          const FIRST = 5;          // сразу показываем только последние пять
+          let rows = null;
+
+          // Рисуем либо короткий список, либо весь. Кнопку показываем, только
+          // когда за пятью записями действительно что-то есть.
+          const draw = (all) => {
+            if (!rows.length) { listEl.innerHTML = '<p class="widget-empty">Нет записей</p>'; return; }
+            const fails = rows.filter(e => e.kind && e.kind !== "ok").length;
+            const head = fails
+              ? `<p class="log-alarm">Неудачных попыток за две недели: ${fails}</p>` : "";
+            const shown = all ? rows : rows.slice(0, FIRST);
+            const more = !all && rows.length > FIRST
+              ? `<button class="log-more" type="button">Показать все · ${rows.length}</button>` : "";
+            listEl.innerHTML = head + shown.map(e => {
+              const bad = e.kind && e.kind !== "ok";
+              return `<div class="log-row${bad ? " log-bad" : ""}"><span class="log-ts">${esc(e.ts)}</span><span class="log-ip">${esc(e.ip)}</span><span class="log-ua">${esc(e.ua)}</span></div>`;
+            }).join("") + more;
+            const btn = listEl.querySelector(".log-more");
+            if (btn) btn.addEventListener("click", () => draw(true));
+          };
+
+          const load = async () => {
+            try {
+              const r = await fetch("/api/login-log", { credentials: "same-origin" });
+              rows = await r.json();
+              draw(false);
+            } catch {}
+          };
+          // Каждое открытие начинается заново с пяти: закрыл, открыл — снова пять.
+          if (toggle) toggle.addEventListener("widget-open", e => {
+            if (!e.detail) return;
+            if (rows) draw(false); else load();
+          });
+        }
+
+        // ── Запомненные устройства ──
+        {
+          const toggle = document.getElementById("devices-toggle");
+          const listEl = document.getElementById("devices-list");
+          const checkbox = document.getElementById("dev-remember-cb");
+          const confirmBox = document.getElementById("dev-confirm");
+          const dailyInput = document.getElementById("dev-daily");
+          const confirmBtn = document.getElementById("dev-confirm-btn");
+          const errorEl = document.getElementById("dev-error");
+          let devices = [];
+
+          const ago = ts => {
+            const mins = Math.floor((Date.now() / 1000 - ts) / 60);
+            if (mins < 1) return "только что";
+            if (mins < 60) return mins + " мин назад";
+            const hours = Math.floor(mins / 60);
+            if (hours < 24) return hours + " ч назад";
+            const days = Math.floor(hours / 24);
+            if (days < 30) return days + " дн назад";
+            return new Date(ts * 1000).toLocaleDateString("ru-RU");
+          };
+
+          const render = () => {
+            const current = devices.find(d => d.current);
+            if (checkbox) checkbox.checked = Boolean(current);
+            if (!devices.length) {
+              listEl.innerHTML = '<p class="widget-empty">Пока ни одного устройства не запомнено</p>';
+              return;
+            }
+            listEl.innerHTML = devices.map(d => `
+              <div class="dev-row" data-id="${esc(d.id)}">
+                <span class="dev-name${d.current ? " is-current" : ""}">${esc(d.label)}</span>
+                <button class="dev-act dev-edit" type="button" title="Переименовать">✎</button>
+                <button class="dev-act dev-del" type="button" title="Забыть устройство">🗑</button>
+                <span class="dev-meta">Последний вход: ${esc(ago(d.last_used))}${d.last_ip ? " · " + esc(d.last_ip) : ""}</span>
+              </div>`).join("");
+          };
+
+          const load = async () => {
+            try {
+              const r = await fetch("/api/devices", { credentials: "same-origin" });
+              devices = await r.json();
+              render();
+            } catch {}
+          };
+
+          const showError = text => { if (errorEl) errorEl.textContent = text || ""; };
+
+          const trust = async () => {
+            showError("");
+            try {
+              const r = await fetch("/api/devices/trust", {
+                method: "POST", credentials: "same-origin",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ password: dailyInput.value }),
+              });
+              const data = await r.json();
+              if (!r.ok) { showError(data.error || "Не получилось."); return; }
+              dailyInput.value = "";
+              confirmBox.hidden = true;
+              load();
+            } catch { showError("Сеть недоступна."); }
+          };
+
+          const forget = async id => {
+            try {
+              await fetch("/api/devices/" + encodeURIComponent(id), { method: "DELETE", credentials: "same-origin" });
+              load();
+            } catch {}
+          };
+
+          if (checkbox) checkbox.addEventListener("change", () => {
+            showError("");
+            if (checkbox.checked) {
+              confirmBox.hidden = false;
+              dailyInput.focus();
+            } else {
+              confirmBox.hidden = true;
+              const current = devices.find(d => d.current);
+              if (current) forget(current.id);
+            }
+          });
+
+          if (confirmBtn) confirmBtn.addEventListener("click", trust);
+          if (dailyInput) dailyInput.addEventListener("keydown", e => { if (e.key === "Enter") trust(); });
+
+          if (listEl) listEl.addEventListener("click", async e => {
+            const row = e.target.closest(".dev-row");
+            if (!row) return;
+            const id = row.dataset.id;
+
+            if (e.target.classList.contains("dev-del")) {
+              const item = devices.find(d => d.id === id);
+              const warn = item && item.current
+                ? "Забыть это устройство? Придётся вводить пароль заново."
+                : "Забыть устройство «" + (item ? item.label : "") + "»?";
+              if (confirm(warn)) forget(id);
+              return;
+            }
+
+            if (e.target.classList.contains("dev-edit")) {
+              const nameEl = row.querySelector(".dev-name");
+              const item = devices.find(d => d.id === id);
+              const input = document.createElement("input");
+              input.className = "dev-rename";
+              input.value = item ? item.label : "";
+              input.maxLength = 40;
+              nameEl.replaceWith(input);
+              input.focus();
+              input.select();
+              const save = async () => {
+                const label = input.value.trim();
+                if (label) {
+                  try {
+                    await fetch("/api/devices/" + encodeURIComponent(id), {
+                      method: "PATCH", credentials: "same-origin",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ label }),
+                    });
+                  } catch {}
+                }
+                load();
+              };
+              input.addEventListener("blur", save, { once: true });
+              input.addEventListener("keydown", ev => {
+                if (ev.key === "Enter") input.blur();
+                if (ev.key === "Escape") { input.removeEventListener("blur", save); load(); }
+              });
+            }
+          });
+
+          if (toggle) toggle.addEventListener("widget-open", e => { if (e.detail) load(); });
+        }
+      }
+      </script>
+    </body>
+    </html>
+    """
     return html.replace("{{DEVICE_ITEMS}}", device_items) \
                .replace("__ICONLINKS__", ICON_LINKS)
 
