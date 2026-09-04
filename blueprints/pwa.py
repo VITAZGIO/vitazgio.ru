@@ -173,6 +173,6 @@ def create_pwa_blueprint(
                 }
                 drop_write_index()
             saved += 1
-        return redirect(url_for("drop_page") + ("?saved=%d" % saved if saved else ""))
+        return redirect(url_for("drop.drop_page") + ("?saved=%d" % saved if saved else ""))
 
     return pwa

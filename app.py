@@ -37,6 +37,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 from blueprints.debts import create_debts_blueprint
 from blueprints.diy import create_diy_blueprint
+from blueprints.drop import create_drop_blueprint
 from blueprints.home import create_home_blueprint
 from blueprints.music import create_music_blueprint
 from blueprints.notebook import create_notebook_blueprint
@@ -2542,23 +2543,6 @@ def _drop_make_thumb(item_id):
         return thumb_path
     except Exception:
         return None
-
-
-@app.get("/api/drop/thumb/<item_id>")
-@login_required
-def drop_thumb(item_id):
-    with drop_lock:
-        item = drop_items.get(item_id)
-    if not item or not _drop_can_thumb(item):
-        return "", 404
-    thumb_path = _drop_make_thumb(item_id)
-    if not thumb_path:
-        return "", 404
-    response = send_file(thumb_path, mimetype="image/jpeg", conditional=True)
-    response.headers["Cache-Control"] = "private, max-age=86400"
-    return response
-
-
 # Растровые картинки, которые можно безопасно отдать в строку: они не умеют
 # выполнять скрипты. SVG сюда не входит намеренно — внутри него живёт
 # полноценный JS, и на домене сайта он дотянулся бы до сессии.
@@ -2645,247 +2629,6 @@ def _drop_text_name(first_line):
     """Имя текстовой заметки: первая строка плюс .txt, если его ещё нет."""
     name = (first_line or "").strip()[:60] or "Текст"
     return name if name.lower().endswith(".txt") else name + ".txt"
-
-
-@app.post("/api/drop/text")
-@login_required
-def drop_upload_text():
-    payload = request.get_json(silent=True) or {}
-    text = payload.get("text", "")
-    parent = payload.get("parent") or None
-    if not isinstance(text, str) or not text.strip():
-        return jsonify(error="Текст пустой."), 400
-    data = text.encode("utf-8")
-    item_id = str(uuid.uuid4())
-    with drop_lock:
-        if parent and drop_items.get(parent, {}).get("kind") != "folder":
-            parent = None
-        if _drop_used() + len(data) > DROP_QUOTA:
-            return jsonify(error="Нет места: квота исчерпана."), 507
-        try:
-            with open(_drop_path(item_id), "wb") as fh:
-                fh.write(data)
-        except OSError as e:
-            return jsonify(error=f"Не удалось сохранить: {e}"), 500
-        # Имя лепим из первой строки, но обязательно с .txt на конце. Без
-        # него любая точка в тексте («1. Убрать датчики») выглядела как
-        # расширение, и переименование правило текст до этой точки.
-        first = text.strip().splitlines()[0][:60] if text.strip() else "Текст"
-        drop_items[item_id] = {
-            "kind": "text", "name": _drop_text_name(first), "parent": parent,
-            "content_type": "text/plain; charset=utf-8", "size": len(data),
-            "created": time.time(), "preview": text[:DROP_TEXT_PREVIEW],
-            "truncated": len(text) > DROP_TEXT_PREVIEW, "share": None,
-        }
-        _drop_write_index()
-    return jsonify(id=item_id)
-
-
-@app.get("/api/drop/text/<item_id>")
-@login_required
-def drop_text_full(item_id):
-    with drop_lock:
-        item = drop_items.get(item_id)
-    if not item or item["kind"] != "text":
-        return jsonify(error="Не найдено."), 404
-    try:
-        with open(_drop_path(item_id), encoding="utf-8") as fh:
-            return jsonify(text=fh.read())
-    except OSError:
-        return jsonify(error="Файл потерян."), 404
-
-
-@app.put("/api/drop/text/<item_id>")
-@login_required
-def drop_text_update(item_id):
-    """Переписать содержимое заметки. Имя не трогаем: его пользователь мог
-    уже поправить руками, и подменять его под новый первый абзац — грубо."""
-    payload = request.get_json(silent=True) or {}
-    text = payload.get("text", "")
-    if not isinstance(text, str) or not text.strip():
-        return jsonify(error="Текст пустой."), 400
-    data = text.encode("utf-8")
-    with drop_lock:
-        item = drop_items.get(item_id)
-        if not item or item["kind"] != "text":
-            return jsonify(error="Не найдено."), 404
-        if _drop_used() - item["size"] + len(data) > DROP_QUOTA:
-            return jsonify(error="Нет места: квота исчерпана."), 507
-        try:
-            with open(_drop_path(item_id), "wb") as fh:
-                fh.write(data)
-        except OSError as e:
-            return jsonify(error=f"Не удалось сохранить: {e}"), 500
-        item["size"] = len(data)
-        item["preview"] = text[:DROP_TEXT_PREVIEW]
-        item["truncated"] = len(text) > DROP_TEXT_PREVIEW
-        item["edited"] = time.time()
-        _drop_write_index()
-    return jsonify(ok=True, size=len(data))
-
-
-@app.post("/api/drop/folder")
-@login_required
-def drop_folder_create():
-    payload = request.get_json(silent=True) or {}
-    name = (payload.get("name") or "").strip()[:60]
-    parent = payload.get("parent") or None
-    icon = payload.get("icon") if payload.get("icon") in DROP_FOLDER_ICONS else "folder"
-    if not name:
-        return jsonify(error="Имя пустое."), 400
-    # Папка внутри MUSIK — это папка ФОНОТЕКИ, а не склад дропа. MUSIK
-    # показывает не свои вложения, а папки фонотеки (id с «mf_»), поэтому
-    # обычная папка дропа тут просто не показалась бы — «создал, а её нет».
-    # Заводим настоящую папку фонотеки, туда же потом лягут загруженные треки.
-    if parent == DROP_MUSIK_ID or (parent or "").startswith("mf_"):
-        inside = "" if parent == DROP_MUSIK_ID else parent[3:]
-        with music_lock:
-            if inside and inside not in music_folders:
-                inside = ""
-            if _music_folder_depth(inside) >= MUSIC_MAX_DEPTH:
-                return jsonify(error="Глубже вкладывать некуда."), 400
-            fid = str(uuid.uuid4())
-            music_folders[fid] = {"name": name, "parent": inside, "added": time.time()}
-            _music_write_index()
-        return jsonify(id="mf_" + fid, name=name)
-    item_id = str(uuid.uuid4())
-    with drop_lock:
-        if parent and drop_items.get(parent, {}).get("kind") != "folder":
-            parent = None
-        drop_items[item_id] = {
-            "kind": "folder", "name": name, "parent": parent, "icon": icon,
-            "size": 0, "created": time.time(), "share": None,
-        }
-        _drop_write_index()
-    return jsonify(id=item_id, name=name)
-
-
-@app.post("/api/drop/upload/init")
-@login_required
-def drop_upload_init():
-    payload = request.get_json(silent=True) or {}
-    name = (payload.get("name") or "файл")[:120]
-    parent = payload.get("parent") or None
-    try:
-        size = int(payload.get("size", 0))
-    except (TypeError, ValueError):
-        return jsonify(error="Некорректный размер."), 400
-    if size <= 0:
-        return jsonify(error="Пустой файл."), 400
-    if size > DROP_MAX_SIZE:
-        return jsonify(error="Файл больше 2 ГБ."), 413
-
-    upload_id = str(uuid.uuid4())
-    music_target = parent == DROP_MUSIK_ID or (parent or "").startswith("mf_")
-    music_used = _music_used_safe()        # музыка тоже в общем лимите 30 ГБ
-    with drop_lock:
-        _drop_sweep_uploads()
-        # MUSIK и папки внутри неё — приёмник фонотеки, а не склад дропа
-        if not music_target and parent and drop_items.get(parent, {}).get("kind") != "folder":
-            parent = None
-        reserved = sum(u["size"] for u in drop_uploads.values())
-        if _drop_used() + music_used + reserved + size > DROP_QUOTA:
-            return jsonify(error="Нет места: квота исчерпана."), 507
-        drop_uploads[upload_id] = {
-            "name": name, "size": size, "parent": parent,
-            "received": 0, "started": time.time(),
-            "content_type": payload.get("content_type") or "application/octet-stream",
-        }
-    try:
-        open(_drop_tmp_path(upload_id), "wb").close()
-    except OSError as e:
-        return jsonify(error=f"Не удалось начать загрузку: {e}"), 500
-    return jsonify(upload_id=upload_id)
-
-
-@app.post("/api/drop/upload/chunk/<upload_id>")
-@login_required
-def drop_upload_chunk(upload_id):
-    with drop_lock:
-        upload = drop_uploads.get(upload_id)
-    if not upload:
-        return jsonify(error="Загрузка не найдена."), 404
-
-    try:
-        offset = int(request.args.get("offset", "-1"))
-    except ValueError:
-        offset = -1
-    if offset != upload["received"]:
-        # Кусок пришёл не тот, что ждали (повтор после обрыва) — говорим,
-        # с какого места продолжать, вместо того чтобы портить файл.
-        return jsonify(error="Рассинхронизация.", expected=upload["received"]), 409
-
-    data = request.get_data(cache=False)
-    if not data:
-        return jsonify(error="Пустой кусок."), 400
-    if upload["received"] + len(data) > upload["size"]:
-        return jsonify(error="Больше заявленного размера."), 413
-
-    try:
-        with open(_drop_tmp_path(upload_id), "ab") as fh:
-            fh.write(data)
-    except OSError as e:
-        return jsonify(error=f"Ошибка записи: {e}"), 500
-
-    with drop_lock:
-        if upload_id in drop_uploads:
-            drop_uploads[upload_id]["received"] += len(data)
-            received = drop_uploads[upload_id]["received"]
-        else:
-            return jsonify(error="Загрузка не найдена."), 404
-    return jsonify(received=received)
-
-
-@app.post("/api/drop/upload/finish/<upload_id>")
-@login_required
-def drop_upload_finish(upload_id):
-    with drop_lock:
-        upload = drop_uploads.pop(upload_id, None)
-    if not upload:
-        return jsonify(error="Загрузка не найдена."), 404
-
-    tmp_path = _drop_tmp_path(upload_id)
-    try:
-        actual = os.path.getsize(tmp_path)
-    except OSError:
-        return jsonify(error="Временный файл потерян."), 500
-    if actual != upload["size"]:
-        try:
-            os.remove(tmp_path)
-        except OSError:
-            pass
-        return jsonify(error="Размер не сошёлся, загрузка прервана."), 400
-
-    parent_in = upload.get("parent") or ""
-    if parent_in == DROP_MUSIK_ID or parent_in.startswith("mf_"):
-        return _drop_music_take(tmp_path, upload["name"], actual,
-                                "" if parent_in == DROP_MUSIK_ID else parent_in[3:])
-
-    item_id = str(uuid.uuid4())
-    music_used = _music_used_safe()        # музыка тоже в общем лимите 30 ГБ
-    with drop_lock:
-        if _drop_used() + music_used + actual > DROP_QUOTA:
-            try:
-                os.remove(tmp_path)
-            except OSError:
-                pass
-            return jsonify(error="Нет места: квота исчерпана."), 507
-        try:
-            os.replace(tmp_path, _drop_path(item_id))
-        except OSError as e:
-            return jsonify(error=f"Не удалось сохранить: {e}"), 500
-        parent = upload["parent"]
-        if parent and parent not in drop_items:
-            parent = None
-        drop_items[item_id] = {
-            "kind": "file", "name": upload["name"], "parent": parent,
-            "content_type": upload["content_type"], "size": actual,
-            "created": time.time(), "share": None,
-        }
-        _drop_write_index()
-    return jsonify(id=item_id)
-
-
 def _drop_music_take(tmp_path, name, size, folder):
     """Принимает файл, брошенный в папку MUSIK, прямо в фонотеку — тогда он
     сразу оказывается и в плеере, и на странице музыки."""
@@ -2972,79 +2715,6 @@ def _drop_music_view(parent):
                    breadcrumbs=[{"id": DROP_MUSIK_ID, "name": "MUSIK"}] + chain,
                    used=used, music=music_used, quota=DROP_QUOTA, trash=trash,
                    music_view=True)
-
-
-@app.get("/api/drop/list")
-@login_required
-def drop_list_api():
-    parent = request.args.get("parent") or None
-    # Папка MUSIK и всё внутри неё — это фонотека, а не склад дропа
-    if parent == DROP_MUSIK_ID or (parent or "").startswith("mf_"):
-        try:
-            return _drop_music_view(parent)
-        except Exception:                                   # noqa: BLE001
-            app.logger.exception("MUSIK: не собрал список фонотеки")
-            return jsonify(items=[], breadcrumbs=[{"id": DROP_MUSIK_ID, "name": "MUSIK"}],
-                           used=0, quota=DROP_QUOTA, trash=0, music_view=True,
-                           warn="Фонотека сейчас не читается.")
-    music_used = _music_used_safe()        # музыка делит хранилище с дропом
-    with drop_lock:
-        _drop_sweep_trash()
-        if parent and parent not in drop_items:
-            parent = None
-        memo = {}
-        items = []
-        for k, v in drop_items.items():
-            if v.get("parent") != parent or v.get("deleted"):
-                continue
-            row = {
-                "id": k, "kind": v["kind"], "name": v["name"], "size": v.get("size", 0),
-                "created": v["created"], "preview": v.get("preview"),
-                "truncated": v.get("truncated", False),
-                "thumb": _drop_can_thumb(v),
-                "share": bool(v.get("share")),
-                "share_expires": (v.get("share") or {}).get("expires"),
-                "share_mode": _drop_share_mode(v["share"]) if v.get("share") else None,
-                # Ссылку отдаём готовой: страница должна уметь показать её
-                # ещё раз, а не только выдать один раз при создании.
-                "share_url": (url_for("drop_public", token=v["share"]["token"], _external=True)
-                              if v.get("share") else None),
-                # По этой отметке страница сортирует. У файла это его время,
-                # у папки — время самого свежего файла внутри.
-                "touched": v["created"],
-            }
-            if v["kind"] == "folder":
-                size, touched, count = _drop_folder_stats(k, memo)
-                row["size"] = size
-                row["count"] = count
-                row["touched"] = touched
-                row["icon"] = v.get("icon") or "folder"
-                if v.get("special"):
-                    row["special"] = True
-                    # MUSIK показывает фонотеку, значит и веса берём её. Если
-                    # фонотека почему-то не читается — это не повод ронять
-                    # весь список файлов: просто оставим прежние цифры.
-                    try:
-                        with music_lock:
-                            row["size"] = _music_used()
-                            row["count"] = len(music_items)
-                    except Exception:                       # noqa: BLE001
-                        app.logger.exception("MUSIK: не посчитал фонотеку")
-            items.append(row)
-        # Сначала новые, но особая папка (MUSIK) всегда падает в самый низ.
-        # Сортировка устойчивая: сперва по свежести, затем особые — вниз.
-        items.sort(key=lambda x: -x["touched"])
-        items.sort(key=lambda x: bool(x.get("special")))
-        return jsonify(
-            items=items,
-            breadcrumbs=_drop_path_to_root(parent),
-            used=_drop_used() + music_used,
-            music=music_used,
-            quota=DROP_QUOTA,
-            trash=_drop_trash_bytes(memo),
-        )
-
-
 def _drop_music_send(item_id, inline=False):
     """Трек фонотеки, отданный через дроп: id вида «mt_<id>». Возвращает
     ответ или None, если это обычный элемент дропа."""
@@ -3061,21 +2731,6 @@ def _drop_music_send(item_id, inline=False):
     name = " — ".join([p for p in (track.get("artist"), track.get("title")) if p]) or track["file"]
     return send_file(path, mimetype=MUSIC_MIMES.get(ext, "audio/mpeg"),
                      as_attachment=not inline, download_name=name + ext, conditional=True)
-
-
-@app.get("/api/drop/download/<item_id>")
-@login_required
-def drop_download(item_id):
-    tune = _drop_music_send(item_id)
-    if tune is not None:
-        return tune
-    with drop_lock:
-        item = drop_items.get(item_id)
-    if not item or item["kind"] == "folder":
-        return "Не найдено", 404
-    return _drop_send(item_id, item)
-
-
 # Архив папки собираем на лету и сразу отдаём: складывать его в памяти
 # нельзя — папка с фотографиями легко весит больше, чем есть оперативки.
 DROP_ZIP_CHUNK = 1024 * 1024
@@ -3195,129 +2850,6 @@ def _drop_zip_time(stamp):
         return (1980, 1, 1, 0, 0, 0)
     return (moment.year, moment.month, moment.day,
             moment.hour, moment.minute, moment.second - moment.second % 2)
-
-
-@app.get("/api/drop/zip/<item_id>")
-@login_required
-def drop_zip(item_id):
-    """Папка целиком одним архивом.
-
-    Ничего не сжимаем: фотографии, видео и музыка уже сжаты, и второй проход
-    только сожрал бы процессор ради процента-двух. Зато без сжатия архив
-    собирается ровно со скоростью диска."""
-    with drop_lock:
-        item = drop_items.get(item_id)
-        if not item or item["kind"] != "folder":
-            return "Не найдено", 404
-        plan = _drop_zip_plan(item_id)
-        folder = item["name"]
-
-    def pour():
-        sink = _ZipSink()
-        with zipfile.ZipFile(sink, "w", zipfile.ZIP_STORED, allowZip64=True) as zf:
-            for arcname, file_id, _, made in plan:
-                info = zipfile.ZipInfo(arcname, _drop_zip_time(made))
-                info.compress_type = zipfile.ZIP_STORED
-                if file_id is None:
-                    zf.writestr(info, b"")          # пустая папка
-                    yield sink.drain()
-                    continue
-                path = _drop_path(file_id)
-                if not os.path.exists(path):
-                    continue
-                with zf.open(info, "w") as dst, open(path, "rb") as src:
-                    while True:
-                        chunk = src.read(DROP_ZIP_CHUNK)
-                        if not chunk:
-                            break
-                        dst.write(chunk)
-                        if sink.held >= DROP_ZIP_CHUNK:
-                            yield sink.drain()
-                if sink.held:
-                    yield sink.drain()
-        yield sink.drain()
-
-    safe = (_drop_zip_name(folder, set()) or "папка") + ".zip"
-    quoted = urllib.parse.quote(safe)
-    response = Response(pour(), mimetype="application/zip")
-    # Имя даём дважды. Русское — только в filename* и только процентами:
-    # заголовки уходят в latin-1, и сырая кириллица роняет отдачу на месте.
-    # Простое filename оставляем латинским, для совсем старых клиентов.
-    response.headers["Content-Disposition"] = (
-        "attachment; filename=\"archive.zip\"; filename*=UTF-8''" + quoted)
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["Cache-Control"] = "no-store"
-    length = _drop_zip_length(plan)
-    if length is not None:
-        response.headers["Content-Length"] = str(length)
-    return response
-
-
-@app.get("/api/drop/view/<item_id>")
-@login_required
-def drop_view(item_id):
-    """То же содержимое, но с настоящим типом — для просмотра внутри дропа.
-
-    Скачивание отдаёт всё как поток байтов, и видео от такого не играет:
-    тегу нужен разобранный тип, а угадывать его браузеру мы запретили
-    заголовком nosniff. Здесь тип берётся из того же белого списка, что и у
-    публичной ссылки, так что ничего исполняемого сюда не попадёт."""
-    tune = _drop_music_send(item_id, inline=True)
-    if tune is not None:
-        return tune
-    with drop_lock:
-        item = drop_items.get(item_id)
-    if not item or item["kind"] == "folder":
-        return "Не найдено", 404
-    response = _drop_send(item_id, item, inline=True)
-    if os.path.splitext(item["name"])[1].lower() == ".pdf":
-        # Родному просмотрщику PDF жёсткий sandbox мешает работать, а рамку
-        # того же домена мы разрешаем — чтобы показать файл прямо в дропе.
-        # PDF скриптов страницы не исполняет, nosniff остаётся.
-        response.headers["Content-Security-Policy"] = (
-            "default-src 'none'; object-src 'self'; img-src 'self' blob:; "
-            "style-src 'unsafe-inline'; frame-ancestors 'self'")
-        g.frameable = True
-    return response
-
-
-@app.patch("/api/drop/<item_id>")
-@login_required
-def drop_update(item_id):
-    payload = request.get_json(silent=True) or {}
-    with drop_lock:
-        item = drop_items.get(item_id)
-        if not item:
-            return jsonify(error="Не найдено."), 404
-        if "name" in payload:
-            name = (payload.get("name") or "").strip()[:120]
-            if not name:
-                return jsonify(error="Имя пустое."), 400
-            # Расширение переименованием не трогаем: иначе картинка перестаёт
-            # быть картинкой, а архив — архивом.
-            if item["kind"] != "folder":
-                old_ext = os.path.splitext(item["name"])[1]
-                if old_ext:
-                    name = os.path.splitext(name)[0] + old_ext
-            item["name"] = name
-        if "icon" in payload:
-            if item["kind"] != "folder":
-                return jsonify(error="Значок меняется только у папок."), 400
-            icon = payload.get("icon") or "folder"
-            if icon not in DROP_FOLDER_ICONS:
-                return jsonify(error="Нет такого значка."), 400
-            item["icon"] = icon
-        if "parent" in payload:
-            target = payload.get("parent") or None
-            if target and drop_items.get(target, {}).get("kind") != "folder":
-                return jsonify(error="Такой папки нет."), 400
-            if target and _drop_is_descendant(item_id, target):
-                return jsonify(error="Нельзя переместить папку внутрь себя."), 400
-            item["parent"] = target
-        _drop_write_index()
-    return jsonify(ok=True)
-
-
 # ---- Пакетные действия: копирование, перенос, удаление -----------------------
 # Копирование гигабайтной папки занимает секунды, а то и минуты, поэтому работа
 # уходит в отдельный поток, а страница спрашивает о ходе дела по номеру задачи.
@@ -3474,88 +3006,6 @@ def _drop_run_delete(job_id, ids, _target):
 
 
 DROP_OPS = {"copy": _drop_run_copy, "move": _drop_run_move, "delete": _drop_run_delete}
-
-
-@app.post("/api/drop/op")
-@login_required
-def drop_op_start():
-    payload = request.get_json(silent=True) or {}
-    op = payload.get("op")
-    ids = [str(i) for i in (payload.get("ids") or [])][:2000]
-    target = payload.get("parent") or None
-    if op not in DROP_OPS:
-        return jsonify(error="Неизвестное действие."), 400
-    if not ids:
-        return jsonify(error="Ничего не выбрано."), 400
-
-    job_id = str(uuid.uuid4())
-    with drop_jobs_lock:
-        _drop_jobs_sweep()
-        drop_jobs[job_id] = {"state": "run", "op": op, "done": 0, "total": len(ids),
-                             "bytes": 0, "bytes_total": 0, "error": "", "ended": 0.0}
-
-    def work():
-        try:
-            DROP_OPS[op](job_id, ids, target)
-            _drop_job_set(job_id, state="done", ended=time.time())
-        except Exception as e:                      # noqa: BLE001 — причину показываем как есть
-            _drop_job_set(job_id, state="fail", error=str(e), ended=time.time())
-
-    threading.Thread(target=work, daemon=True).start()
-    return jsonify(job=job_id)
-
-
-@app.get("/api/drop/op/<job_id>")
-@login_required
-def drop_op_status(job_id):
-    with drop_jobs_lock:
-        job = drop_jobs.get(job_id)
-        if not job:
-            return jsonify(error="Задача не найдена."), 404
-        return jsonify(**{k: v for k, v in job.items() if k != "ended"})
-
-
-@app.post("/api/drop/share/<item_id>")
-@login_required
-def drop_share_create(item_id):
-    payload = request.get_json(silent=True) or {}
-    forever = bool(payload.get("forever"))
-    # Срок и режим независимы: бывает нужна и вечная ссылка на скачивание,
-    # и суточная на просмотр.
-    mode = "view" if payload.get("mode") == "view" else "dl"
-    try:
-        hours = int(payload.get("hours", 24))
-    except (TypeError, ValueError):
-        hours = 24
-    hours = max(1, min(hours, 24 * 30))
-    with drop_lock:
-        item = drop_items.get(item_id)
-        if not item or item["kind"] == "folder":
-            return jsonify(error="Папки ссылкой не отдаются."), 400
-        # expires = None означает «без срока»: проверка на истечение такую
-        # ссылку пропускает, потому что сравнивает только заданное время.
-        item["share"] = {
-            "token": secrets.token_urlsafe(24),
-            "expires": None if forever else time.time() + hours * 3600,
-            "mode": mode,
-        }
-        token = item["share"]["token"]
-        _drop_write_index()
-    return jsonify(url=url_for("drop_public", token=token, _external=True),
-                   hours=0 if forever else hours, forever=forever, mode=mode)
-
-
-@app.delete("/api/drop/share/<item_id>")
-@login_required
-def drop_share_revoke(item_id):
-    with drop_lock:
-        item = drop_items.get(item_id)
-        if item:
-            item["share"] = None
-            _drop_write_index()
-    return jsonify(ok=True)
-
-
 def _drop_public_item(token):
     """Файл по токену ссылки, либо пусто. Из-под замка выходим сразу:
     держать его на время отдачи файла незачем."""
@@ -3563,113 +3013,6 @@ def _drop_public_item(token):
         item_id = _drop_share_lookup(token)
         item = drop_items.get(item_id) if item_id else None
     return (item_id, item) if item else (None, None)
-
-
-@app.get("/d/<token>")
-def drop_public(token):
-    """Публичная ссылка — единственный вход в дроп без авторизации.
-
-    Ссылка бывает двух видов, и вид выбирается отдельно от срока. «Скачать»
-    отдаёт файл вложением, как и раньше. «Просмотр» открывает страницу с
-    картинкой, видео или проигрывателем — и кнопкой скачивания рядом, чтобы
-    просмотровая ссылка не была урезанной.
-
-    Если показывать нечем — архив, установщик, что угодно ещё, — просмотр
-    вырождается в обычную отдачу файла."""
-    item_id, item = _drop_public_item(token)
-    if not item:
-        return "Ссылка недействительна или истекла", 404
-    if _drop_share_mode(item.get("share")) != "view":
-        return _drop_send(item_id, item)
-    kind = _drop_view_kind(item["name"])
-    if not kind:
-        return _drop_send(item_id, item)
-    return _drop_view_page(token, item, kind)
-
-
-@app.get("/d/<token>/raw")
-def drop_public_raw(token):
-    """Байты для тега на странице просмотра.
-
-    Отдаём потоком с поддержкой запросов по кускам: без неё браузер тянул бы
-    весь фильм целиком, прежде чем показать первый кадр, и перемотка не
-    работала бы вовсе. Памяти это не стоит ничего — файл читается с диска
-    порциями, а не загружается в неё."""
-    item_id, item = _drop_public_item(token)
-    if not item or _drop_share_mode(item.get("share")) != "view":
-        return "", 404
-    return _drop_send(item_id, item, inline=True)
-
-
-@app.get("/d/<token>/save")
-def drop_public_save(token):
-    """Кнопка «скачать» со страницы просмотра."""
-    item_id, item = _drop_public_item(token)
-    if not item:
-        return "", 404
-    return _drop_send(item_id, item)
-
-
-def _drop_view_page(token, item, kind):
-    """Страница просмотра: сам файл, его имя, вес и кнопка скачивания.
-
-    Ничего не читаем в память — теги ссылаются на /raw, а его отдаёт
-    send_file прямо с диска."""
-    raw = url_for("drop_public_raw", token=token)
-    save = url_for("drop_public_save", token=token)
-    name = escape(item["name"])
-    size = _drop_human_size(item.get("size") or 0)
-    if kind == "image":
-        body = f'<img src="{raw}" alt="{name}">'
-    elif kind == "video":
-        body = f'<video src="{raw}" controls playsinline preload="metadata"></video>'
-    elif kind == "audio":
-        body = f'<audio src="{raw}" controls preload="metadata"></audio>'
-    else:
-        body = f'<iframe src="{raw}" title="{name}"></iframe>'
-    html = _template("drop_view.html")
-    return (html.replace("__ICONLINKS__", ICON_LINKS)
-                .replace("__NAME__", name)
-                .replace("__SIZE__", size)
-                .replace("__SAVE__", save)
-                .replace("__BODY__", body))
-
-
-@app.get("/api/drop/qr")
-@login_required
-def drop_qr():
-    """Ссылка картинкой: показать телефону, а не диктовать вслух.
-
-    Рисуем прямо на сервере в SVG — он чёткий на любом экране и весит
-    считанные килобайты. Кодируем только свои же ссылки на этот сайт."""
-    url = (request.args.get("url") or "").strip()[:900]
-    if not url.startswith(request.host_url.rstrip("/")):
-        return "Чужая ссылка", 400
-    try:
-        import segno
-    except ImportError:
-        return "Нечем нарисовать", 501
-    buf = io.BytesIO()
-    segno.make(url, error="m").save(buf, kind="svg", scale=1, border=2,
-                                    dark="#04121c", light="#ffffff", xmldecl=False)
-    response = Response(buf.getvalue(), mimetype="image/svg+xml")
-    response.headers["Cache-Control"] = "private, max-age=600"
-    return response
-
-
-@app.delete("/api/drop/<item_id>")
-@login_required
-def drop_delete(item_id):
-    # Трек или папку фонотеки удаляем прямо в ней: в дропе они только видны.
-    if item_id.startswith("mt_") or item_id.startswith("mf_"):
-        return _drop_music_delete(item_id)
-    with drop_lock:
-        if item_id in drop_items:
-            _drop_trash(item_id)             # в корзину, не насовсем
-            _drop_write_index()
-    return jsonify(ok=True)
-
-
 def _drop_music_delete(item_id):
     """Удаление из фонотеки по запросу из дропа. Корзины у фонотеки нет —
     предупреждение об этом висит на самой кнопке."""
@@ -3702,96 +3045,6 @@ def _drop_music_delete(item_id):
             music_folders.pop(k, None)
         _music_write_index()
     return jsonify(ok=True)
-
-
-@app.post("/api/drop/trash/unlock")
-@login_required
-def drop_trash_unlock():
-    """Открывает корзину по паролю. Дальше действия с ней разрешены до конца
-    сессии — как в проводнике, где второй раз пароль не спрашивают."""
-    payload = request.get_json(silent=True) or {}
-    if not _drop_trash_ok(payload.get("password")):
-        return jsonify(error="Неверный пароль."), 403
-    session["drop_trash"] = True
-    return jsonify(ok=True)
-
-
-@app.get("/api/drop/trash")
-@login_required
-def drop_trash_list():
-    if not session.get("drop_trash"):
-        return jsonify(error="Корзина закрыта."), 403
-    with drop_lock:
-        _drop_sweep_trash()
-        rows = []
-        for root in _drop_trash_roots():
-            v = drop_items[root]
-            row = {"id": root, "kind": v["kind"], "name": v["name"],
-                   "deleted": v.get("deleted"), "size": v.get("size", 0)}
-            if v["kind"] == "folder":
-                row["size"] = _drop_trash_subtree_bytes(root)
-            rows.append(row)
-        rows.sort(key=lambda x: -(x["deleted"] or 0))
-        return jsonify(items=rows, trash=_drop_trash_bytes(),
-                       used=_drop_used(), quota=DROP_QUOTA, ttl_days=30)
-
-
-@app.post("/api/drop/<item_id>/restore")
-@login_required
-def drop_restore(item_id):
-    if not session.get("drop_trash"):
-        return jsonify(error="Корзина закрыта."), 403
-    with drop_lock:
-        item = drop_items.get(item_id)
-        if not item or not item.get("deleted"):
-            return jsonify(error="Не найдено в корзине."), 404
-        # Папки-родителя могло уже не быть или она сама в корзине — тогда
-        # возвращаем в корень, чтобы не потерялось.
-        parent = item.get("parent")
-        if parent and (parent not in drop_items or drop_items[parent].get("deleted")):
-            parent = None
-            item["parent"] = None
-        item["name"] = _drop_unique_name(item["name"], parent)
-        item["deleted"] = None
-        _drop_write_index()
-    return jsonify(ok=True)
-
-
-@app.delete("/api/drop/trash/<item_id>")
-@login_required
-def drop_trash_purge(item_id):
-    if not session.get("drop_trash"):
-        return jsonify(error="Корзина закрыта."), 403
-    with drop_lock:
-        item = drop_items.get(item_id)
-        if not item or not item.get("deleted"):
-            return jsonify(error="Не найдено в корзине."), 404
-        _drop_discard(item_id)               # теперь насовсем
-        _drop_write_index()
-    return jsonify(ok=True)
-
-
-@app.delete("/api/drop/trash")
-@login_required
-def drop_trash_empty():
-    """Выкинуть всю корзину разом.
-
-    Удалять по одному, когда там сотня файлов, — занятие на полчаса. Сносим
-    только то, что лежит в корзине верхним уровнем: вложенное уедет вместе с
-    папкой, за это отвечает _drop_discard."""
-    if not session.get("drop_trash"):
-        return jsonify(error="Корзина закрыта."), 403
-    with drop_lock:
-        _drop_sweep_trash()
-        roots = list(_drop_trash_roots())
-        for item_id in roots:
-            _drop_discard(item_id)
-        if roots:
-            _drop_write_index()
-        return jsonify(ok=True, gone=len(roots), trash=_drop_trash_bytes(),
-                       used=_drop_used(), quota=DROP_QUOTA)
-
-
 @app.get("/cabinet")
 @login_required
 def cabinet():
@@ -4206,14 +3459,6 @@ _GAME_ICONS = {
         "L": ("#ff3fa4", "px-blink"), "g": ("#d8b23a", None),
     }),
 }
-
-@app.get("/drop")
-@login_required
-def drop_page():
-    html = _template("drop.html")
-    return html.replace("__ICONLINKS__", ICON_LINKS)
-
-
 # ---- Страна DIY: свои творения --------------------------------------------
 # Записи ведёт хозяин сайта прямо со страницы, без правки кода. Обложки
 # ужимаем при загрузке: портфолио листают, и тянуть в него исходные пять
@@ -6181,6 +5426,70 @@ app.register_blueprint(create_music_blueprint(
     music_mimes=MUSIC_MIMES,
     drop_lock=drop_lock,
     drop_musik_tracks=_drop_musik_tracks,
+))
+
+app.register_blueprint(create_drop_blueprint(
+    template=_template,
+    icon_links=ICON_LINKS,
+    escape=escape,
+    login_required=login_required,
+    logger=app.logger,
+    drop_items=drop_items,
+    drop_uploads=drop_uploads,
+    drop_lock=drop_lock,
+    drop_jobs=drop_jobs,
+    drop_jobs_lock=drop_jobs_lock,
+    drop_folder_icons=DROP_FOLDER_ICONS,
+    drop_max_size=DROP_MAX_SIZE,
+    drop_quota=DROP_QUOTA,
+    drop_text_preview=DROP_TEXT_PREVIEW,
+    drop_musik_id=DROP_MUSIK_ID,
+    drop_zip_chunk=DROP_ZIP_CHUNK,
+    drop_ops=DROP_OPS,
+    drop_path=_drop_path,
+    drop_tmp_path=_drop_tmp_path,
+    drop_write_index=_drop_write_index,
+    drop_used=_drop_used,
+    drop_children=_drop_children,
+    drop_folder_stats=_drop_folder_stats,
+    drop_trash=_drop_trash,
+    drop_trash_ok=_drop_trash_ok,
+    drop_path_to_root=_drop_path_to_root,
+    drop_is_descendant=_drop_is_descendant,
+    drop_share_lookup=_drop_share_lookup,
+    drop_sweep_uploads=_drop_sweep_uploads,
+    drop_sweep_trash=_drop_sweep_trash,
+    drop_trash_roots=_drop_trash_roots,
+    drop_trash_bytes=_drop_trash_bytes,
+    drop_trash_subtree_bytes=_drop_trash_subtree_bytes,
+    drop_discard=_drop_discard,
+    drop_thumb_path=_drop_thumb_path,
+    drop_can_thumb=_drop_can_thumb,
+    drop_make_thumb=_drop_make_thumb,
+    drop_human_size=_drop_human_size,
+    drop_view_kind=_drop_view_kind,
+    drop_share_mode=_drop_share_mode,
+    drop_send=_drop_send,
+    drop_text_name=_drop_text_name,
+    drop_music_take=_drop_music_take,
+    drop_music_view=_drop_music_view,
+    drop_music_send=_drop_music_send,
+    drop_music_delete=_drop_music_delete,
+    drop_zip_name=_drop_zip_name,
+    drop_zip_plan=_drop_zip_plan,
+    drop_zip_length=_drop_zip_length,
+    drop_zip_time=_drop_zip_time,
+    drop_job_set=_drop_job_set,
+    drop_jobs_sweep=_drop_jobs_sweep,
+    drop_unique_name=_drop_unique_name,
+    music_used_safe=_music_used_safe,
+    music_lock=music_lock,
+    music_items=music_items,
+    music_folders=music_folders,
+    music_folder_depth=_music_folder_depth,
+    music_max_depth=MUSIC_MAX_DEPTH,
+    music_write_index=_music_write_index,
+    music_used_raw=_music_used,
 ))
 
 app.register_blueprint(create_pwa_blueprint(
