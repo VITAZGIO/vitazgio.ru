@@ -35,6 +35,7 @@ from markupsafe import escape
 from flask_sock import Sock
 from werkzeug.middleware.proxy_fix import ProxyFix
 
+from blueprints.home import create_home_blueprint
 from blueprints.pwa import ICON_LINKS, create_pwa_blueprint
 
 app = Flask(__name__)
@@ -1135,7 +1136,7 @@ def debtor_required(view):
     @wraps(view)
     def wrapped(*args, **kwargs):
         if not session.get("debtor_id"):
-            return redirect(url_for("home"))
+            return redirect(url_for("home.home"))
         return view(*args, **kwargs)
     return wrapped
 
@@ -1357,7 +1358,7 @@ def login_required(view):
             # Пароль не вводили — но устройство могло быть помечено доверенным.
             fresh = _device_check(request.cookies.get(DEVICE_COOKIE))
             if not fresh:
-                return redirect(url_for("home"))
+                return redirect(url_for("home.home"))
             session["authenticated"] = True
             g.new_device_cookie = fresh
             _log_login("доверенное устройство")
@@ -1744,7 +1745,7 @@ def logout():
     # Доверие устройству намеренно переживает выход: «Выйти» закрывает кабинет,
     # а не отзывает устройство. Отзыв — снять галку или нажать корзину в списке.
     session.clear()
-    return redirect(url_for("home"))
+    return redirect(url_for("home.home"))
 
 
 @app.get("/api/session/probe")
@@ -2601,89 +2602,6 @@ def login_log_api():
     with login_log_lock:
         _login_log_trim()
         return jsonify(list(reversed(login_log)))
-
-
-# ---- Рекорды аркады: без пароля, аркада ведь тоже открыта -------------------
-@app.get("/api/arcade/scores")
-def arcade_scores_api():
-    with arcade_lock:
-        return jsonify(
-            scores=_arcade_public(),
-            games={g: {"title": m["title"], "order": m["order"], "unit": m["unit"]}
-                   for g, m in ARCADE_GAMES.items()},
-        )
-
-
-@app.post("/api/arcade/scores")
-def arcade_score_add():
-    client = _client_ip()
-    if _rate_blocked(arcade_submit_attempts, arcade_submit_lock, client,
-                     ARCADE_SUBMIT_WINDOW, ARCADE_SUBMIT_MAX):
-        return jsonify(error="Слишком часто. Попробуйте позже."), 429
-    _rate_hit(arcade_submit_attempts, arcade_submit_lock, client)
-
-    payload = request.get_json(silent=True) or {}
-    game = payload.get("game")
-    if game not in ARCADE_GAMES:
-        return jsonify(error="Неизвестная игра."), 400
-    try:
-        value = int(payload.get("value"))
-    except (TypeError, ValueError):
-        return jsonify(error="Плохой результат."), 400
-    meta = ARCADE_GAMES[game]
-    if not meta.get("lo", 0) <= value <= min(meta.get("hi", ARCADE_VALUE_MAX),
-                                             ARCADE_VALUE_MAX):
-        return jsonify(error="Результат вне правдоподобных границ."), 400
-
-    row = {
-        "id": secrets.token_urlsafe(6),
-        "name": _arcade_clean_name(payload.get("name")),
-        "value": value,
-        "at": time.time(),
-        "epoch": meta["epoch"],
-    }
-    with arcade_lock:
-        rows = _arcade_sort(game, arcade_scores.get(game, []) + [row])[:ARCADE_KEEP]
-        arcade_scores[game] = rows
-        _arcade_save()
-        place = next((i for i, r in enumerate(rows) if r["id"] == row["id"]), None)
-        return jsonify(
-            # place — место в таблице (0 — первое) или null, если не пролез
-            place=place if place is not None and place < ARCADE_TOP else None,
-            scores=_arcade_public(),
-        )
-
-
-@app.post("/api/arcade/scores/delete")
-def arcade_score_delete():
-    """Чистка таблицы от неприличных ников. Пускаем по тому же суточному
-    паролю, что и в консоль, — заводить ради этого отдельный секрет незачем."""
-    client = _client_ip()
-    if _rate_blocked(console_login_attempts, console_login_attempts_lock, client,
-                     CONSOLE_LOGIN_WINDOW_SECONDS, CONSOLE_LOGIN_MAX_ATTEMPTS):
-        _log_login("лимит попыток (рекорды)", kind="block")
-        return jsonify(error="Слишком много попыток. Попробуйте через 5 минут."), 429
-
-    payload = request.get_json(silent=True) or {}
-    password = payload.get("password", "")
-    if not SSH_GATE_PASSWORD_PREFIX or not isinstance(password, str) or \
-            not hmac.compare_digest(password.encode(), console_password_today().encode()):
-        _rate_hit(console_login_attempts, console_login_attempts_lock, client)
-        _log_login("неверный суточный пароль (рекорды)", kind="fail")
-        return jsonify(error="Неверный суточный пароль."), 401
-    _rate_clear(console_login_attempts, console_login_attempts_lock, client)
-
-    game = payload.get("game")
-    if game not in ARCADE_GAMES:
-        return jsonify(error="Неизвестная игра."), 400
-    target = str(payload.get("id", ""))
-    with arcade_lock:
-        rows = arcade_scores.get(game, [])
-        kept = [r for r in rows if r["id"] != target]
-        if len(kept) != len(rows):
-            arcade_scores[game] = kept
-            _arcade_save()
-        return jsonify(scores=_arcade_public())
 
 
 def music_editor_required(view):
@@ -4739,40 +4657,6 @@ _GAME_ICONS = {
         "L": ("#ff3fa4", "px-blink"), "g": ("#d8b23a", None),
     }),
 }
-
-@app.get("/themes")
-@login_required
-def themes_page():
-    """Витрина оформления: разделы кабинета как органы и импланты киборга.
-    Своего бэкенда нет — данные берутся из уже существующих эндпоинтов."""
-    organs = ["ЛОБНАЯ ДОЛЯ", "ТЕМЕННАЯ ДОЛЯ", "ЗАТЫЛОЧНАЯ ДОЛЯ", "ВИСОЧНАЯ ДОЛЯ",
-              "МОЗЖЕЧОК", "СТВОЛ МОЗГА", "ТАЛАМУС", "ГИПОФИЗ"]
-    cols, rows = [60, 330, 600, 870], [250, 420]
-    cards = []
-    for i, device in enumerate(NETBIRD_DEVICES[:8]):
-        left, top = cols[i % 4], rows[i // 4]
-        kind = ("SSH" if device.get("ssh_enabled") else
-                "RDP" if device.get("rdp_enabled") else
-                "VNC" if device.get("vnc_enabled") else "\u2014")
-        cards.append(
-            f'<g class="ncard" style="--i:{i}">'
-            f'<path class="ncard-plate" d="M{left} {top + 12} L{left + 12} {top} L{left + 246} {top} '
-            f'L{left + 246} {top + 68} L{left + 234} {top + 80} L{left} {top + 80} Z"/>'
-            f'<text class="ncard-organ" x="{left + 84}" y="{top + 20}">{organs[i]}</text>'
-            f'<text class="ncard-name" x="{left + 84}" y="{top + 38}">{device["name"]}</text>'
-            f'<text class="ncard-ip" x="{left + 84}" y="{top + 54}">{device["ip"]}</text>'
-            f'<text class="ncard-ping" x="{left + 236}" y="{top + 22}" text-anchor="end" '
-            f'data-ping="{device["ip"]}">\u2014 \u2014 \u2014</text>'
-            f'<g class="ncard-btn"><rect x="{left + 84}" y="{top + 60}" width="100" height="16" rx="1"/>'
-            f'<text x="{left + 134}" y="{top + 72}" text-anchor="middle">ПОДКЛЮЧИТЬСЯ</text></g>'
-            f'<text class="ncard-ip" x="{left + 236}" y="{top + 72}" text-anchor="end">{kind}</text>'
-            f'</g>'
-        )
-
-    html = _template("themes.html")
-    return html.replace("__NODES__", "".join(cards)) \
-               .replace("__ICONLINKS__", ICON_LINKS)
-
 
 @app.get("/drop")
 @login_required
@@ -7238,17 +7122,6 @@ def ai_page():
     return html.replace("__ICONLINKS__", ICON_LINKS).replace("%%PRESET%%", _preset.replace("\"", "\\\"")).replace("%%NET%%", _net)
 
 
-@app.get("/servers")
-def servers_page():
-    """Хозяйство: три машины, их роли и что на них крутится.
-
-    Страница открыта всем, поэтому наружу не выносим ни публичный адрес VPS,
-    ни адреса mesh-сети — только домашние 192.168.x, которые одинаковы у
-    половины страны и ничего не выдают."""
-    html = _template("servers.html")
-    return html.replace("__ICONLINKS__", ICON_LINKS)
-
-
 @app.get("/music")
 @login_required
 def music_page():
@@ -7270,14 +7143,38 @@ def music_page():
     return html.replace("__ICONLINKS__", ICON_LINKS)
 
 
-@app.route("/")
-def home():
-    html = _template("home.html")
-    for name, svg in _GAME_ICONS.items():
-        html = html.replace("__ICON_%s__" % name.upper(), svg)
-    html = html.replace("__ICONLINKS__", ICON_LINKS)
-    return html
-
+app.register_blueprint(create_home_blueprint(
+    template=_template,
+    icon_links=ICON_LINKS,
+    game_icons=_GAME_ICONS,
+    login_required=login_required,
+    netbird_devices=NETBIRD_DEVICES,
+    arcade_games=ARCADE_GAMES,
+    arcade_top=ARCADE_TOP,
+    arcade_keep=ARCADE_KEEP,
+    arcade_value_max=ARCADE_VALUE_MAX,
+    arcade_submit_window=ARCADE_SUBMIT_WINDOW,
+    arcade_submit_max=ARCADE_SUBMIT_MAX,
+    arcade_scores=arcade_scores,
+    arcade_lock=arcade_lock,
+    arcade_submit_attempts=arcade_submit_attempts,
+    arcade_submit_lock=arcade_submit_lock,
+    arcade_clean_name=_arcade_clean_name,
+    arcade_sort=_arcade_sort,
+    arcade_save=_arcade_save,
+    arcade_public=_arcade_public,
+    client_ip=_client_ip,
+    rate_blocked=_rate_blocked,
+    rate_hit=_rate_hit,
+    rate_clear=_rate_clear,
+    console_login_attempts=console_login_attempts,
+    console_login_attempts_lock=console_login_attempts_lock,
+    console_login_window_seconds=CONSOLE_LOGIN_WINDOW_SECONDS,
+    console_login_max_attempts=CONSOLE_LOGIN_MAX_ATTEMPTS,
+    log_login=_log_login,
+    ssh_gate_password_prefix=SSH_GATE_PASSWORD_PREFIX,
+    console_password_today=console_password_today,
+))
 
 app.register_blueprint(create_pwa_blueprint(
     template=_template,
