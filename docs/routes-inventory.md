@@ -3,8 +3,13 @@
 Baseline before blueprint split:
 
 - Source: `app.py`
-- Route decorators: `123`
+- Route decorators: `127`
 - Code changes in this inventory: none
+- Исправление 2026-09-04: в первой версии описи (задача 17) забыли 4
+  вебсокет-роута (`@sock.route`, не `@app.*`) — реальных роутов в коде
+  всегда было 127, не 123. Задачи 20-25 (перенос на blueprints) на этот
+  подсчёт не влияли и ничего не потеряли — проверено разбором AST,
+  до и после переноса ровно 127. Ошибка была только в самой описи.
 
 Guards column includes route decorators such as `login_required`, `debtor_required`,
 `music_editor_required`, plus existing domain guards where useful.
@@ -196,3 +201,7 @@ Guards column includes route decorators such as `login_required`, `debtor_requir
 | `/api/console/login` | `@app.post("/api/console/login")` | `console_login` | `login_required` |
 | `/api/pc/shutdown` | `@app.post("/api/pc/shutdown")` | `pc_shutdown` | `login_required` |
 | `/api/wol` | `@app.post("/api/wol")` | `wol` | `login_required` |
+| `/ws/console/<ip>` | `@sock.route("/ws/console/<ip>")` | `console_ws` | проверка внутри функции |
+| `/ws/claude` | `@sock.route("/ws/claude")` | `claude_ws` | проверка внутри функции |
+| `/ws/rdp/<ip>` | `@sock.route("/ws/rdp/<ip>")` | `rdp_ws` | проверка внутри функции |
+| `/ws/vnc/<ip>` | `@sock.route("/ws/vnc/<ip>")` | `vnc_ws` | проверка внутри функции |
