@@ -51,6 +51,19 @@ jobs:
             # при падении до prune скрипт выходил по set -e раньше него.
             docker builder prune -af
             docker compose up -d --build web
+            ok=
+            for i in $(seq 1 20); do
+              if curl -fsS --max-time 2 http://127.0.0.1:5000/ >/dev/null; then
+                ok=1
+                break
+              fi
+              sleep 1
+            done
+            if [ "$ok" != 1 ]; then
+              docker compose ps
+              docker logs --tail=200 vitazgio-site || true
+              exit 1
+            fi
             docker builder prune -f
             docker image prune -f
           '
