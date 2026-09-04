@@ -1,0 +1,2052 @@
+
+    <!DOCTYPE html>
+    <html lang="ru">
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <meta name="robots" content="noindex, nofollow">
+      <meta name="theme-color" content="#0d1321">
+      __ICONLINKS__
+      <link rel="manifest" href="/manifest.webmanifest">
+      <title>Личный дроп · vitazgio.ru</title>
+      <style>
+        * { box-sizing: border-box; }
+        body { margin: 0; min-height: 100svh; color: #e9fbff; font-family: "Cascadia Code", Consolas, monospace; background: radial-gradient(circle at top left, #192a44, #0d1321 55%); }
+        [hidden] { display: none !important; }
+        .wrap { max-width: 1100px; margin: 0 auto; padding: clamp(18px, 3vw, 40px); }
+
+        .top { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+        .back { width: 44px; height: 44px; flex: none; display: grid; place-items: center; color: #2de2ff; text-decoration: none; border: 1px solid rgba(45,226,255,.3); border-radius: 50%; background: rgba(45,226,255,.07); transition: all .18s; }
+        .back svg { width: 20px; height: 20px; display: block; }
+        .back:hover { color: #fff; border-color: #2de2ff; background: rgba(45,226,255,.18); }
+        h1 { margin: 0; font-size: clamp(1.5rem, 3.5vw, 2.3rem); font-weight: 700; letter-spacing: -.02em;
+             color: #eaf6ff; text-shadow: 0 0 22px rgba(45,226,255,.35); }
+        h1 span { color: #2de2ff; text-shadow: 0 0 22px rgba(45,226,255,.5); }
+        .quota { margin-left: auto; min-width: 320px; }
+        /* Две подписи вокруг шкалы: сверху сколько занято всего (папка),
+           снизу сколько в корзине (кликабельно). */
+        .quota-line { display: flex; align-items: center; gap: 8px; color: #8f99ab;
+                      font-size: .9rem; font-family: inherit; text-align: left;
+                      background: none; border: 0; padding: 0; width: 100%; }
+        .quota-line b { color: #cfe2ee; font-weight: 700; }
+        .quota-line .qi { width: 18px; height: 18px; flex: none; display: grid; place-items: center; }
+        .quota-line .qi svg { width: 18px; height: 18px; display: block; }
+        .quota-used { margin-bottom: 6px; }
+        .quota-used .qi { color: #f5c344; }
+        .quota-can { margin-top: 6px; cursor: pointer; transition: color .16s; }
+        .quota-can .qi { color: #e8eef6; }
+        .quota-can:hover { color: #ffffff; }
+        .quota-can:hover .qi { color: #ffffff; }
+        .quota-music { margin-top: 6px; font-size: .82rem; }
+        .quota-music .qi { color: #2de2ff; }
+        /* Шкала: слева обычная заливка (живые файлы), дальше белым — корзина. */
+        .quota-bar { position: relative; height: 7px; background: rgba(255,255,255,.08); overflow: hidden; }
+        .quota-fill { position: absolute; left: 0; top: 0; height: 100%; width: 0;
+                      background: linear-gradient(90deg, #2de2ff, #63f5ad); transition: width .4s; }
+        .quota-fill.hot { background: linear-gradient(90deg, #ffb35c, #ff6b81); }
+        .quota-trash { position: absolute; top: 0; left: 0; height: 100%; width: 0;
+                       background: rgba(255,255,255,.85); transition: width .4s, left .4s; }
+
+        .bar { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 22px; }
+        .btn { padding: 9px 14px; color: #dffaff; font: 700 .74rem "Cascadia Code", Consolas, monospace; border: 1px solid rgba(45,226,255,.28); background: rgba(45,226,255,.07); cursor: pointer; transition: all .18s; }
+        .btn:hover { border-color: #2de2ff; background: rgba(45,226,255,.16); }
+        .btn.primary { color: #1a0d04; border: 0; background: linear-gradient(90deg, #ff782f, #ffb35c); }
+        .search { flex: 1; min-width: 140px; height: 36px; padding: 0 12px; color: #e9fbff; font: 400 .78rem "Cascadia Code", Consolas, monospace; border: 1px solid rgba(255,255,255,.12); outline: none; background: rgba(4,10,20,.6); }
+        .search:focus { border-color: #2de2ff; }
+
+        .crumbs { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 18px; color: #6b7385; font-size: .76rem; }
+        .crumb { color: #69e8ff; background: none; border: 0; padding: 2px 4px; font: inherit; cursor: pointer; }
+        .crumb:hover { color: #fff; text-decoration: underline; }
+        .crumb.here { color: #8f99ab; cursor: default; text-decoration: none; }
+
+        .composer { margin-top: 16px; }
+        .composer textarea { width: 100%; min-height: 76px; padding: 11px 13px; color: #e9fbff; font: 400 .8rem "Cascadia Code", Consolas, monospace; border: 1px solid rgba(255,255,255,.12); outline: none; background: rgba(4,10,20,.6); resize: vertical; }
+        .composer textarea:focus { border-color: #ff782f; }
+        /* Отправка слева, возврат из папки — прижат к правому краю. */
+        .composer-bar { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+        .composer-bar .up { margin-left: auto; color: #8ee9ff; border-color: rgba(45,226,255,.35); }
+        .composer-bar .up:hover { color: #04121c; background: #2de2ff; border-color: #2de2ff; }
+
+        .uploads { margin-top: 14px; }
+        .up { padding: 9px 12px; margin-bottom: 6px; border: 1px solid rgba(45,226,255,.16); background: rgba(10,17,30,.8); }
+        .up-head { display: flex; justify-content: space-between; gap: 10px; font-size: .74rem; }
+        .up-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .up-pct { color: #63f5ad; flex: none; }
+        .up-bar { height: 4px; margin-top: 6px; background: rgba(255,255,255,.08); }
+        .up-fill { height: 100%; width: 0; background: linear-gradient(90deg, #ff782f, #ffb35c); transition: width .2s; }
+        .up.failed { border-color: rgba(255,107,129,.45); }
+        .up.failed .up-pct { color: #ff6b81; }
+
+        .items { margin-top: 18px; display: grid; gap: 8px; }
+        /* Именованные области: без них браузер раскладывал элементы как попало. */
+        .item { display: grid; grid-template-columns: 46px minmax(0, 1fr) auto;
+                grid-template-areas: "ico name acts" "ico meta acts" "body body body";
+                align-items: center; gap: 2px 13px; padding: 11px 13px;
+                border: 1px solid rgba(255,255,255,.08); background: rgba(10,17,30,.7);
+                transition: border-color .18s, background .18s; }
+        .item:hover { border-color: rgba(45,226,255,.3); background: rgba(14,24,42,.85); }
+        .item.folder { cursor: pointer; }
+        .item.drag-over { border-color: #63f5ad; background: rgba(99,245,173,.1); }
+        .item.dragging { opacity: .4; }
+
+        /* ── Режим выделения ─────────────────────────────────────────── */
+        /* В нём тык по строке не открывает папку, а ставит и снимает галку.
+           Чтобы это было видно сразу, строки в этом режиме подсвечены рамкой,
+           а выделенные — ещё и заливкой с галочкой слева. */
+        body.picking .item { cursor: pointer; border-color: rgba(45,226,255,.16);
+                position: relative; }
+        /* Кнопки строки в этом режиме убираем совсем, а не приглушаем: на
+           телефоне они занимают отдельную строку, и список раздувался вдвое
+           ровно там, где нужно видеть побольше файлов сразу. */
+        body.picking .item .acts { display: none; }
+        .item.picked { border-color: #2de2ff; background: rgba(45,226,255,.12);
+                box-shadow: inset 0 0 0 1px rgba(45,226,255,.25); }
+        /* Галка уголком у самого края рамки, а не поверх значка файла */
+        .item.picked::after { content: "✓"; position: absolute; left: -1px; top: -1px;
+                width: 22px; height: 20px; display: grid; place-items: center;
+                color: #04121c; font-size: .74rem; font-weight: 800; line-height: 1;
+                background: #2de2ff; border-radius: 0 0 7px 0; }
+        /* Место под панель действий, иначе она накрывает последнюю строку */
+        body.picking .wrap, body.has-clip .wrap { padding-bottom: 132px; }
+
+        .selbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 120;
+                  display: flex; align-items: center; gap: 12px;
+                  padding: 10px 52px 10px 14px;
+                  padding-bottom: calc(10px + env(safe-area-inset-bottom));
+                  border-top: 1px solid rgba(45,226,255,.35);
+                  background: linear-gradient(180deg, rgba(12,20,33,.99), rgba(7,12,20,.99));
+                  box-shadow: 0 -14px 40px rgba(0,0,0,.6); }
+        .selbar .count { flex: none; color: #2de2ff;
+                  font: 700 .76rem "Cascadia Code", Consolas, monospace; letter-spacing: .04em; }
+        .selbar .count b { color: #eafcff; }
+        .selbar .count i { display: block; margin-top: 3px; color: #6b7c8f;
+                  font-style: normal; font-size: .66rem; letter-spacing: .02em; }
+        .selbar .row { flex: 1; display: flex; justify-content: flex-end; gap: 8px; }
+
+        /* Кнопки: значок плюс подпись, подпись никогда не вылезает наружу —
+           её режет overflow, а не удача с длиной слова. */
+        .selbar button { display: inline-flex; align-items: center; justify-content: center;
+                  gap: 7px; height: 40px; padding: 0 14px; cursor: pointer; color: #cfe2ee;
+                  font: 700 .70rem "Cascadia Code", Consolas, monospace; letter-spacing: .04em;
+                  white-space: nowrap; overflow: hidden; border-radius: 9px;
+                  border: 1px solid rgba(255,255,255,.14);
+                  background: linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,.03));
+                  transition: border-color .16s, background .16s, transform .1s; }
+        .selbar button svg { width: 15px; height: 15px; flex: none; }
+        .selbar button span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+        .selbar button:hover:not([disabled]) { border-color: rgba(45,226,255,.55);
+                  background: linear-gradient(180deg, rgba(45,226,255,.2), rgba(45,226,255,.07)); }
+        .selbar button:active:not([disabled]) { transform: translateY(1px); }
+        .selbar button.go { color: #04121c; border-color: #2de2ff;
+                  background: linear-gradient(180deg, #6df0ff, #21c8e6); }
+        .selbar button.go:hover:not([disabled]) { background: linear-gradient(180deg, #8af5ff, #2de2ff); }
+        .selbar button.bad { color: #ffb3b3; border-color: rgba(255,90,90,.38);
+                  background: linear-gradient(180deg, rgba(255,90,90,.16), rgba(255,90,90,.05)); }
+        .selbar button.bad:hover:not([disabled]) { border-color: rgba(255,90,90,.7);
+                  background: linear-gradient(180deg, rgba(255,90,90,.28), rgba(255,90,90,.1)); }
+        .selbar button[disabled] { opacity: .28; cursor: default; }
+
+        /* Крестик закрытия — в углу самой панели, как у окошек в браузере.
+           Отдельной кнопкой в ряду он съедал место у четырёх нужных. */
+        .selbar .shut { position: absolute; right: 10px; top: 8px; width: 30px; height: 30px;
+                  padding: 0; gap: 0; border-radius: 8px; color: #7f93a8;
+                  border-color: transparent; background: transparent; }
+        .selbar .shut svg { width: 15px; height: 15px; }
+        .selbar .shut:hover:not([disabled]) { color: #eafcff;
+                  border-color: rgba(255,255,255,.18);
+                  background: rgba(255,255,255,.07); }
+
+        /* Полоса хода дела — показываем только когда работа затянулась */
+        .oplane { position: fixed; left: 0; right: 0; bottom: 0; z-index: 130;
+                  padding: 14px 16px calc(14px + env(safe-area-inset-bottom));
+                  border-top: 1px solid rgba(45,226,255,.35); background: rgba(6,11,20,.99); }
+        .oplane .txt { display: flex; justify-content: space-between; margin-bottom: 8px;
+                  color: #9fd7e8; font: 700 .72rem "Cascadia Code", Consolas, monospace; }
+        .oplane .bar { height: 6px; background: rgba(255,255,255,.08); }
+        .oplane .fill { height: 100%; width: 0; background: linear-gradient(90deg,#2de2ff,#63f5ad);
+                  transition: width .2s ease; }
+
+        /* На телефоне панель в два ряда: сверху счётчик, снизу кнопки сеткой
+           по три. В одну строку пять кнопок с подписями не влезают — слова
+           вроде «ПЕРЕМЕСТИТЬ» вылезали за рамку. */
+        @media (max-width: 620px) {
+          .selbar { flex-direction: column; align-items: stretch; gap: 9px;
+                    padding-right: 14px; }
+          .selbar .count { width: 100%; padding-right: 38px; }
+          .selbar .row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; }
+          .selbar button { padding: 0 5px; font-size: .60rem; gap: 5px; letter-spacing: 0; }
+          .selbar button svg { width: 14px; height: 14px; }
+          .selbar .shut { padding: 0; }
+        }
+        @media (max-width: 380px) {
+          .selbar .row { gap: 6px; }
+          .selbar button { font-size: .55rem; gap: 3px; padding: 0 3px; }
+          .selbar button svg { width: 12px; height: 12px; }
+        }
+
+        .ico { grid-area: ico; justify-self: center; width: 34px; height: 42px; display: grid; place-items: center;
+               color: var(--tint, #7d8798); font-size: .5rem; font-weight: 800; letter-spacing: .02em;
+               border: 2px solid var(--tint, #7d8798); border-radius: 5px;
+               background: color-mix(in srgb, var(--tint, #7d8798) 12%, transparent); }
+        .ico.img { border-style: solid; background-size: cover; background-position: center; font-size: 0; }
+        /* Значок видео и звука кликабелен — метим треугольником в углу,
+           иначе не понять, что по нему можно ткнуть. */
+        .ico.play { position: relative; cursor: pointer; }
+        .ico.play::after { content: ""; position: absolute; right: 2px; bottom: 2px;
+               width: 0; height: 0; border-left: 8px solid currentColor;
+               border-top: 5px solid transparent; border-bottom: 5px solid transparent; }
+        .ico.img, .ico.play, .ico.doc { cursor: pointer; }
+        .ico.play:hover, .ico.doc:hover { background: color-mix(in srgb, var(--tint, #7d8798) 26%, transparent); }
+        /* Та же ширина, что у бейджей, иначе значок папки съезжает на пару пикселей. */
+        .ico.dir { width: 34px; height: 34px; border: 0; border-radius: 0; background: none;
+                   cursor: pointer; transition: transform .16s; }
+        .ico.dir svg { width: 32px; height: 32px; }
+        .ico.dir:hover { transform: scale(1.12); }
+
+        .nm { grid-area: name; min-width: 0; color: #dfe7f3; font-size: .84rem; overflow-wrap: anywhere; }
+        .meta { grid-area: meta; color: #6b7385; font-size: .68rem; }
+        .acts { grid-area: acts; display: flex; gap: 5px; align-self: center; }
+        .act { padding: 5px 7px; color: #6b7385; font-size: .82rem; line-height: 1; border: 1px solid rgba(255,255,255,.1); background: transparent; cursor: pointer; transition: all .16s; }
+        .act:hover { color: #fff; border-color: rgba(45,226,255,.4); background: rgba(45,226,255,.1); }
+        .act.del:hover { color: #ff6b81; border-color: rgba(255,107,129,.45); background: rgba(255,107,129,.1); }
+        /* Корзина с красным крестом у папки MUSIK: показывает, что удалить
+           нельзя. Сам значок приглушён, крест — поверх. */
+        .act.nodel { position: relative; color: #6b7385; cursor: not-allowed; }
+        .act.nodel::after { content: "✕"; position: absolute; inset: 0; display: grid;
+                            place-items: center; color: #ff4d4d; font-size: .82rem; font-weight: 800;
+                            text-shadow: 0 0 3px rgba(0,0,0,.6); }
+        .act.nodel:hover { border-color: rgba(255,90,90,.45); background: rgba(255,90,90,.08); }
+        .act.on { color: #63f5ad; border-color: rgba(99,245,173,.4); }
+
+        /* На телефоне интерфейс и так в притык к пальцу, а вот на широком
+           экране компьютера всё это выглядело мелко — увеличиваем разом
+           контейнер, шрифты, кнопки и строки списка. */
+        @media (min-width: 860px) {
+          .wrap { max-width: 1320px; padding: 44px 48px; }
+          h1 { font-size: 2.6rem; }
+          .quota { min-width: 340px; }
+          .quota-line { font-size: 1.16rem; }
+          .quota-line .qi, .quota-line .qi svg { width: 24px; height: 24px; }
+          .bar { gap: 12px; margin-top: 28px; }
+          .btn { padding: 12px 20px; font-size: .86rem; }
+          .search { height: 44px; padding: 0 16px; font-size: .88rem; }
+          .crumbs { gap: 8px; margin-top: 22px; font-size: .86rem; }
+          .composer { margin-top: 22px; }
+          .composer textarea { min-height: 100px; padding: 15px 17px; font-size: .9rem; }
+          .items { margin-top: 24px; gap: 11px; }
+          .item { grid-template-columns: 58px minmax(0, 1fr) auto; gap: 3px 18px; padding: 15px 18px; }
+          .ico { width: 44px; height: 54px; font-size: .58rem; }
+          .ico.dir { width: 44px; height: 44px; }
+          .ico.dir svg { width: 42px; height: 42px; }
+          .nm { font-size: .96rem; }
+          .meta { font-size: .76rem; }
+          .act { padding: 7px 10px; font-size: .92rem; }
+        }
+
+        .txt { position: relative; grid-area: body; margin-top: 8px; padding: 10px 34px 10px 12px; color: #b8c2d4; font-size: .76rem; white-space: pre-wrap; overflow-wrap: anywhere; border-left: 2px solid rgba(255,120,47,.5); background: rgba(4,10,20,.5); }
+        /* Карандаш висит в правом верхнем углу самого текста, а не в общем
+           ряду кнопок: там уже живёт переименование, и два карандаша рядом
+           путали бы — этот правит содержимое, тот название. */
+        .txt-edit { position: absolute; top: 6px; right: 6px; width: 24px; height: 24px; display: grid; place-items: center;
+                    color: #ff9f45; font-size: .9rem; line-height: 1; cursor: pointer; border: 1px solid rgba(255,159,69,.35);
+                    border-radius: 4px; background: rgba(255,159,69,.08); }
+        .txt-edit:hover { color: #04060b; background: #ff9f45; border-color: #ff9f45; }
+        .txt-area { width: 100%; min-height: 160px; margin: 0; padding: 10px 12px; color: #eaf6ff; font: 400 .78rem "Cascadia Code", Consolas, monospace;
+                    line-height: 1.6; resize: vertical; border: 1px solid rgba(255,159,69,.5); outline: none; background: rgba(4,10,20,.8); }
+        .txt-bar { display: flex; gap: 8px; margin-top: 8px; }
+        .txt-bar button { height: 30px; padding: 0 14px; font: 700 .72rem "Cascadia Code", Consolas, monospace; letter-spacing: .06em;
+                          cursor: pointer; border: 1px solid rgba(255,255,255,.16); background: rgba(255,255,255,.05); color: #cfe2ee; }
+        .txt-bar button.go { color: #04060b; border-color: #ff9f45; background: #ff9f45; }
+
+        body.modal-open { overflow: hidden; }
+
+        .share-panel { width: min(380px, 100%); padding: 24px; color: #e8fbff;
+                       border: 1px solid rgba(45,226,255,.35);
+                       background: linear-gradient(145deg, rgba(16,30,47,.99), rgba(20,16,37,.99));
+                       box-shadow: 0 32px 100px rgba(0,0,0,.7); }
+        .share-panel h3 { margin: 0 0 16px; font-size: 1.05rem; letter-spacing: .04em; }
+        .share-row { display: flex; align-items: center; gap: 10px; margin-bottom: 12px;
+                     font-size: .82rem; color: #b8c8d8; }
+        .share-row input[type=number] { width: 90px; height: 34px; padding: 0 10px; color: #f4fbff;
+                     font: 600 .85rem "Cascadia Code", Consolas, monospace;
+                     border: 1px solid rgba(255,255,255,.14); outline: none; background: rgba(4,10,20,.65); }
+        .share-row input[type=number]:disabled { opacity: .4; }
+        .share-row.check { cursor: pointer; }
+        /* Имя новой папки: то же поле, что и часы у ссылки, только на всю
+           ширину и без стрелочек счётчика. */
+        .share-row input[type=text] { flex: 1; height: 36px; padding: 0 12px; color: #f4fbff;
+                     font: 600 .85rem "Cascadia Code", Consolas, monospace;
+                     border: 1px solid rgba(255,255,255,.14); outline: none; background: rgba(4,10,20,.65); }
+        .share-row input:focus { border-color: rgba(45,226,255,.5); }
+        .share-row input[type=checkbox] { width: 17px; height: 17px; margin: 0; accent-color: #2de2ff; }
+        .share-note { margin: 0 0 16px; color: #5d6d80; font-size: .72rem; line-height: 1.5; }
+        /* Режим ссылки: две кнопки-переключателя, выбранная залита. Срок и
+           режим независимы, поэтому и стоят отдельными блоками. */
+        .sh-modes { display: flex; gap: 8px; margin-bottom: 10px; }
+        .sh-mode { flex: 1; height: 38px; color: #cfe2ee; cursor: pointer;
+                   font: 700 .72rem "Cascadia Code", Consolas, monospace;
+                   border: 1px solid rgba(255,255,255,.16); border-radius: 9px;
+                   background: rgba(255,255,255,.05); transition: .16s; }
+        .sh-mode:hover { border-color: rgba(45,226,255,.5); }
+        .sh-mode.on { color: #04121c; border-color: #2de2ff; background: #2de2ff; }
+        .share-btns { display: flex; gap: 10px; }
+        .share-btns button { flex: 1; height: 36px; font: 700 .74rem "Cascadia Code", Consolas, monospace;
+                     letter-spacing: .06em; cursor: pointer; color: #cfe2ee;
+                     border: 1px solid rgba(255,255,255,.16); background: rgba(255,255,255,.05); }
+        .share-btns button.go { color: #04121c; border-color: #2de2ff; background: #2de2ff; }
+        .share-btns button.bad { color: #ff8f8f; border-color: rgba(255,90,90,.4); }
+        /* Диалог совпадения имён: галочка «ко всем» и кнопки в столбик,
+           чтобы длинные подписи не жались. */
+        .conf-all { display: flex; align-items: center; gap: 8px; margin: 0 0 14px;
+                    color: #b6c4d6; font-size: .74rem; cursor: pointer; }
+        .conf-all input { width: 16px; height: 16px; accent-color: #2de2ff; cursor: pointer; }
+        .conf-btns { flex-direction: column; }
+
+        /* Окно корзины */
+        .trash-panel { width: min(560px, 100%); }
+        .trash-panel h3 { margin: 0 0 12px; font-size: 1.05rem; letter-spacing: .04em; }
+        .trash-note { margin: 0 0 14px; color: #8f9bad; font-size: .78rem; line-height: 1.5; }
+        .trash-note b { color: #cfe2ee; }
+        .trash-list { display: flex; flex-direction: column; gap: 8px;
+                      max-height: 52vh; overflow-y: auto; margin-bottom: 14px; }
+        .trash-row { display: flex; align-items: center; gap: 12px; padding: 10px 12px;
+                     border: 1px solid rgba(255,255,255,.1); background: rgba(4,10,20,.5); }
+        .trash-info { flex: 1; min-width: 0; }
+        .trash-name { color: #e6eef8; font-size: .82rem;
+                      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .trash-meta { margin-top: 3px; color: #6b7c8f; font-size: .68rem; }
+        .trash-acts { flex: none; display: flex; gap: 6px; }
+        .trash-acts .btn { height: 30px; padding: 0 11px; font-size: .72rem;
+                           display: inline-flex; align-items: center; justify-content: center; line-height: 1; }
+        .btn.bad { color: #ff9aa6; border-color: rgba(255,90,110,.35); }
+        .btn.bad:hover { color: #fff; border-color: #ff5a6e; background: rgba(255,90,110,.14); }
+        .trash-empty { padding: 26px 0; color: #6b7c8f; text-align: center; font-size: .82rem; }
+        /* «Очистить всё» слева, «Закрыть» справа: разные по весу действия
+           не должны стоять вплотную, чтобы не промахнуться. */
+        .trash-keys { display: flex; justify-content: space-between; gap: 10px; }
+        .trash-keys .btn { height: 34px; display: inline-flex; align-items: center;
+                           justify-content: center; gap: 6px; line-height: 1; }
+        #trash-all i { font-style: normal; margin-left: 0; padding: 1px 6px;
+                       font-size: .68rem; line-height: 1.4; border-radius: 999px;
+                       color: #ffd0d6; background: rgba(255,90,110,.18); }
+
+        /* Окно ввода пароля от корзины */
+        .trash-lock { width: min(390px, 100%); text-align: left; }
+        .trash-lock .tl-badge { display: grid; place-items: center; width: 46px; height: 46px;
+                     margin-bottom: 16px; color: #dfe9f3; border: 1px solid rgba(255,255,255,.14);
+                     border-radius: 12px; background: rgba(255,255,255,.05); }
+        .trash-lock .tl-badge svg { width: 24px; height: 24px; }
+        .trash-lock .tl-kick { color: #2de2ff; font: 700 .68rem/1 "Cascadia Code", Consolas, monospace;
+                     letter-spacing: .16em; text-transform: uppercase; }
+        .trash-lock h3 { margin: 10px 0 6px; font-size: 1.4rem; letter-spacing: -.02em; }
+        .trash-lock .tl-sub { margin: 0 0 18px; color: #7f8ca0; font-size: .8rem; }
+        .trash-lock input { width: 100%; height: 46px; padding: 0 14px; color: #f4fbff;
+                     font: 700 1rem "Cascadia Code", Consolas, monospace;
+                     border: 1px solid rgba(255,255,255,.14); outline: none; background: rgba(4,10,20,.65); }
+        .trash-lock input:focus { border-color: #2de2ff; box-shadow: 0 0 0 3px rgba(45,226,255,.09); }
+        .trash-lock .tl-err { min-height: 16px; margin: 8px 0 12px; color: #ff6ba8; font-size: .76rem; }
+
+        /* Карточка папки: сколько весит и каким значком её пометить */
+        .fi-stat { margin: 0 0 16px; color: #7f93a8; font-size: .76rem; line-height: 1.7; }
+        .fi-stat b { color: #cfe2ee; font-weight: 700; }
+        .fi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 16px; }
+        .fi-cell { display: grid; place-items: center; height: 56px; cursor: pointer;
+                   border: 1px solid rgba(255,255,255,.12); background: rgba(255,255,255,.03); }
+        .fi-cell svg { width: 27px; height: 27px; }
+        .fi-cell:hover { border-color: rgba(45,226,255,.5); background: rgba(45,226,255,.09); }
+        .fi-cell.on { border-color: #2de2ff; background: rgba(45,226,255,.16); }
+
+        /* Ссылка кодом: белое поле обязательно, иначе камера не прочтёт. */
+        .qr-box { display: grid; place-items: center; gap: 8px; margin: 0 0 14px; }
+        .qr-box img { width: 190px; height: 190px; padding: 8px; border-radius: 10px;
+                      background: #fff; image-rendering: pixelated; }
+        .qr-box span { color: #6b7c8f; font-size: .68rem; letter-spacing: .08em;
+                       text-transform: uppercase; }
+
+        /* Выданная раньше ссылка — её надо уметь показать и скопировать снова */
+        .lk-url { margin: 0 0 14px; padding: 11px; color: #9fd7e8; font-size: .72rem;
+                  word-break: break-all; line-height: 1.55;
+                  border: 1px solid rgba(255,255,255,.1); background: rgba(4,10,20,.6); }
+
+        /* Меню сортировки */
+        .sort-wrap { position: relative; }
+        .sort-menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 40; min-width: 200px;
+                     padding: 5px; border: 1px solid rgba(45,226,255,.3);
+                     background: rgba(10,16,26,.99); box-shadow: 0 18px 50px rgba(0,0,0,.6); }
+        .sort-menu button { display: block; width: 100%; padding: 10px 12px; text-align: left; cursor: pointer;
+                     color: #cfe2ee; font: 600 .76rem "Cascadia Code", Consolas, monospace;
+                     border: 0; background: transparent; }
+        .sort-menu button:hover { background: rgba(45,226,255,.12); }
+        .sort-menu button.on { color: #2de2ff; }
+
+        /* Просмотр картинки во весь экран */
+        .lightbox { position: fixed; inset: 0; z-index: 300; display: grid; place-items: center; padding: 24px;
+                    background: rgba(2,5,10,.94); backdrop-filter: blur(4px); }
+        .lightbox img, .lightbox video { max-width: 100%; max-height: 100%; object-fit: contain;
+                        border: 1px solid rgba(45,226,255,.25); box-shadow: 0 24px 70px rgba(0,0,0,.7); }
+        .lightbox audio { width: min(560px, calc(100% - 40px)); }
+        /* Читалка PDF занимает почти весь экран, со своей прокруткой и зумом */
+        .lightbox .lb-pdf { width: min(1000px, 100%); height: 100%; border: 1px solid rgba(45,226,255,.25);
+                            border-radius: 4px; background: #fff; box-shadow: 0 24px 70px rgba(0,0,0,.7); }
+        .lightbox .lb-close { position: absolute; top: 16px; right: 16px; width: 44px; height: 44px; display: grid; place-items: center;
+                              color: #eaf6ff; font-size: 1.5rem; line-height: 1; cursor: pointer; border: 1px solid rgba(255,255,255,.22);
+                              border-radius: 6px; background: rgba(10,16,26,.85); }
+        .lightbox .lb-close:hover { color: #04060b; background: #2de2ff; border-color: #2de2ff; }
+        .lightbox .lb-name { position: absolute; left: 16px; top: 24px; max-width: calc(100% - 90px); color: #7f93a8;
+                             font-size: .74rem; letter-spacing: .04em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .txt-more { margin-top: 6px; color: #69e8ff; font-size: .72rem; background: none; border: 0; padding: 0; cursor: pointer; }
+
+        .empty { padding: 40px 0; color: #4a5060; font-size: .82rem; text-align: center; }
+        .rename { min-width: 0; width: 100%; height: 28px; padding: 0 8px; color: #f4fbff; font: 600 .8rem "Cascadia Code", Consolas, monospace; border: 1px solid rgba(45,226,255,.4); outline: none; background: rgba(4,10,20,.65); }
+
+        .veil { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; background: rgba(3,6,13,.85); backdrop-filter: blur(6px); color: #2de2ff; font-size: 1.3rem; letter-spacing: .04em; border: 3px dashed rgba(45,226,255,.5); }
+        .toast { position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%); z-index: 60; max-width: 90vw; padding: 11px 18px; color: #06131c; font-size: .78rem; background: #63f5ad; box-shadow: 0 10px 40px rgba(0,0,0,.5); }
+        .toast.bad { background: #ff6b81; color: #fff; }
+
+        @media (max-width: 560px) {
+          .quota { margin-left: 0; width: 100%; }
+          .item { grid-template-areas: "ico name name" "ico meta meta" "acts acts acts" "body body body"; }
+          .acts { justify-content: flex-end; margin-top: 8px; }
+        }
+      </style>
+    </head>
+    <body>
+      <div class="wrap">
+        <div class="top">
+          <a class="back" href="/cabinet" title="Назад в кабинет" aria-label="Назад в кабинет">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M19 12H5m0 0 6-6m-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </a>
+          <h1>Личный <span>дроп</span></h1>
+          <div class="quota">
+            <div class="quota-line quota-used">
+              <span class="qi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6a1 1 0 0 1 1-1h4l2 2h10a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1Z"/></svg></span>
+              <span>Занято: <b id="quota-used">—</b> из <span id="quota-all">—</span></span>
+            </div>
+            <div class="quota-bar">
+              <div class="quota-fill" id="quota-fill"></div>
+              <div class="quota-trash" id="quota-trash-seg"></div>
+            </div>
+            <div class="quota-line quota-music">
+              <span class="qi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></span>
+              <span>Музыка: <b id="quota-music">—</b></span>
+            </div>
+            <button class="quota-line quota-can" id="trash-open" type="button" title="Открыть корзину">
+              <span class="qi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V5h6v2m-8 0 1 13h8l1-13"/></svg></span>
+              <span>Корзина: <b id="quota-trash">—</b></span>
+            </button>
+          </div>
+        </div>
+
+        <div class="bar">
+          <button class="btn primary" id="pick" type="button">Выбрать файлы</button>
+          <button class="btn" id="from-clip" type="button">Из буфера</button>
+          <button class="btn" id="mkdir" type="button">Новая папка</button>
+          <input class="search" id="search" type="search" placeholder="Поиск в этой папке…">
+          <div class="sort-wrap"><button class="btn" id="sort" type="button">Сначала новые</button></div>
+          <!-- accept обязателен: без него Android показывает только камеру и галерею -->
+          <input type="file" id="file-input" accept="*/*" multiple hidden>
+        </div>
+
+        <div class="crumbs" id="crumbs"></div>
+
+        <div class="composer">
+          <textarea id="text-area" placeholder="Текст — отправится отдельной панелью. Ctrl+Enter"></textarea>
+          <div class="composer-bar">
+            <button class="btn" id="send-text" type="button">Отправить текст</button>
+            <!-- Возврат из папки. В цепочку сверху попадать неудобно: она
+                 мелкая и уезжает наверх, а эта кнопка всегда под рукой. -->
+            <button class="btn up" id="go-up" type="button" hidden>← Назад</button>
+          </div>
+        </div>
+
+        <div class="uploads" id="uploads"></div>
+        <div class="items" id="items"><p class="empty">Загрузка…</p></div>
+      </div>
+
+      <div class="veil" id="veil" hidden>Отпусти — загрузим</div>
+
+      <script>
+      (() => {
+        const CHUNK = 4 * 1024 * 1024;
+        const esc = s => String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+        const $ = id => document.getElementById(id);
+
+        let parent = null;
+        let upTo = null;            // куда уводит кнопка «назад»
+        let items = [];
+        const expanded = new Set();
+
+        /* Выделение нескольких штук сразу. picking — в режиме мы или нет,
+           picked — что отмечено, clip — что лежит в буфере после «копировать»
+           или «переместить». Буфер переживает переход в другую папку: в этом
+           и весь смысл — набрал здесь, вставил там. */
+        let picking = false;
+        const picked = new Set();
+        let clip = null;             // { mode: "copy" | "move", ids: [...] }
+
+        /* Сортировка одна на папки и файлы вперемешку — как в проводнике,
+           когда столбец «Изменён» уже нажат. Свежесть папки сервер считает
+           по самому свежему файлу внутри: правишь содержимое — папка
+           поднимается наверх. */
+        const SORTS = {
+          new: ["Сначала новые", (a, b) => b.touched - a.touched],
+          old: ["Сначала старые", (a, b) => a.touched - b.touched],
+          az:  ["По алфавиту А→Я", (a, b) => a.name.localeCompare(b.name, "ru")],
+          za:  ["По алфавиту Я→А", (a, b) => b.name.localeCompare(a.name, "ru")],
+        };
+        let sortKey = localStorage.getItem("vitaz-drop-sort") || "new";
+        if (!SORTS[sortKey]) sortKey = "new";
+
+        const fmtSize = b => {
+          if (b < 1024) return b + " Б";
+          if (b < 1048576) return (b / 1024).toFixed(1) + " КБ";
+          if (b < 1073741824) return (b / 1048576).toFixed(1) + " МБ";
+          return (b / 1073741824).toFixed(2) + " ГБ";
+        };
+        const fmtDate = ts => new Date(ts * 1000).toLocaleString("ru-RU",
+          { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" });
+
+        // Эмодзи выглядят по-разному на каждой платформе, поэтому рисуем
+        // одинаковые значки сами: рамка нужного цвета плюс подпись типа.
+        const TINTS = [
+          [["pdf"], "#ff5a5a"],
+          [["doc","docx","odt","rtf"], "#4a90e2"],
+          [["xls","xlsx","ods","csv"], "#3ec97a"],
+          [["ppt","pptx","odp"], "#ff9f45"],
+          [["zip","7z","rar","tar","gz","xz"], "#f5c344"],
+          [["mp4","mkv","avi","mov","webm","m4v"], "#c77dff"],
+          [["mp3","wav","flac","ogg","m4a","opus"], "#56d4dd"],
+          [["exe","msi","apk","deb","appimage"], "#8b95a5"],
+          [["jpg","jpeg","png","gif","webp","bmp","svg","heic","tif","tiff"], "#63f5ad"],
+          [["txt","md","log","json","xml","yml","yaml","ini","conf"], "#9aa6b8"],
+        ];
+        const extOf = name => (name.includes(".") ? name.split(".").pop() : "").toLowerCase();
+
+        /* Что можно открыть прямо на странице. Список повторяет серверный:
+           там он решает, чем показывать файл по публичной ссылке. */
+        const VIEW_KINDS = {
+          image: ["png", "jpg", "jpeg", "gif", "webp", "bmp", "avif", "ico"],
+          video: ["mp4", "webm", "m4v", "mov", "ogv"],
+          audio: ["mp3", "ogg", "wav", "m4a", "opus", "flac", "aac"],
+          pdf: ["pdf"],
+        };
+        const viewKind = name => {
+          const ext = extOf(name);
+          for (const kind in VIEW_KINDS) if (VIEW_KINDS[kind].includes(ext)) return kind;
+          return "";
+        };
+        const tintOf = ext => (TINTS.find(([list]) => list.includes(ext)) || [null, "#7d8798"])[1];
+
+        /* Значки папок. Рисуем сами, а не эмодзи: те на каждой системе
+           выглядят по-своему, а тут всё должно быть в одном стиле. Имя
+           значка хранится в индексе, вся отрисовка — здесь. */
+        const FOLDER_ICONS = {
+          folder:  ["Папка", "#f5c344",
+            '<path d="M3 7a2 2 0 0 1 2-2h6l3 3h13a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" fill="currentColor" fill-opacity=".2"/>' +
+            '<path d="M3 7a2 2 0 0 1 2-2h6l3 3h13a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/>'],
+          warn:    ["Внимание", "#ff8f4a",
+            '<path d="M16 4.5 29.5 27.5H2.5L16 4.5Z" fill="currentColor" fill-opacity=".2"/>' +
+            '<path d="M16 4.5 29.5 27.5H2.5L16 4.5Z"/><path d="M16 13v6"/><path d="M16 23.2h.01"/>'],
+          clock:   ["Часы", "#4ec8ff",
+            '<circle cx="16" cy="16" r="12.5" fill="currentColor" fill-opacity=".18"/>' +
+            '<circle cx="16" cy="16" r="12.5"/><path d="M16 8.5V16l5.5 3.2"/>'],
+          tree:    ["Дерево", "#56d97f",
+            '<path d="M16 3.5 25 15.5h-4.5l6 8H5.5l6-8H7l9-12Z" fill="currentColor" fill-opacity=".2"/>' +
+            '<path d="M16 3.5 25 15.5h-4.5l6 8H5.5l6-8H7l9-12Z"/><path d="M16 23.5v5.5"/>'],
+          monitor: ["Компьютер", "#9aa6b8",
+            '<rect x="2.5" y="5" width="27" height="17.5" rx="2" fill="currentColor" fill-opacity=".18"/>' +
+            '<rect x="2.5" y="5" width="27" height="17.5" rx="2"/><path d="M16 22.5v5M11 27.5h10"/>'],
+          phone:   ["Телефон", "#b57cff",
+            '<rect x="9" y="2.5" width="14" height="27" rx="3" fill="currentColor" fill-opacity=".18"/>' +
+            '<rect x="9" y="2.5" width="14" height="27" rx="3"/><path d="M14.2 6h3.6"/><path d="M16 25.6h.01"/>'],
+          // Одиннадцать лучей — это один луч и десять его поворотов вокруг
+          // середины: так они одинаковы по построению. Основание заходит за
+          // центр, иначе в середине оставалась бы дырка.
+          claude:  ["Клод", "#d97757",
+            '<g fill="currentColor" stroke="none">' +
+            [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(function (i) {
+              return '<path d="M15.45 17L14.6 3.9A1.4 1.4 0 0 1 17.4 3.9L16.55 17Z"' +
+                     ' transform="rotate(' + (i * 360 / 11).toFixed(3) + ' 16 16)"/>';
+            }).join("") + '</g>'],
+          // Тот же знак, что стоит иконкой сайта: пять фигур, вычерченных
+          // хозяином. Цвет бирюзовый, как у настоящего логотипа; зерно на
+          // значке в двадцать семь пикселей всё равно не разглядеть.
+          vitaz:   ["Vitaz Gio", "#2de2ff",
+            '<path fill="currentColor" stroke="none" d="' +
+            'M1.60 4.04 7.90 24.70 9.88 18.21 5.56 4.04Z' +
+            'M8.92 27.96 11.77 27.96 12.92 24.14 17.89 7.86 19.04 4.04 15.08 4.04 10.34 19.59 8.32 26.08Z' +
+            'M23.13 27.96 25.71 19.54 21.70 19.54 20.28 24.14 13.75 24.14 12.60 27.96Z' +
+            'M27.09 14.90 19.73 14.90 18.53 18.71 21.93 18.71 25.94 18.71Z' +
+            'M18.76 7.86 29.25 7.86 30.40 4.04 19.91 4.04Z' +
+            '"/>'],
+          star:    ["Звезда", "#ffd84a",
+            '<path d="m16 3.5 3.9 8.4 9.2 1.1-6.8 6.3 1.8 9.1-8.1-4.5-8.1 4.5 1.8-9.1-6.8-6.3 9.2-1.1L16 3.5Z" fill="currentColor" fill-opacity=".2"/>' +
+            '<path d="m16 3.5 3.9 8.4 9.2 1.1-6.8 6.3 1.8 9.1-8.1-4.5-8.1 4.5 1.8-9.1-6.8-6.3 9.2-1.1L16 3.5Z"/>'],
+          lock:    ["Замок", "#ff5a5a",
+            '<rect x="6" y="14" width="20" height="15" rx="3" fill="currentColor" fill-opacity=".18"/>' +
+            '<rect x="6" y="14" width="20" height="15" rx="3"/><path d="M11 14V9.6a5 5 0 0 1 10 0V14"/>'],
+          music:   ["Музыка", "#35e0f0",
+            '<path d="M12.5 23.5V7l14-3v16.5"/>' +
+            '<circle cx="8.5" cy="24" r="4.2" fill="currentColor" fill-opacity=".22"/><circle cx="8.5" cy="24" r="4.2"/>' +
+            '<circle cx="22.5" cy="20.5" r="4.2" fill="currentColor" fill-opacity=".22"/><circle cx="22.5" cy="20.5" r="4.2"/>'],
+          photo:   ["Фото", "#63f5ad",
+            '<rect x="3" y="6" width="26" height="20" rx="2" fill="currentColor" fill-opacity=".18"/>' +
+            '<rect x="3" y="6" width="26" height="20" rx="2"/><circle cx="10.5" cy="13" r="2.6"/>' +
+            '<path d="m4.5 23.5 7.5-7.5 5 5 4-3.2 6 6.2"/>'],
+          video:   ["Видео", "#ff3b3b",
+            '<rect x="2.5" y="7" width="27" height="18" rx="5" fill="currentColor" fill-opacity=".2"/>' +
+            '<rect x="2.5" y="7" width="27" height="18" rx="5"/>' +
+            '<path d="M13.5 12.3v7.4l6.4-3.7Z" fill="currentColor" stroke="none"/>'],
+          // Ромб со скруглёнными углами (0.4) обрезает глобус по контуру —
+          // видна только часть сферы, что попадает внутрь. Центр глобуса ниже
+          // центра ромба, поэтому снизу пропадает нижняя широта.
+          work:    ["Работа", "#ff9d42",
+            '<defs><clipPath id="fi-work-d"><rect x="6.4" y="6.4" width="19.2" height="19.2" rx="3.84" transform="rotate(45 16 16)"/></clipPath>' +
+            '<clipPath id="fi-work-g"><circle cx="16" cy="25.6" r="10.21"/></clipPath></defs>' +
+            '<g clip-path="url(#fi-work-d)"><g clip-path="url(#fi-work-g)">' +
+            '<path d="M16 15.39V35.81"/><ellipse cx="16" cy="25.6" rx="5.63" ry="10.21"/>' +
+            '<path d="M0 20.5h32M0 25.6h32M0 30.7h32"/></g>' +
+            '<circle cx="16" cy="25.6" r="10.21"/></g>' +
+            '<rect x="6.4" y="6.4" width="19.2" height="19.2" rx="3.84" transform="rotate(45 16 16)"/>'],
+          // Корзина — тот же значок, что стоит у «Корзина:» под шкалой. Белый.
+          trash:   ["Корзина", "#e8eef6",
+            '<path d="M4.5 8h23"/>' +
+            '<path d="M12.5 8V5.6a1.4 1.4 0 0 1 1.4-1.4h4.2a1.4 1.4 0 0 1 1.4 1.4V8"/>' +
+            '<path d="M7 8h18l-1.3 18.4a2 2 0 0 1-2 1.85h-11.4a2 2 0 0 1-2-1.85Z" fill="currentColor" fill-opacity=".14"/>' +
+            '<path d="M7 8h18l-1.3 18.4a2 2 0 0 1-2 1.85h-11.4a2 2 0 0 1-2-1.85Z"/>' +
+            '<path d="M13 13v9.5M16 13v9.5M19 13v9.5"/>'],
+          game:    ["Игра", "#ff7ab8",
+            '<rect x="3" y="11" width="26" height="14" rx="7" fill="currentColor" fill-opacity=".2"/>' +
+            '<rect x="3" y="11" width="26" height="14" rx="7"/>' +
+            '<path d="M9 15v6M6 18h6"/><circle cx="21.5" cy="16.3" r="1.5" fill="currentColor" stroke="none"/>' +
+            '<circle cx="25" cy="19.5" r="1.5" fill="currentColor" stroke="none"/>'],
+        };
+
+        const folderSvg = name => {
+          const [, tint, body] = FOLDER_ICONS[name] || FOLDER_ICONS.folder;
+          return `<svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round" style="color:${tint}"
+            aria-hidden="true">${body}</svg>`;
+        };
+
+        const iconHtml = it => {
+          if (it.kind === "folder") {
+            return `<span class="ico dir" data-act="icon" title="Значок и размер папки">${
+              folderSvg(it.icon || "folder")}</span>`;
+          }
+          if (it.kind === "text") return `<span class="ico" style="--tint:#ff9f45">ТЕКСТ</span>`;
+          const ext = extOf(it.name);
+          if (it.thumb) {
+            // Картинку можно открыть во весь экран — по самой миниатюре
+            return `<span class="ico img" data-act="view" title="Открыть картинку"
+              style="--tint:${tintOf(ext)};background-image:url(/api/drop/thumb/${encodeURIComponent(it.id)})"></span>`;
+          }
+          const label = ext ? ext.slice(0, 4).toUpperCase() : "ФАЙЛ";
+          const kind = viewKind(it.name);
+          if (kind === "pdf") {
+            // PDF открываем прямо в дропе — значок кликабелен, но без
+            // треугольника: это не воспроизведение, а просмотр.
+            return `<span class="ico doc" data-act="view" title="Открыть PDF"
+              style="--tint:${tintOf(ext)}">PDF</span>`;
+          }
+          if (kind) {
+            // У видео и звука миниатюры нет, но открывать их тоже надо —
+            // значок становится кнопкой и получает треугольник в углу.
+            return `<span class="ico play" data-act="view"
+              title="${kind === "video" ? "Смотреть" : "Слушать"}"
+              style="--tint:${tintOf(ext)}">${esc(label)}</span>`;
+          }
+          return `<span class="ico" style="--tint:${tintOf(ext)}">${esc(label)}</span>`;
+        };
+
+        /* Окно выдачи ссылки: часы и галка «без срока». Бессрочная нужна,
+           чтобы картинку можно было вставить адресом в настройки другого
+           сайта — там ссылка с истечением через сутки бесполезна. */
+        /* Что выбрали в прошлый раз — просмотр или скачивание. Первый раз
+           ставим скачивание: это то, зачем ссылку делают чаще всего. */
+        const lastMode = () => {
+          try { return localStorage.getItem("vgShareMode") === "view" ? "view" : "dl"; }
+          catch (e) { return "dl"; }
+        };
+        const rememberMode = mode => {
+          try { localStorage.setItem("vgShareMode", mode); } catch (e) { /* и ладно */ }
+        };
+
+        const askShare = () => new Promise(resolve => {
+          const box = document.createElement("div");
+          box.className = "lightbox share-ask";
+          let mode = lastMode();
+          box.innerHTML =
+            '<div class="share-panel">' +
+              '<h3>Ссылка на файл</h3>' +
+              '<div class="sh-modes">' +
+                '<button type="button" class="sh-mode" data-mode="dl">Скачивание</button>' +
+                '<button type="button" class="sh-mode" data-mode="view">Просмотр</button>' +
+              '</div>' +
+              '<p class="share-note" id="sh-hint"></p>' +
+              '<label class="share-row"><span>Часов</span>' +
+                '<input type="number" min="1" max="720" value="24" id="sh-h"></label>' +
+              '<label class="share-row check"><input type="checkbox" id="sh-f">' +
+                '<span>Без срока — не истекает никогда</span></label>' +
+              '<div class="share-btns">' +
+                '<button type="button" class="go" id="sh-ok">СОЗДАТЬ</button>' +
+                '<button type="button" id="sh-no">ОТМЕНА</button>' +
+              '</div>' +
+            '</div>';
+          document.body.appendChild(box);
+          document.body.classList.add("modal-open");
+          const hours = box.querySelector("#sh-h");
+          const forever = box.querySelector("#sh-f");
+          const hint = box.querySelector("#sh-hint");
+          const paintMode = () => {
+            box.querySelectorAll(".sh-mode").forEach(b =>
+              b.classList.toggle("on", b.dataset.mode === mode));
+            hint.textContent = mode === "view"
+              ? "Открывает страницу с картинкой или видео. Кнопка «скачать» там тоже есть."
+              : "Сразу скачивает файл, без промежуточных страниц.";
+          };
+          paintMode();
+          box.querySelectorAll(".sh-mode").forEach(b =>
+            b.addEventListener("click", () => { mode = b.dataset.mode; paintMode(); }));
+          hours.focus();
+          const shut = value => {
+            box.remove();
+            document.body.classList.remove("modal-open");
+            document.removeEventListener("keydown", onKey);
+            resolve(value);
+          };
+          const onKey = ev => {
+            if (ev.key === "Escape") shut(null);
+            if (ev.key === "Enter") box.querySelector("#sh-ok").click();
+          };
+          // Галка и поле часов взаимно исключают друг друга — так понятнее,
+          // чем оставлять серое неактивное число рядом с «без срока».
+          forever.addEventListener("change", () => { hours.disabled = forever.checked; });
+          box.querySelector("#sh-ok").addEventListener("click", () => {
+            rememberMode(mode);
+            shut(Object.assign({ mode: mode }, forever.checked
+              ? { forever: true }
+              : { hours: parseInt(hours.value, 10) || 24 }));
+          });
+          box.querySelector("#sh-no").addEventListener("click", () => shut(null));
+          box.addEventListener("click", ev => { if (ev.target === box) shut(null); });
+          document.addEventListener("keydown", onKey);
+        });
+
+        /* Общая обёртка для окошек: тёмный фон, панель, Escape и щелчок мимо
+           закрывают. Раньше это дублировалось в каждом окне отдельно. */
+        const modal = html => {
+          const box = document.createElement("div");
+          box.className = "lightbox share-ask";
+          box.innerHTML = '<div class="share-panel">' + html + "</div>";
+          document.body.appendChild(box);
+          document.body.classList.add("modal-open");
+          const shut = () => {
+            box.remove();
+            document.body.classList.remove("modal-open");
+            document.removeEventListener("keydown", onKey);
+          };
+          const onKey = ev => { if (ev.key === "Escape") shut(); };
+          box.addEventListener("click", ev => { if (ev.target === box) shut(); });
+          document.addEventListener("keydown", onKey);
+          return { box: box, shut: shut };
+        };
+
+        /* Шкала занятости: слева живые файлы обычным цветом, дальше белым —
+           корзина. Обе подписи — «Занято» и «Корзина» — берут числа отсюда. */
+        const paintQuota = data => {
+          const quota = data.quota || 0;
+          const used = data.used || 0;
+          const trash = data.trash || 0;
+          const active = Math.max(0, used - trash);
+          const activePct = quota ? Math.min(active / quota * 100, 100) : 0;
+          const trashPct = quota ? Math.min(trash / quota * 100, 100 - activePct) : 0;
+          $("quota-used").textContent = fmtSize(used);
+          $("quota-all").textContent = fmtSize(quota);
+          $("quota-trash").textContent = fmtSize(trash);
+          // Музыка делит хранилище с дропом — показываем, сколько её.
+          const music = data.music || 0;
+          const qm = $("quota-music");
+          if (qm) qm.textContent = fmtSize(music);
+          $("quota-fill").style.width = activePct + "%";
+          $("quota-fill").classList.toggle("hot", quota && used / quota > 0.8);
+          const seg = $("quota-trash-seg");
+          seg.style.left = activePct + "%";
+          seg.style.width = trashPct + "%";
+        };
+
+        /* Дата удаления в корзине — коротко: ДД.ММ.ГГ, чч:мм. */
+        const trashWhen = t => {
+          const d = new Date((t || 0) * 1000);
+          const p = n => String(n).padStart(2, "0");
+          return p(d.getDate()) + "." + p(d.getMonth() + 1) + "." +
+                 String(d.getFullYear()).slice(2) + ", " + p(d.getHours()) + ":" + p(d.getMinutes());
+        };
+
+        /* Корзина. Первый заход просит пароль (1224), дальше сессия помнит.
+           Внутри — что удалено, с весом и датой; можно вернуть или снести
+           насовсем. Само чистится через месяц. */
+        const trashList = () => fetch("/api/drop/trash", { credentials: "same-origin" })
+          .then(r => r.status === 403 ? null : r.json());
+
+        const renderTrash = (panel, data) => {
+          const items = data.items || [];
+          const rows = items.length
+            ? items.map(it =>
+                '<div class="trash-row">' +
+                  '<div class="trash-info">' +
+                    '<div class="trash-name">' + esc(it.name) + '</div>' +
+                    '<div class="trash-meta">' + (it.kind === "folder" ? "папка · " : "") +
+                      fmtSize(it.size) + ' · удалено ' + trashWhen(it.deleted) + '</div>' +
+                  '</div>' +
+                  '<div class="trash-acts">' +
+                    '<button class="btn" type="button" data-restore="' + esc(it.id) + '">Вернуть</button>' +
+                    '<button class="btn bad" type="button" data-purge="' + esc(it.id) + '">Удалить</button>' +
+                  '</div>' +
+                '</div>').join("")
+            : '<p class="trash-empty">Корзина пуста.</p>';
+          panel.innerHTML =
+            '<h3>Корзина</h3>' +
+            '<p class="trash-note">Файлы лежат здесь до месяца, потом удаляются сами. ' +
+              'Всего в корзине: <b>' + fmtSize(data.trash || 0) + '</b>.</p>' +
+            '<div class="trash-list">' + rows + '</div>' +
+            '<div class="trash-keys">' +
+              (items.length
+                ? '<button class="btn bad" type="button" id="trash-all">Очистить всё' +
+                  ' <i>' + items.length + '</i></button>'
+                : "") +
+              '<button class="btn" type="button" id="trash-close">Закрыть</button>' +
+            '</div>';
+        };
+
+        // Красивое окно ввода пароля от корзины: тот же тёмный стиль, что и
+        // остальные окошки дропа, с подсказкой и ошибкой прямо в панели.
+        const askTrashUnlock = () => new Promise((resolve) => {
+          const box = document.createElement("div");
+          box.className = "lightbox share-ask";
+          box.innerHTML =
+            '<div class="share-panel trash-lock">' +
+              '<span class="tl-badge">' +
+                '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V5h6v2m-8 0 1 13h8l1-13"/></svg>' +
+              '</span>' +
+              '<div class="tl-kick">Корзина · доступ</div>' +
+              '<h3>Введите пароль</h3>' +
+              '<p class="tl-sub">Пароль для прав админа.</p>' +
+              '<input id="tl-pass" type="password" autocomplete="current-password" placeholder="Пароль">' +
+              '<p class="tl-err" id="tl-err"></p>' +
+              '<div class="share-btns">' +
+                '<button type="button" id="tl-no">Отмена</button>' +
+                '<button type="button" class="go" id="tl-ok">Открыть</button>' +
+              '</div>' +
+            '</div>';
+          document.body.appendChild(box);
+          document.body.classList.add("modal-open");
+          const input = box.querySelector("#tl-pass");
+          const err = box.querySelector("#tl-err");
+          const okBtn = box.querySelector("#tl-ok");
+          requestAnimationFrame(() => input.focus());
+          const shut = (val) => {
+            box.remove();
+            document.body.classList.remove("modal-open");
+            document.removeEventListener("keydown", onKey);
+            resolve(val);
+          };
+          const tryOpen = async () => {
+            okBtn.disabled = true;
+            err.textContent = "";
+            try {
+              const r = await fetch("/api/drop/trash/unlock", {
+                method: "POST", credentials: "same-origin",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ password: input.value }) });
+              if (r.ok) { shut(true); return; }
+              err.textContent = "Неверный пароль.";
+              input.select();
+            } catch { err.textContent = "Сервер недоступен."; }
+            finally { okBtn.disabled = false; }
+          };
+          const onKey = (e) => {
+            if (e.key === "Escape") shut(false);
+            if (e.key === "Enter") tryOpen();
+          };
+          okBtn.addEventListener("click", tryOpen);
+          box.querySelector("#tl-no").addEventListener("click", () => shut(false));
+          box.addEventListener("click", (e) => { if (e.target === box) shut(false); });
+          document.addEventListener("keydown", onKey);
+        });
+
+        const openTrash = async () => {
+          let data = await trashList();
+          if (!data) {                                   // закрыта — просим пароль
+            const ok = await askTrashUnlock();
+            if (!ok) return;
+            data = await trashList();
+          }
+          if (!data) { toast("Корзина недоступна", true); return; }
+          const m = modal("");
+          const panel = m.box.querySelector(".share-panel");
+          panel.classList.add("trash-panel");
+          renderTrash(panel, data);
+          panel.addEventListener("click", async e => {
+            if (e.target.closest("#trash-close")) { m.shut(); return; }
+            const rest = e.target.closest("[data-restore]");
+            const purge = e.target.closest("[data-purge]");
+            const all = e.target.closest("#trash-all");
+            try {
+              if (all) {
+                // Разом — значит разом: спрашиваем один раз, но честно
+                // называем, сколько и на сколько мегабайт сейчас исчезнет.
+                const many = (data.items || []).length;
+                if (!confirm("Выкинуть из корзины всё — " + many + " " +
+                             plural(many, ["объект", "объекта", "объектов"]) +
+                             " на " + fmtSize(data.trash || 0) + "?\n" +
+                             "Это не отменить.")) return;
+                const done = await api("/api/drop/trash", { method: "DELETE" });
+                toast("Корзина пуста — выкинуто: " + (done.gone || many));
+              } else if (rest) {
+                await api("/api/drop/" + rest.dataset.restore + "/restore", { method: "POST" });
+                toast("Возвращено");
+              } else if (purge) {
+                if (!confirm("Удалить насовсем? Это не отменить.")) return;
+                await api("/api/drop/trash/" + purge.dataset.purge, { method: "DELETE" });
+                toast("Удалено насовсем");
+              } else { return; }
+            } catch (err) { toast(err.message, true); return; }
+            const nd = await trashList();
+            if (nd) { data = nd; renderTrash(panel, nd); }
+            load();                                       // обновить шкалу занятости
+          });
+        };
+
+        /* Карточка папки: сколько она занимает на диске, сколько внутри всего
+           и каким значком её пометить. Открывается тычком по самому значку —
+           тычок по имени по-прежнему заходит внутрь. */
+        const folderCard = item => {
+          const cells = Object.keys(FOLDER_ICONS).map(key => {
+            const [label] = FOLDER_ICONS[key];
+            const on = (item.icon || "folder") === key ? " on" : "";
+            return `<button type="button" class="fi-cell${on}" data-icon="${key}"
+              title="${esc(label)}" aria-label="${esc(label)}">${folderSvg(key)}</button>`;
+          }).join("");
+          const m = modal(
+            "<h3>" + esc(item.name) + "</h3>" +
+            '<p class="fi-stat">На диске: <b>' + fmtSize(item.size || 0) + "</b><br>" +
+            "Внутри: <b>" + (item.count || 0) + "</b> " + plural(item.count || 0,
+              ["объект", "объекта", "объектов"]) + "<br>" +
+            "Последняя правка: <b>" + fmtDate(item.touched || item.created) + "</b></p>" +
+            '<p class="share-note">Значок папки</p>' +
+            '<div class="fi-grid">' + cells + "</div>" +
+            '<div class="share-btns"><button type="button" id="fi-no">ЗАКРЫТЬ</button></div>');
+          m.box.querySelector("#fi-no").addEventListener("click", m.shut);
+          m.box.querySelectorAll(".fi-cell").forEach(cell => {
+            cell.addEventListener("click", async () => {
+              const icon = cell.dataset.icon;
+              try {
+                await api("/api/drop/" + item.id, { method: "PATCH",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ icon }) });
+              } catch (err) { toast(err.message, true); return; }
+              m.shut();
+              load();
+            });
+          });
+        };
+
+        /* Создание папки: имя и сразу выбор значка — раньше значок ставили
+           отдельным шагом уже после создания, а само имя спрашивал голый
+           системный prompt(), который выглядел чужеродно на сайте. */
+        const askFolder = () => new Promise(resolve => {
+          let icon = "folder";
+          let done = false;
+          const finish = value => { if (!done) { done = true; resolve(value); } };
+          const cells = Object.keys(FOLDER_ICONS).map(key => {
+            const [label] = FOLDER_ICONS[key];
+            return `<button type="button" class="fi-cell${key === icon ? " on" : ""}" data-icon="${key}"
+              title="${esc(label)}" aria-label="${esc(label)}">${folderSvg(key)}</button>`;
+          }).join("");
+          const m = modal(
+            "<h3>Новая папка</h3>" +
+            '<label class="share-row"><span>Имя</span><input type="text" id="nf-name" maxlength="60" placeholder="Название"></label>' +
+            '<p class="share-note">Значок папки</p>' +
+            '<div class="fi-grid">' + cells + "</div>" +
+            '<div class="share-btns">' +
+              '<button type="button" class="go" id="nf-ok">СОЗДАТЬ</button>' +
+              '<button type="button" id="nf-no">ОТМЕНА</button>' +
+            "</div>");
+          // Отмена приходит и кнопкой, и Escape, и щелчком мимо панели —
+          // все три ведут в исходный m.shut(), поэтому резолвим прямо в нём.
+          const closeBox = m.shut;
+          m.shut = () => { closeBox(); finish(null); };
+          const field = m.box.querySelector("#nf-name");
+          field.focus();
+          m.box.querySelectorAll(".fi-cell").forEach(cell => {
+            cell.addEventListener("click", () => {
+              icon = cell.dataset.icon;
+              m.box.querySelectorAll(".fi-cell").forEach(c => c.classList.toggle("on", c === cell));
+            });
+          });
+          m.box.querySelector("#nf-no").addEventListener("click", () => m.shut());
+          const submit = () => {
+            const name = field.value.trim();
+            if (!name) { field.focus(); return; }
+            finish({ name, icon });
+            closeBox();
+          };
+          m.box.querySelector("#nf-ok").addEventListener("click", submit);
+          field.addEventListener("keydown", e => { if (e.key === "Enter") submit(); });
+        });
+
+        // «объект / объекта / объектов» — без этого счётчик читается коряво
+        const plural = (n, forms) => {
+          const a = Math.abs(n) % 100, b = a % 10;
+          if (a > 10 && a < 20) return forms[2];
+          if (b > 1 && b < 5) return forms[1];
+          return b === 1 ? forms[0] : forms[2];
+        };
+
+        /* Ссылка уже выдана: показываем её саму, даём скопировать ещё раз и
+           отозвать. Раньше повторный тык по цепочке умел только отзывать, и
+           узнать адрес заново было неоткуда. */
+        const linkMenu = item => {
+          const url = item.share_url || "";
+          const life = (item.share_mode === "view" ? "просмотр · " : "скачивание · ") +
+            (item.share_expires ? "истекает " + fmtDate(item.share_expires) : "без срока");
+          const m = modal(
+            "<h3>Ссылка активна</h3>" +
+            '<div class="lk-url">' + esc(url) + "</div>" +
+            '<p class="share-note">' + esc(life) + "</p>" +
+            '<div class="qr-box" id="lk-qr" hidden>' +
+              '<img alt="Ссылка кодом"><span>наведи телефоном</span></div>' +
+            '<div class="share-btns">' +
+              '<button type="button" class="go" id="lk-copy">⧉ КОПИРОВАТЬ</button>' +
+              '<button type="button" id="lk-qrbtn">QR</button>' +
+              '<button type="button" class="bad" id="lk-del">УДАЛИТЬ</button>' +
+            "</div>");
+          // Ссылку удобно не копировать, а показать телефону кодом.
+          m.box.querySelector("#lk-qrbtn").addEventListener("click", () => {
+            const box = m.box.querySelector("#lk-qr");
+            const img = box.querySelector("img");
+            if (!img.getAttribute("src"))
+              img.src = "/api/drop/qr?url=" + encodeURIComponent(url);
+            box.hidden = !box.hidden;
+          });
+          m.box.querySelector("#lk-copy").addEventListener("click", async () => {
+            try { await navigator.clipboard.writeText(url); toast("Ссылка скопирована"); }
+            catch { prompt("Ссылка:", url); }
+            m.shut();
+          });
+          m.box.querySelector("#lk-del").addEventListener("click", async () => {
+            try { await api("/api/drop/share/" + item.id, { method: "DELETE" }); toast("Ссылка отозвана"); }
+            catch (err) { toast(err.message, true); return; }
+            m.shut();
+            load();
+          });
+        };
+
+        /* Файл во весь экран: картинка, видео или звук. Закрыть можно
+           крестиком, щелчком по фону, Escape или кнопкой «назад» — последнее
+           важно на телефоне, где крестик легко не заметить и по привычке
+           смахнуть назад.
+
+           Берём файл из /api/drop/view, а не из скачивания: там он отдаётся
+           потоком байтов без типа, и видео от такого не играет. */
+        const openImage = item => {
+          const kind = item.thumb ? "image" : (viewKind(item.name) || "image");
+          const box = document.createElement("div");
+          box.className = "lightbox";
+          let img;
+          if (kind === "video") {
+            img = document.createElement("video");
+            img.controls = true;
+            img.autoplay = true;
+            img.playsInline = true;
+          } else if (kind === "audio") {
+            img = document.createElement("audio");
+            img.controls = true;
+            img.autoplay = true;
+          } else if (kind === "pdf") {
+            // Читалка PDF — родной просмотрщик браузера: листается и
+            // масштабируется сам. Занимает почти весь экран.
+            img = document.createElement("iframe");
+            img.className = "lb-pdf";
+            img.title = item.name;
+          } else {
+            img = document.createElement("img");
+            img.alt = item.name;
+          }
+          img.src = "/api/drop/view/" + encodeURIComponent(item.id);
+          const name = document.createElement("div");
+          name.className = "lb-name";
+          name.textContent = item.name;
+          const close = document.createElement("button");
+          close.className = "lb-close";
+          close.type = "button";
+          close.setAttribute("aria-label", "Закрыть картинку");
+          close.textContent = "×";
+          box.append(img, name, close);
+          document.body.appendChild(box);
+          document.body.classList.add("modal-open");
+
+          let closed = false;
+          const shut = fromBack => {
+            if (closed) return;
+            closed = true;
+            box.remove();
+            document.body.classList.remove("modal-open");
+            document.removeEventListener("keydown", onEsc);
+            window.removeEventListener("popstate", onBack);
+            if (!fromBack && history.state && history.state.lightbox) history.back();
+          };
+          const onEsc = ev => { if (ev.key === "Escape") shut(false); };
+          const onBack = () => shut(true);
+          close.addEventListener("click", () => shut(false));
+          box.addEventListener("click", ev => { if (ev.target === box) shut(false); });
+          document.addEventListener("keydown", onEsc);
+          history.pushState({ lightbox: true }, "");
+          window.addEventListener("popstate", onBack);
+        };
+
+        let toastTimer = null;
+        const toast = (text, bad) => {
+          document.querySelectorAll(".toast").forEach(t => t.remove());
+          const el = document.createElement("div");
+          el.className = "toast" + (bad ? " bad" : "");
+          el.textContent = text;
+          document.body.appendChild(el);
+          clearTimeout(toastTimer);
+          toastTimer = setTimeout(() => el.remove(), 3600);
+        };
+
+        const api = async (url, options) => {
+          const response = await fetch(url, Object.assign({ credentials: "same-origin" }, options || {}));
+          let data = {};
+          try { data = await response.json(); } catch {}
+          if (!response.ok) throw new Error(data.error || "Ошибка " + response.status);
+          return data;
+        };
+
+        // ── Отрисовка ──
+        const renderCrumbs = crumbs => {
+          // В корне цепочка ни к чему — там был бы одинокий ярлык «Дроп».
+          // Показываем крошки только когда зашли в папку.
+          if (!crumbs.length) {
+            $("crumbs").innerHTML = "";
+            upTo = null;
+            $("go-up").hidden = true;
+            return;
+          }
+          const parts = ['<button class="crumb" data-go="">Дроп</button>'];
+          crumbs.forEach((c, i) => {
+            parts.push("<span>/</span>");
+            const last = i === crumbs.length - 1;
+            parts.push(`<button class="crumb${last ? " here" : ""}" data-go="${esc(c.id)}">${esc(c.name)}</button>`);
+          });
+          $("crumbs").innerHTML = parts.join("");
+          // Куда ведёт «назад»: предпоследняя папка цепочки, а из папки
+          // первого уровня — в корень. В корне кнопку прячем: оттуда некуда.
+          upTo = crumbs.length > 1 ? crumbs[crumbs.length - 2].id : null;
+          $("go-up").hidden = crumbs.length === 0;
+        };
+
+        const render = () => {
+          const needle = $("search").value.trim().toLowerCase();
+          let list = items.filter(it => !needle || it.name.toLowerCase().includes(needle));
+          list.sort(SORTS[sortKey][1]);
+          // Особая папка MUSIK всегда в самом низу, какую бы сортировку ни выбрали.
+          list.sort((a, b) => (a.special ? 1 : 0) - (b.special ? 1 : 0));
+          $("sort").textContent = SORTS[sortKey][0];
+
+          if (!list.length) {
+            $("items").innerHTML = '<p class="empty">' + (needle ? "Ничего не нашлось" : "Пусто. Перетащи файлы сюда или вставь через Ctrl+V") + "</p>";
+            paintPicks();          // панель нужна и в пустой папке: сюда вставляют
+            return;
+          }
+          $("items").innerHTML = list.map(it => {
+            const isText = it.kind === "text";
+            const isFolder = it.kind === "folder";
+            const open = expanded.has(it.id);
+            const body = isText && it.preview != null
+              ? `<div class="txt"><button class="txt-edit" data-act="edit" title="Изменить текст">✎</button>${
+                   esc(open && it.full ? it.full : it.preview)}${
+                   it.truncated && !open ? "…" : ""}${
+                   it.truncated ? `<br><button class="txt-more" data-act="more">${open ? "свернуть" : "показать целиком"}</button>` : ""}</div>`
+              : "";
+            const meta = isFolder
+              ? "папка · " + fmtSize(it.size || 0) + " · " + fmtDate(it.touched || it.created)
+              : fmtSize(it.size) + " · " + fmtDate(it.created);
+            return `<div class="item ${it.kind}" data-id="${esc(it.id)}" draggable="true">
+              ${iconHtml(it)}
+              <span class="nm">${esc(it.name)}</span>
+              <span class="acts">
+                ${it.music ? `
+                  ${isFolder ? "" : `<button class="act" data-act="view" title="Слушать">▶</button>`}
+                  <button class="act" data-act="dl" title="Скачать">⤓</button>
+                  <button class="act" data-act="ren" title="${isFolder ? "Переименовать папку" : "Переименовать трек"}">✎</button>
+                  <button class="act del" data-act="del" title="Удалить из фонотеки">🗑</button>
+                ` : it.special ? `
+                  <button class="act" data-act="zip" title="Скачать папку архивом">⤓</button>
+                  <button class="act nodel" data-act="noren" title="Эту папку переименовать нельзя">✎</button>
+                  <button class="act nodel" data-act="nodel" title="Эту папку удалить нельзя">🗑</button>
+                ` : `
+                ${isText ? `<button class="act" data-act="copy" title="Копировать">⧉</button>` : ""}
+                ${isFolder ? "" : `<button class="act${it.share ? " on" : ""}" data-act="share" title="Ссылка для скачивания">🔗</button>`}
+                ${isFolder
+                  ? `<button class="act" data-act="zip" title="Скачать папку архивом">⤓</button>`
+                  : `<button class="act" data-act="dl" title="Скачать">⤓</button>`}
+                <button class="act" data-act="ren" title="Переименовать">✎</button>
+                <button class="act del" data-act="del" title="Удалить">🗑</button>
+                `}
+              </span>
+              <span class="meta">${esc(meta)}${it.share ? " · ссылка активна" : ""}</span>
+              ${body}
+            </div>`;
+          }).join("");
+          // Разметку строк перерисовали заново — вернуть галки на место
+          paintPicks();
+        };
+
+        const load = async () => {
+          try {
+            const data = await api("/api/drop/list?parent=" + encodeURIComponent(parent || ""));
+            items = data.items;
+            renderCrumbs(data.breadcrumbs);
+            paintQuota(data);
+            render();
+          } catch (e) { toast(e.message, true); }
+        };
+
+        /* ── Выделение, буфер и пакетные действия ─────────────────────────
+           Как в проводнике: долгий тык включает режим, дальше обычные тычки
+           ставят и снимают галки. Сняли всё — режим выключился сам, и папки
+           снова открываются одним касанием. */
+
+        const paintPicks = () => {
+          document.body.classList.toggle("picking", picking);
+          document.body.classList.toggle("has-clip", !!clip);
+          document.querySelectorAll(".item").forEach(row => {
+            row.classList.toggle("picked", picked.has(row.dataset.id));
+            // Заодно снимаем следы перетаскивания. На телефоне событие его
+            // окончания не приходит вовсе, и строка оставалась бледной.
+            row.classList.remove("dragging", "drag-over");
+          });
+          drawSelbar();
+        };
+
+        const stopPicking = () => {
+          picking = false;
+          picked.clear();
+          paintPicks();
+        };
+
+        const togglePick = id => {
+          if (picked.has(id)) picked.delete(id); else picked.add(id);
+          // Сняли последнюю галку — выходим из режима, чтобы не гадать,
+          // откроется папка от тычка или нет.
+          if (!picked.size) picking = false;
+          paintPicks();
+        };
+
+        const startPicking = id => {
+          picking = true;
+          picked.add(id);
+          if (navigator.vibrate) navigator.vibrate(12);
+          paintPicks();
+        };
+
+        /* Значки на кнопках панели. Рисуем сами по той же причине, что и
+           значки папок: эмодзи на каждой системе выглядят по-своему. */
+        const OP_ICONS = {
+          copy: '<rect x="6.5" y="6.5" width="11" height="13" rx="2"/>' +
+                '<path d="M13.5 6.5V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h1.5"/>',
+          cut:  '<path d="M3 6h6l2 2h9a1 1 0 0 1 1 1v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7"/>' +
+                '<path d="M9 13.5h6"/><path d="M12.5 11l2.5 2.5-2.5 2.5"/>',
+          paste:'<rect x="4.5" y="4" width="15" height="17" rx="2"/>' +
+                '<path d="M9 4V2.8A1.3 1.3 0 0 1 10.3 1.5h3.4A1.3 1.3 0 0 1 15 2.8V4"/>' +
+                '<path d="M8.5 12h7M8.5 16h4.5"/>',
+          del:  '<path d="M4 6.5h16"/><path d="M9 6.5V4.2A1.2 1.2 0 0 1 10.2 3h3.6A1.2 1.2 0 0 1 15 4.2v2.3"/>' +
+                '<path d="M6 6.5 7 20a1.5 1.5 0 0 0 1.5 1.4h7A1.5 1.5 0 0 0 17 20l1-13.5"/>' +
+                '<path d="M10 10.5v7M14 10.5v7"/>',
+          off:  '<path d="M6 6l12 12M18 6 6 18"/>',
+        };
+        const opIcon = name =>
+          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" ' +
+          'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+          OP_ICONS[name] + "</svg>";
+
+        function drawSelbar() {
+          let bar = document.querySelector(".selbar");
+          if (!picking && !clip) { if (bar) bar.remove(); return; }
+          if (!bar) {
+            bar = document.createElement("div");
+            bar.className = "selbar";
+            document.body.appendChild(bar);
+            bar.addEventListener("click", onSelbarClick);
+          }
+          const n = picked.size;
+          const clipNote = clip
+            ? '<i>в буфере ' + clip.ids.length + " " +
+              plural(clip.ids.length, ["штука", "штуки", "штук"]) +
+              (clip.mode === "move" ? " на перенос" : " на копию") + "</i>"
+            : "";
+          const btn = (op, label, cls, off) =>
+            '<button type="button" data-op="' + op + '"' +
+            (cls ? ' class="' + cls + '"' : "") + (off ? " disabled" : "") +
+            ' aria-label="' + label + '">' + opIcon(op) +
+            "<span>" + label + "</span></button>";
+          bar.innerHTML =
+            '<span class="count">Выделено <b>' + n + "</b>" + clipNote + "</span>" +
+            '<span class="row">' +
+              btn("copy", "КОПИЯ", "", !n) +
+              btn("cut", "ПЕРЕНОС", "", !n) +
+              btn("paste", "ВСТАВИТЬ", "go", !clip) +
+              btn("del", "УДАЛИТЬ", "bad", !n) +
+            "</span>" +
+            '<button type="button" class="shut" data-op="off" title="Выйти из режима" ' +
+            'aria-label="Выйти из режима выделения">' + opIcon("off") + "</button>";
+        }
+
+        /* Полоса хода дела. Появляется только если работа затянулась дольше
+           секунды: на мелочи она мигала бы и раздражала. */
+        const runOp = async (op, ids, target, title) => {
+          let data;
+          try {
+            data = await api("/api/drop/op", { method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ op, ids, parent: target }) });
+          } catch (err) { toast(err.message, true); return false; }
+
+          const started = Date.now();
+          let lane = null;
+          const showLane = st => {
+            if (!lane) {
+              lane = document.createElement("div");
+              lane.className = "oplane";
+              lane.innerHTML = '<div class="txt"><span>' + esc(title) +
+                '</span><span data-pct>0%</span></div>' +
+                '<div class="bar"><div class="fill"></div></div>';
+              document.body.appendChild(lane);
+            }
+            // Если известен объём в байтах, считаем по нему: одна большая
+            // папка иначе висела бы на нуле до самого конца.
+            const pct = st.bytes_total
+              ? st.bytes / st.bytes_total * 100
+              : (st.total ? st.done / st.total * 100 : 0);
+            lane.querySelector(".fill").style.width = Math.min(pct, 100).toFixed(1) + "%";
+            lane.querySelector("[data-pct]").textContent = Math.round(pct) + "%";
+          };
+
+          for (;;) {
+            await new Promise(r => setTimeout(r, 250));
+            let st;
+            try { st = await api("/api/drop/op/" + data.job); }
+            catch (err) { toast(err.message, true); break; }
+            if (Date.now() - started > 1000 && st.state === "run") showLane(st);
+            if (st.state !== "run") {
+              if (lane) { showLane(st); await new Promise(r => setTimeout(r, 180)); }
+              if (st.state === "fail") toast(st.error || "Не получилось", true);
+              break;
+            }
+          }
+          if (lane) lane.remove();
+          return true;
+        };
+
+        async function onSelbarClick(e) {
+          const btn = e.target.closest("button");
+          if (!btn || btn.disabled) return;
+          const op = btn.dataset.op;
+
+          if (op === "off") { clip = null; stopPicking(); return; }
+
+          if (op === "copy" || op === "cut") {
+            clip = { mode: op === "copy" ? "copy" : "move", ids: [...picked] };
+            picking = false;
+            picked.clear();
+            paintPicks();
+            toast(clip.mode === "copy" ? "Скопировано в буфер — открой папку и вставь"
+                                       : "Взято на перенос — открой папку и вставь");
+            return;
+          }
+
+          if (op === "paste") {
+            const job = clip;
+            if (!job) return;
+            await runOp(job.mode, job.ids, parent,
+                        job.mode === "copy" ? "Копирую" : "Переношу");
+            // Перенос буфер опустошает: то же самое второй раз уже не вставить.
+            if (job.mode === "move") clip = null;
+            paintPicks();
+            load();
+            return;
+          }
+
+          if (op === "del") {
+            const n = picked.size;
+            if (!confirm("Удалить " + n + " " + plural(n, ["штуку", "штуки", "штук"]) +
+                         "? Папки удалятся со всем содержимым.")) return;
+            const ids = [...picked];
+            stopPicking();
+            await runOp("delete", ids, null, "Удаляю");
+            load();
+          }
+        }
+
+        // Долгий тык по строке — вход в режим. На мышке та же роль у правой
+        // кнопки: держать её секунду никто не станет.
+        let holdTimer = null, holdFrom = null, touching = false;
+        const holdStart = (id, x, y) => {
+          clearTimeout(holdTimer);
+          holdFrom = { x, y };
+          holdTimer = setTimeout(() => { holdTimer = null; if (!picking) startPicking(id); }, 420);
+        };
+        const holdStop = () => {
+          clearTimeout(holdTimer);
+          holdTimer = null;
+          holdFrom = null;
+          touching = false;
+          document.querySelectorAll(".item.dragging, .item.drag-over")
+            .forEach(r => r.classList.remove("dragging", "drag-over"));
+        };
+
+        // Поле ввода внутри строки живёт по своим правилам: и долгий тык, и
+        // правая кнопка на нём должны работать как в обычном поле, иначе не
+        // вставить имя из буфера.
+        const inField = el => !!(el && el.closest && el.closest("input, textarea"));
+
+        $("items").addEventListener("touchstart", e => {
+          touching = true;
+          const row = e.target.closest(".item");
+          if (!row || picking) return;
+          if (e.target.closest("[data-act]")) return;     // кнопки строки не трогаем
+          if (inField(e.target)) return;
+          holdStart(row.dataset.id, e.touches[0].clientX, e.touches[0].clientY);
+        }, { passive: true });
+        $("items").addEventListener("touchmove", e => {
+          if (!holdFrom) return;
+          const t = e.touches[0];
+          // Уехал пальцем — значит листает, а не держит
+          if (Math.abs(t.clientX - holdFrom.x) > 12 || Math.abs(t.clientY - holdFrom.y) > 12) holdStop();
+        }, { passive: true });
+        $("items").addEventListener("touchend", holdStop);
+        $("items").addEventListener("touchcancel", holdStop);
+
+        $("items").addEventListener("contextmenu", e => {
+          const row = e.target.closest(".item");
+          if (!row) return;
+          // На поле имени правая кнопка должна открыть меню браузера с
+          // «вставить», а не начать выделение строк.
+          if (inField(e.target)) return;
+          e.preventDefault();
+          if (picking) togglePick(row.dataset.id); else startPicking(row.dataset.id);
+        });
+
+        // Escape выходит из режима — привычка из проводника
+        document.addEventListener("keydown", e => {
+          if (e.key === "Escape" && (picking || clip)) { clip = null; stopPicking(); }
+        });
+
+        /* Файл с таким именем уже лежит в этой папке — спрашиваем, как быть,
+           прямо как проводник: заменить / сохранить оба (допишем номер) /
+           пропустить. Галочка «для всех» запоминает выбор на остаток пачки. */
+        const askConflict = (name) => new Promise((resolve) => {
+          const m = modal(
+            "<h3>Файл уже есть</h3>" +
+            '<p class="share-note">В этой папке уже лежит <b>' + esc(name) + "</b>. Что делаем?</p>" +
+            '<label class="conf-all"><input type="checkbox" id="cf-all"> Применить ко всем</label>' +
+            '<div class="share-btns conf-btns">' +
+              '<button type="button" class="go" data-act="keep">Сохранить оба</button>' +
+              '<button type="button" data-act="replace">Заменить</button>' +
+              '<button type="button" data-act="skip">Пропустить</button>' +
+            "</div>");
+          let done = false;
+          const closeBox = m.shut;
+          const finish = (action) => {
+            if (done) return; done = true;
+            const all = !!(m.box.querySelector("#cf-all") || {}).checked;
+            document.removeEventListener("keydown", onEsc);
+            closeBox(); resolve({ action, all });
+          };
+          // Escape и клик мимо панели = «Пропустить». Вешаем СВОИ обработчики:
+          // встроенные в modal закрывают окно, но промис бы не разрешили.
+          // Важно: НЕ называть это `esc` — так зовётся глобальный
+          // html-экранировщик, а он нужен выше при сборке разметки диалога.
+          const onEsc = (ev) => { if (ev.key === "Escape") finish("skip"); };
+          document.addEventListener("keydown", onEsc);
+          m.box.addEventListener("click", (ev) => { if (ev.target === m.box) finish("skip"); });
+          m.box.querySelectorAll("[data-act]").forEach((b) =>
+            b.addEventListener("click", () => finish(b.dataset.act)));
+        });
+
+        // ── Загрузка кусками ──
+        const queue = [];
+        let busy = false;
+        // Свободное имя «файл (2).ext», если «файл.ext» занят. Учитываем и
+        // то, что уже в папке, и то, что назначили в этой же пачке.
+        const freeName = (name, taken) => {
+          if (!taken.has(name)) return name;
+          const dot = name.lastIndexOf(".");
+          const stem = dot > 0 ? name.slice(0, dot) : name;
+          const ext = dot > 0 ? name.slice(dot) : "";
+          let n = 2, cand;
+          do { cand = stem + " (" + n + ")" + ext; n++; } while (taken.has(cand));
+          return cand;
+        };
+
+        const upRow = file => {
+          const row = document.createElement("div");
+          row.className = "up";
+          row.innerHTML = `<div class="up-head"><span class="up-name">${esc(file.name)}</span><span class="up-pct">0%</span></div>
+                           <div class="up-bar"><div class="up-fill"></div></div>`;
+          $("uploads").appendChild(row);
+          return row;
+        };
+
+        const sendOne = async (file, row, asName) => {
+          const pctEl = row.querySelector(".up-pct");
+          const fillEl = row.querySelector(".up-fill");
+          const init = await api("/api/drop/upload/init", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name: asName || file.name, size: file.size, parent,
+                                   content_type: file.type || "application/octet-stream" }),
+          });
+          let offset = 0;
+          while (offset < file.size) {
+            const piece = file.slice(offset, offset + CHUNK);
+            let done = false;
+            for (let attempt = 0; attempt < 4 && !done; attempt++) {
+              try {
+                const response = await fetch(
+                  "/api/drop/upload/chunk/" + init.upload_id + "?offset=" + offset,
+                  { method: "POST", credentials: "same-origin", body: piece });
+                const data = await response.json();
+                if (response.status === 409) { offset = data.expected; done = true; break; }
+                if (!response.ok) throw new Error(data.error || "сбой куска");
+                offset = data.received;
+                done = true;
+              } catch (err) {
+                if (attempt === 3) throw err;
+                await new Promise(r => setTimeout(r, 600 * (attempt + 1)));
+              }
+            }
+            const pct = Math.round((offset / file.size) * 100);
+            pctEl.textContent = pct + "%";
+            fillEl.style.width = pct + "%";
+          }
+          await api("/api/drop/upload/finish/" + init.upload_id, { method: "POST" });
+        };
+
+        const pump = async () => {
+          if (busy) return;
+          busy = true;
+          // Имена, уже занятые в этой папке (файлы) — для проверки совпадений
+          // и подбора свободного имени при «сохранить оба».
+          const taken = new Set((items || [])
+            .filter((it) => it.kind === "file").map((it) => it.name));
+          let forAll = null;   // выбор «применить ко всем» на остаток пачки
+          while (queue.length) {
+            const file = queue.shift();
+            let asName = null;
+            if (taken.has(file.name)) {
+              let choice = forAll;
+              if (!choice) {
+                const res = await askConflict(file.name);
+                choice = res.action;
+                if (res.all) forAll = choice;
+              }
+              if (choice === "skip") continue;
+              if (choice === "keep") {
+                asName = freeName(file.name, taken);
+              } else if (choice === "replace") {
+                // Старое уходит в корзину, новое встаёт под тем же именем.
+                const olds = (items || [])
+                  .filter((it) => it.kind === "file" && it.name === file.name)
+                  .map((it) => it.id);
+                if (olds.length) {
+                  try { await api("/api/drop/op", { method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ op: "delete", ids: olds, parent: null }) }); }
+                  catch (e) { /* не вышло убрать старое — не страшно, зальём рядом */ }
+                }
+              }
+            }
+            // застолбим имя, чтобы следующие файлы пачки его не заняли снова
+            taken.add(asName || file.name);
+            const row = upRow(file);
+            try {
+              await sendOne(file, row, asName);
+              row.remove();
+            } catch (e) {
+              row.classList.add("failed");
+              row.querySelector(".up-pct").textContent = e.message;
+              setTimeout(() => row.remove(), 6000);
+            }
+          }
+          busy = false;
+          load();
+        };
+
+        const enqueue = files => {
+          const list = Array.from(files || []).filter(f => f.size > 0);
+          if (!list.length) return;
+          list.forEach(f => queue.push(f));
+          pump();
+        };
+
+        // ── Ввод ──
+        $("pick").addEventListener("click", () => $("file-input").click());
+        $("trash-open").addEventListener("click", openTrash);
+        $("file-input").addEventListener("change", e => { enqueue(e.target.files); e.target.value = ""; });
+
+        let dragDepth = 0;
+        document.addEventListener("dragenter", e => {
+          if (!e.dataTransfer.types.includes("Files")) return;
+          dragDepth++; $("veil").hidden = false;
+        });
+        document.addEventListener("dragleave", () => { if (--dragDepth <= 0) { dragDepth = 0; $("veil").hidden = true; } });
+        document.addEventListener("dragover", e => { if (e.dataTransfer.types.includes("Files")) e.preventDefault(); });
+        document.addEventListener("drop", e => {
+          if (!e.dataTransfer.files.length) return;
+          e.preventDefault(); dragDepth = 0; $("veil").hidden = true;
+          enqueue(e.dataTransfer.files);
+        });
+
+        // Снимок экрана (Win+Shift+S) кладётся в буфер картинкой, но в
+        // clipboardData.files её может не оказаться — Chrome отдаёт её только
+        // через items[].getAsFile(). Из-за этого Ctrl+V молчал на картинке,
+        // хотя текст вставлялся. Смотрим оба места.
+        const clipFiles = data => {
+          const out = [];
+          const seen = new Set();
+          Array.from(data.files || []).forEach(f => { out.push(f); seen.add(f.name + f.size); });
+          Array.from(data.items || []).forEach(it => {
+            if (it.kind !== "file" || !it.type.startsWith("image/")) return;
+            const f = it.getAsFile();
+            if (f && !seen.has(f.name + f.size)) out.push(f);
+          });
+          // Имя у снимка пустое или generic — даём своё, по времени
+          return out.map(f => {
+            if (f.name && f.name !== "image.png") return f;
+            const ext = (f.type.split("/")[1] || "png").split("+")[0];
+            const t = new Date();
+            const pad = n => String(n).padStart(2, "0");
+            const stamp = t.getFullYear() + "-" + pad(t.getMonth() + 1) + "-" + pad(t.getDate()) +
+                          "-" + pad(t.getHours()) + pad(t.getMinutes()) + pad(t.getSeconds());
+            return new File([f], "снимок-" + stamp + "." + ext, { type: f.type });
+          });
+        };
+
+        document.addEventListener("paste", e => {
+          /* Курсор стоит в поле ввода — не вмешиваемся вовсе. Раньше проверка
+             была только на поле заметки, и вставка имени файла при
+             переименовании улетала в новое сообщение вместо самого поля. */
+          const field = e.target.closest && e.target.closest("input, textarea, [contenteditable]");
+          if (field && field !== $("text-area")) return;
+          const files = clipFiles(e.clipboardData);
+          if (files.length) {
+            // Картинка идёт файлом всегда, даже если курсор стоит в поле
+            // текста: в текстовое поле её всё равно не вставить.
+            e.preventDefault();
+            enqueue(files);
+            toast(files.length > 1 ? "Вставлено " + files.length + " файла" : "Картинка из буфера");
+            return;
+          }
+          if (document.activeElement === $("text-area")) return;
+          const text = (e.clipboardData.getData("text/plain") || "").trim();
+          if (text) {
+            // Текст кладём в поле заметки — оттуда его отправляют как .txt
+            e.preventDefault();
+            $("text-area").value = text;
+            $("text-area").focus();
+            toast("Текст вставлен — проверь и отправь");
+          }
+        });
+
+        // Кнопка «Из буфера»: на телефоне это обход кривого выбора файлов —
+        // скопировал картинку в любом приложении и нажал сюда.
+        $("from-clip").addEventListener("click", async () => {
+          if (!navigator.clipboard || !navigator.clipboard.read) {
+            toast("Браузер не отдаёт буфер. Нажми Ctrl+V прямо на странице", true);
+            return;
+          }
+          try {
+            const entries = await navigator.clipboard.read();
+            const files = [];
+            let plain = "";
+            for (const entry of entries) {
+              const imageType = entry.types.find(t => t.startsWith("image/"));
+              if (imageType) {
+                const blob = await entry.getType(imageType);
+                const ext = imageType.split("/")[1].split("+")[0];
+                const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+                files.push(new File([blob], `буфер-${stamp}.${ext}`, { type: imageType }));
+              } else if (entry.types.includes("text/plain")) {
+                plain = await (await entry.getType("text/plain")).text();
+              }
+            }
+            if (files.length) { enqueue(files); toast("Загружаю из буфера"); return; }
+            if (plain.trim()) { $("text-area").value = plain; toast("Текст вставлен — проверь и отправь"); return; }
+            toast("В буфере ничего подходящего", true);
+          } catch (err) {
+            // Чтение буфера кнопкой браузер разрешает не всегда. Ctrl+V
+            // работает без всяких разрешений — на него и отправляем.
+            toast("Браузер не дал прочитать буфер. Нажми Ctrl+V прямо на странице", true);
+          }
+        });
+
+        // Приём «Поделиться»: обработчик в браузере складывает файлы в кэш,
+        // забираем их отсюда и грузим обычным путём — с прогрессом и куками.
+        const collectShared = async () => {
+          if (!("caches" in window) || !location.search.includes("shared=1")) return;
+          try {
+            const cache = await caches.open("share-inbox");
+            const keys = await cache.keys();
+            const files = [];
+            for (const key of keys) {
+              const response = await cache.match(key);
+              await cache.delete(key);
+              if (!response) continue;
+              if (new URL(key.url).pathname === "/__shared-text") {
+                const text = await response.text();
+                if (text.trim()) $("text-area").value = text;
+                continue;
+              }
+              const name = decodeURIComponent(response.headers.get("X-Name") || "файл");
+              const type = response.headers.get("X-Type") || "application/octet-stream";
+              files.push(new File([await response.blob()], name, { type }));
+            }
+            history.replaceState({}, "", "/drop");
+            if (files.length) { enqueue(files); toast("Принято из «Поделиться»"); }
+          } catch (e) {}
+        };
+
+        if ("serviceWorker" in navigator) {
+          navigator.serviceWorker.register("/sw.js").catch(() => {});
+        }
+
+        $("mkdir").addEventListener("click", async () => {
+          const made = await askFolder();
+          if (!made) return;
+          try { await api("/api/drop/folder", { method: "POST", headers: { "Content-Type": "application/json" },
+                                                body: JSON.stringify({ name: made.name, icon: made.icon, parent }) }); load(); }
+          catch (e) { toast(e.message, true); }
+        });
+
+        const sendText = async () => {
+          const text = $("text-area").value;
+          if (!text.trim()) return;
+          try {
+            await api("/api/drop/text", { method: "POST", headers: { "Content-Type": "application/json" },
+                                          body: JSON.stringify({ text, parent }) });
+            $("text-area").value = "";
+            load();
+          } catch (e) { toast(e.message, true); }
+        };
+        $("send-text").addEventListener("click", sendText);
+        $("text-area").addEventListener("keydown", e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) sendText(); });
+
+        $("search").addEventListener("input", render);
+        // Раньше кнопка просто переключала «новые ⇄ старые». Теперь она
+        // роняет меню со всеми порядками, а выбор запоминается.
+        $("sort").addEventListener("click", e => {
+          e.stopPropagation();
+          const old = document.querySelector(".sort-menu");
+          if (old) { old.remove(); return; }
+          const menu = document.createElement("div");
+          menu.className = "sort-menu";
+          menu.innerHTML = Object.keys(SORTS).map(k =>
+            `<button type="button" data-sort="${k}"${k === sortKey ? ' class="on"' : ""}>${
+              SORTS[k][0]}</button>`).join("");
+          $("sort").parentNode.appendChild(menu);
+          menu.addEventListener("click", ev => {
+            const btn = ev.target.closest("button");
+            if (!btn) return;
+            sortKey = btn.dataset.sort;
+            localStorage.setItem("vitaz-drop-sort", sortKey);
+            menu.remove();
+            render();
+          });
+        });
+        document.addEventListener("click", () => {
+          const menu = document.querySelector(".sort-menu");
+          if (menu) menu.remove();
+        });
+
+        $("crumbs").addEventListener("click", e => {
+          const btn = e.target.closest(".crumb");
+          if (!btn || btn.classList.contains("here")) return;
+          parent = btn.dataset.go || null;
+          expanded.clear();
+          load();
+        });
+
+        $("go-up").addEventListener("click", () => {
+          parent = upTo;
+          expanded.clear();
+          load();
+        });
+
+        // ── Перетаскивание элементов в папки ──
+        let dragId = null;
+        $("items").addEventListener("dragstart", e => {
+          const row = e.target.closest(".item");
+          if (!row) return;
+          // На касаниях встроенное перетаскивание браузера только мешает:
+          // работать оно всё равно не работает, а строку глушит до 40%
+          // прозрачности и обратно не возвращает — события конца нет.
+          if (touching) { e.preventDefault(); return; }
+          dragId = row.dataset.id;
+          row.classList.add("dragging");
+          e.dataTransfer.effectAllowed = "move";
+          e.dataTransfer.setData("text/plain", dragId);
+        });
+        $("items").addEventListener("dragend", e => {
+          dragId = null;
+          document.querySelectorAll(".item").forEach(r => r.classList.remove("dragging", "drag-over"));
+        });
+        $("items").addEventListener("dragover", e => {
+          const row = e.target.closest(".item.folder");
+          if (!row || !dragId || row.dataset.id === dragId) return;
+          e.preventDefault();
+          row.classList.add("drag-over");
+        });
+        $("items").addEventListener("dragleave", e => {
+          const row = e.target.closest(".item");
+          if (row) row.classList.remove("drag-over");
+        });
+        $("items").addEventListener("drop", async e => {
+          const row = e.target.closest(".item.folder");
+          if (!row || !dragId || row.dataset.id === dragId) return;
+          e.preventDefault();
+          e.stopPropagation();
+          const target = row.dataset.id;
+          // Тащат отмеченную строку — переносим всю пачку разом, как в
+          // проводнике. Тащат постороннюю — только её одну.
+          const bunch = picked.has(dragId) ? [...picked] : [dragId];
+          dragId = null;
+          if (bunch.includes(target)) { toast("Папка не может лежать в себе самой", true); return; }
+          stopPicking();
+          await runOp("move", bunch, target, "Переношу");
+          load();
+        });
+
+        // ── Действия над элементами ──
+        $("items").addEventListener("click", async e => {
+          const row = e.target.closest(".item");
+          if (!row) return;
+          const id = row.dataset.id;
+          const item = items.find(i => i.id === id);
+          // closest, а не сам e.target: у значка папки внутри лежит svg,
+          // и щелчок прилетает из его path — без подъёма вверх действие
+          // терялось и вместо окна открывалась сама папка.
+          const hit = e.target.closest("[data-act]");
+          const act = hit && row.contains(hit) ? hit.dataset.act : null;
+
+          // В режиме выделения строка целиком работает галкой: ни папки не
+          // открываются, ни кнопки строки не срабатывают.
+          if (picking) { togglePick(id); return; }
+
+          if (!act) {
+            if (item && item.kind === "folder") { parent = id; expanded.clear(); load(); }
+            return;
+          }
+
+          if (act === "dl") { window.location.assign("/api/drop/download/" + id); return; }
+
+          if (act === "zip") {
+            // Пустую папку архивировать нечего — сразу говорим, а не отдаём
+            // пользователю архив на двадцать два байта.
+            if (!item.count) { toast("Папка пуста", true); return; }
+            toast("Собираю архив: " + item.count + " " +
+                  plural(item.count, ["объект", "объекта", "объектов"]) +
+                  ", " + fmtSize(item.size || 0));
+            window.location.assign("/api/drop/zip/" + id);
+            return;
+          }
+
+          if (act === "icon") { folderCard(item); return; }
+
+          if (act === "view") {
+            openImage(item);
+            return;
+          }
+
+          if (act === "edit") {
+            const box = row.querySelector(".txt");
+            if (!box || box.dataset.editing) return;
+            box.dataset.editing = "1";
+            let full = "";
+            try {
+              // Показываем всегда полный текст, а не обрезанный предпросмотр:
+              // сохранить кусок вместо целого было бы потерей данных.
+              const data = await api("/api/drop/text/" + id);
+              full = data.text;
+            } catch (err) { toast(err.message, true); delete box.dataset.editing; return; }
+            box.innerHTML = "";
+            const area = document.createElement("textarea");
+            area.className = "txt-area";
+            area.value = full;
+            const bar = document.createElement("div");
+            bar.className = "txt-bar";
+            const ok = document.createElement("button");
+            ok.className = "go"; ok.textContent = "СОХРАНИТЬ";
+            const no = document.createElement("button");
+            no.textContent = "ОТМЕНА";
+            bar.append(ok, no);
+            box.append(area, bar);
+            area.focus();
+            const stop = ev => ev.stopPropagation();
+            box.addEventListener("click", stop);
+            no.addEventListener("click", () => { delete box.dataset.editing; load(); });
+            ok.addEventListener("click", async () => {
+              const text = area.value;
+              if (!text.trim()) { toast("Текст пустой", true); return; }
+              ok.disabled = true;
+              try {
+                await api("/api/drop/text/" + id, { method: "PUT",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ text }) });
+                toast("Сохранено");
+              } catch (err) { toast(err.message, true); ok.disabled = false; return; }
+              delete box.dataset.editing;
+              expanded.delete(id);
+              load();
+            });
+            // Ctrl+Enter — сохранить, Escape — отменить: руки со сборки текста
+            // убирать не хочется.
+            area.addEventListener("keydown", ev => {
+              if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); ok.click(); }
+              if (ev.key === "Escape") { ev.preventDefault(); no.click(); }
+            });
+            return;
+          }
+
+          if (act === "more") {
+            if (expanded.has(id)) { expanded.delete(id); render(); return; }
+            try {
+              const data = await api("/api/drop/text/" + id);
+              item.full = data.text;
+              expanded.add(id);
+              render();
+            } catch (err) { toast(err.message, true); }
+            return;
+          }
+
+          if (act === "copy") {
+            try {
+              const data = await api("/api/drop/text/" + id);
+              await navigator.clipboard.writeText(data.text);
+              toast("Текст скопирован");
+            } catch { toast("Не удалось скопировать", true); }
+            return;
+          }
+
+          if (act === "share") {
+            // Ссылка уже есть — показываем её и даём выбор: скопировать
+            // ещё раз или отозвать.
+            if (item.share) { linkMenu(item); return; }
+            const choice = await askShare();
+            if (!choice) return;
+            try {
+              const data = await api("/api/drop/share/" + id, {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(choice) });
+              const life = (data.mode === "view" ? "просмотр, " : "скачивание, ") +
+                           (data.forever ? "без срока" : "живёт " + data.hours + " ч");
+              try { await navigator.clipboard.writeText(data.url); toast("Ссылка скопирована — " + life); }
+              catch { prompt("Ссылка (" + life + "):", data.url); }
+              load();
+            } catch (err) { toast(err.message, true); }
+            return;
+          }
+
+          if (act === "nodel") {
+            toast("Папку MUSIK удалить нельзя — она для плеера", true);
+            return;
+          }
+
+          if (act === "noren") {
+            toast("Папку MUSIK переименовать нельзя — по имени её находит плеер", true);
+            return;
+          }
+
+          if (act === "del") {
+            const what = item.music
+              ? (item.kind === "folder"
+                  ? "Удалить папку «" + item.name + "» из фонотеки со всеми треками?\n" +
+                    "У фонотеки нет корзины — это насовсем."
+                  : "Удалить трек «" + item.name + "» из фонотеки?\nУ фонотеки нет корзины — это насовсем.")
+              : item.kind === "folder"
+              ? "Удалить папку «" + item.name + "» со всем содержимым?"
+              : "Удалить «" + item.name + "»?";
+            if (!confirm(what)) return;
+            try { await api("/api/drop/" + id, { method: "DELETE" }); load(); }
+            catch (err) { toast(err.message, true); }
+            return;
+          }
+
+          if (act === "ren") {
+            const nameEl = row.querySelector(".nm");
+            // Правим только имя без расширения — менять его нельзя,
+            // иначе файл перестаёт открываться. Но расширением считаем
+            // лишь то, что на него похоже: точка, а за ней до восьми букв
+            // или цифр без пробелов. Иначе имя вроде «1. Убрать датчики»
+            // резалось по первой же точке, и правилась одна цифра.
+            const m = item.kind === "folder" ? null : /^(.*)(\.[A-Za-z0-9]{1,8})$/.exec(item.name);
+            const stem = m ? m[1] : item.name;
+            const ext = m ? m[2] : "";
+            const input = document.createElement("input");
+            input.className = "rename";
+            input.value = stem;
+            input.maxLength = 120;
+            if (ext) input.title = "Расширение " + ext + " останется прежним";
+            nameEl.replaceWith(input);
+            // Пока правим имя, строку нельзя таскать: нажатие мышью в поле
+            // запускало перенос файла вместо установки курсора, и вставить
+            // из буфера было нечем. Разметку потом перерисует load().
+            row.draggable = false;
+            input.focus();
+            input.select();
+            let saving = false;
+            const save = async () => {
+              if (saving) return;
+              saving = true;
+              const name = input.value.trim() ? input.value.trim() + ext : "";
+              if (name && name !== item.name) {
+                // Треки и папки фонотеки живут не в дропе, у них свои адреса.
+                // Имя трека показано как «исполнитель — название»: если тире
+                // на месте, так его и разбираем обратно.
+                let url = "/api/drop/" + id, patch = { name };
+                if (item.music && id.startsWith("mf_")) {
+                  url = "/api/music/folder/" + id.slice(3);
+                } else if (item.music && id.startsWith("mt_")) {
+                  const cut = name.indexOf(" — ");
+                  url = "/api/music/" + id.slice(3);
+                  patch = cut > 0
+                    ? { artist: name.slice(0, cut), title: name.slice(cut + 3) }
+                    : { title: name };
+                }
+                try { await api(url, { method: "PATCH", headers: { "Content-Type": "application/json" },
+                                       body: JSON.stringify(patch) }); }
+                catch (err) { toast(err.message, true); }
+              }
+              load();
+            };
+            input.addEventListener("blur", save);
+            input.addEventListener("keydown", ev => {
+              if (ev.key === "Enter") input.blur();
+              if (ev.key === "Escape") { saving = true; render(); }
+            });
+            input.addEventListener("click", ev => ev.stopPropagation());
+          }
+        });
+
+        load();
+        collectShared();
+      })();
+      </script>
+      <script src="/vg-player.js" defer></script>
+    </body>
+    </html>
+    
