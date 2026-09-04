@@ -36,6 +36,7 @@ from flask_sock import Sock
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from blueprints.ai import create_ai_blueprint
+from blueprints.backup_sebastian import create_backup_sebastian_blueprint
 from blueprints.debts import create_debts_blueprint
 from blueprints.diy import create_diy_blueprint
 from blueprints.drop import create_drop_blueprint
@@ -3688,116 +3689,6 @@ def _backup_build(full):
     return tmp
 
 
-@app.get("/api/backup/state")
-@login_required
-def backup_state_api():
-    """Что и сколько весит — кабинет показывает это до нажатия кнопки."""
-    light_size, light_count = _backup_measure(False)
-    full_size, full_count = _backup_measure(True)
-    return jsonify(light={"size": light_size, "files": light_count},
-                   full={"size": full_size, "files": full_count},
-                   robot=bool(BACKUP_TOKEN))
-
-
-@app.get("/api/backup/export")
-def backup_export_api():
-    """Отдаёт архив. Пускаем хозяина из кабинета или программу с ключом."""
-    token = (request.args.get("token") or "").strip()
-    by_token = bool(BACKUP_TOKEN) and token and hmac.compare_digest(token, BACKUP_TOKEN)
-    if not by_token and not session.get("authenticated"):
-        fresh = _device_check(request.cookies.get(DEVICE_COOKIE))
-        if not fresh:
-            return jsonify(error="Нужен вход в кабинет."), 403
-        session["authenticated"] = True
-        g.new_device_cookie = fresh
-
-    full = (request.args.get("kind") or "light") == "full"
-    try:
-        path = _backup_build(full)
-    except OSError as e:
-        return jsonify(error=f"Не удалось собрать копию: {e}"), 500
-
-    stamp = time.strftime("%Y-%m-%d-%H%M")
-    name = f"vitazgio-{'full' if full else 'light'}-{stamp}.zip"
-
-    # Файл временный: отдаём и сразу убираем за собой.
-    handle = open(path, "rb")
-    try:
-        os.remove(path)
-    except OSError:
-        pass
-    response = send_file(handle, mimetype="application/zip",
-                         as_attachment=True, download_name=name)
-    response.headers["Cache-Control"] = "no-store"
-    return response
-
-
-@app.post("/api/backup/import")
-@login_required
-def backup_import_api():
-    """Разворачивает копию обратно. Файлы кладём поверх, ничего не удаляя:
-    так восстановление не может стереть больше, чем принесло."""
-    import zipfile
-
-    upload = request.files.get("file")
-    if not upload:
-        return jsonify(error="Архив не выбран."), 400
-
-    fd, tmp = tempfile.mkstemp(prefix="vg-restore-", suffix=".zip")
-    os.close(fd)
-    try:
-        upload.save(tmp)
-        with zipfile.ZipFile(tmp) as zf:
-            names = zf.namelist()
-            if "backup.json" not in names:
-                return jsonify(error="Это не копия сайта."), 400
-            roots = {"data": DATA_DIR, "drop_data": DROP_DIR}
-            written = 0
-            for inside in names:
-                if inside.endswith("/") or inside == "backup.json":
-                    continue
-                head, _, rest = inside.partition("/")
-                target_root = roots.get(head)
-                if not target_root or not rest:
-                    continue
-                # Защита от «..» в именах: путь обязан остаться внутри папки.
-                dest = os.path.normpath(os.path.join(target_root, rest))
-                if not dest.startswith(os.path.abspath(target_root) + os.sep) and \
-                   not dest.startswith(target_root + os.sep):
-                    continue
-                os.makedirs(os.path.dirname(dest), exist_ok=True)
-                with zf.open(inside) as src, open(dest, "wb") as out:
-                    shutil.copyfileobj(src, out)
-                written += 1
-    except zipfile.BadZipFile:
-        return jsonify(error="Архив повреждён."), 400
-    except OSError as e:
-        return jsonify(error=f"Не удалось развернуть: {e}"), 500
-    finally:
-        try:
-            os.remove(tmp)
-        except OSError:
-            pass
-
-    # Перечитываем то, что только что легло на диск, чтобы сайт увидел копию
-    # без перезапуска.
-    with drop_lock:
-        drop_items.clear()
-    _drop_load_index()
-    with diy_lock:
-        diy_items.clear()
-    _diy_load()
-    with notebook_lock:
-        notebook_data["pages"] = []
-        notebook_data["entries"] = {}
-    _notebook_load()
-    with music_lock:
-        music_items.clear()
-        music_folders.clear()
-    _music_load()
-    return jsonify(ok=True, files=written)
-
-
 # ---- Себастьян: разговор с дворецким через сайт ---------------------------
 # Отвечает та же модель, что уже висит в памяти видеокарты дома, — новую не
 # поднимаем, иначе домашнему Себастьяну не хватит места. Поэтому здесь только
@@ -3860,81 +3751,6 @@ def _sebastian_allow(owner):
                     if not v or now - v[-1] > 7200]:
             sebastian_calls.pop(key, None)
     return True
-
-
-@app.get("/api/sebastian/state")
-def sebastian_state_api():
-    """Готов ли дворецкий отвечать — страница спрашивает при открытии."""
-    ready = bool(SEBASTIAN_HOST) and SEBASTIAN_PUBLIC
-    return jsonify(ready=ready, model=SEBASTIAN_MODEL if ready else "",
-                   owner=bool(session.get("authenticated")))
-
-
-@app.post("/api/sebastian/ask")
-def sebastian_ask_api():
-    if not SEBASTIAN_PUBLIC:
-        return jsonify(error="Дворецкий сейчас не принимает."), 503
-    if not SEBASTIAN_HOST:
-        return jsonify(error="Дворецкий не на связи: сервер с моделью не указан."), 503
-
-    payload = request.get_json(silent=True) or {}
-    text = (payload.get("text") or "").strip()[:SEBASTIAN_MSG_MAX]
-    if not text:
-        return jsonify(error="Пустой вопрос."), 400
-
-    owner = bool(session.get("authenticated"))
-    if not _sebastian_allow(owner):
-        return jsonify(error="На сегодня довольно вопросов — приходите позже."), 429
-
-    # История нужна, чтобы разговор был связным, но держим её короткой:
-    # длинный контекст съедает видеопамять, а она тут дефицит.
-    history = []
-    for row in (payload.get("history") or [])[-6:]:
-        role = "assistant" if row.get("role") == "bot" else "user"
-        body = (row.get("text") or "").strip()[:SEBASTIAN_MSG_MAX]
-        if body:
-            history.append({"role": role, "content": body})
-
-    body = json.dumps({
-        "model": SEBASTIAN_MODEL,
-        "messages": ([{"role": "system", "content": SEBASTIAN_PROMPT}]
-                     + history + [{"role": "user", "content": text}]),
-        "stream": False,
-        "think": False,
-        "options": {"num_predict": SEBASTIAN_REPLY_TOKENS, "temperature": 0.7},
-    }).encode("utf-8")
-
-    if not sebastian_gate.acquire(timeout=20):
-        return jsonify(error="Дворецкий занят домашними делами. Минуту."), 503
-    try:
-        from urllib import request as urlrequest, error as urlerror
-        req = urlrequest.Request(SEBASTIAN_HOST + "/api/chat", data=body,
-                                 headers={"Content-Type": "application/json"})
-        try:
-            with urlrequest.urlopen(req, timeout=SEBASTIAN_TIMEOUT) as resp:
-                data = json.loads(resp.read().decode("utf-8", "replace"))
-        except urlerror.URLError:
-            return jsonify(error="Дворецкий не отвечает — видимо, сервер спит."), 502
-        except (ValueError, OSError):
-            return jsonify(error="Дворецкий ответил невнятно."), 502
-    finally:
-        sebastian_gate.release()
-
-    said = ((data.get("message") or {}).get("content") or "").strip()
-    # у думающих моделей бывает служебный блок размышлений — он не для гостей
-    said = re.sub(r"<think>.*?</think>", "", said, flags=re.S).strip()
-    if not said:
-        return jsonify(error="Дворецкий промолчал."), 502
-    return jsonify(text=said[:4000])
-
-
-@app.get("/sebastian")
-def sebastian_page():
-    """Разговор с дворецким. Открыт всем: управлять домом отсюда нельзя,
-    поэтому пускать можно кого угодно."""
-    html = _template("sebastian.html")
-    return (html.replace("__ICONLINKS__", ICON_LINKS)
-                .replace("__ICON_BUTLER__", _GAME_ICONS.get(SEBASTIAN_ICON, "")))
 
 
 # ---- Нейросеть: чат с DeepSeek через OpenRouter ---------------------------
@@ -4577,6 +4393,42 @@ app.register_blueprint(create_drop_blueprint(
     music_max_depth=MUSIC_MAX_DEPTH,
     music_write_index=_music_write_index,
     music_used_raw=_music_used,
+))
+
+app.register_blueprint(create_backup_sebastian_blueprint(
+    template=_template,
+    icon_links=ICON_LINKS,
+    login_required=login_required,
+    device_check=_device_check,
+    device_cookie=DEVICE_COOKIE,
+    backup_token=lambda: BACKUP_TOKEN,
+    backup_measure=lambda *args, **kwargs: _backup_measure(*args, **kwargs),
+    backup_build=lambda *args, **kwargs: _backup_build(*args, **kwargs),
+    data_dir=lambda: DATA_DIR,
+    drop_dir=lambda: DROP_DIR,
+    drop_lock=drop_lock,
+    drop_items=drop_items,
+    drop_load_index=lambda *args, **kwargs: _drop_load_index(*args, **kwargs),
+    diy_lock=diy_lock,
+    diy_items=diy_items,
+    diy_load=lambda *args, **kwargs: _diy_load(*args, **kwargs),
+    notebook_lock=notebook_lock,
+    notebook_data=notebook_data,
+    notebook_load=lambda *args, **kwargs: _notebook_load(*args, **kwargs),
+    music_lock=music_lock,
+    music_items=music_items,
+    music_folders=music_folders,
+    music_load=lambda *args, **kwargs: _music_load(*args, **kwargs),
+    sebastian_host=lambda: SEBASTIAN_HOST,
+    sebastian_model=lambda: SEBASTIAN_MODEL,
+    sebastian_public=lambda: SEBASTIAN_PUBLIC,
+    sebastian_msg_max=SEBASTIAN_MSG_MAX,
+    sebastian_reply_tokens=SEBASTIAN_REPLY_TOKENS,
+    sebastian_timeout=SEBASTIAN_TIMEOUT,
+    sebastian_prompt=SEBASTIAN_PROMPT,
+    sebastian_gate=sebastian_gate,
+    sebastian_allow=lambda *args, **kwargs: _sebastian_allow(*args, **kwargs),
+    sebastian_icon_svg=lambda: _GAME_ICONS.get(SEBASTIAN_ICON, ""),
 ))
 
 app.register_blueprint(create_ai_blueprint(
