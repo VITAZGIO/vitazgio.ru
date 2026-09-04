@@ -1,26 +1,19 @@
 import base64
-import codecs
 import gzip
 import hashlib
 import hmac
 import io
 import json
-import math
 import os
 import platform
 import re
 import secrets
-import shlex
 import shutil
 import tempfile
-import socket
 import subprocess
 import threading
 import time
 import uuid
-import urllib.error
-import urllib.parse
-import urllib.request
 import zipfile
 from collections import defaultdict, deque
 from datetime import datetime
@@ -30,7 +23,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import paramiko
-from flask import Flask, Response, g, jsonify, redirect, request, send_file, session, url_for
+from flask import Flask, g, jsonify, redirect, request, send_file, session, url_for
 from markupsafe import escape
 from flask_sock import Sock
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -3591,22 +3584,6 @@ def _notebook_apply(e, payload):
         e["accent"] = ac
 
 
-def _soon_page(name, kicker, headline, lead, points):
-    """Заготовка под раздел: страница уже есть и открывается с полки, а
-    содержимое появится позже. Пустая страница выглядела бы поломкой,
-    поэтому честно пишем, что здесь будет."""
-    items = "".join(f"<li>{escape(p)}</li>" for p in points)
-    html = _template("soon.html")
-    return (html.replace("__ICONLINKS__", ICON_LINKS)
-                .replace("__NAME__", escape(name))
-                .replace("__KICKER__", escape(kicker))
-                .replace("__HEADLINE__", escape(headline))
-                .replace("__LEAD__", escape(lead))
-                .replace("__ITEMS__", items))
-
-
-
-
 # ---- Резервные копии ------------------------------------------------------
 # Всё, что нажито сайтом, лежит в двух папках: data (записи DIY, блокнот,
 # фонотека, журнал входов) и drop_data (личный дроп). Здесь они складываются
@@ -3622,7 +3599,6 @@ def _soon_page(name, kicker, headline, lead, points):
 # копии на свой диск. Для неё есть ключ BACKUP_TOKEN: с ним архив отдаётся по
 # обычному GET, без входа в кабинет. Ключ не задан — эта дверь закрыта.
 BACKUP_TOKEN = os.environ.get("BACKUP_TOKEN", "").strip()
-BACKUP_HEAVY = ("drop_data",)          # что попадает только в полную копию
 
 
 def _backup_targets(full):
