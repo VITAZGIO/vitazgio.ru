@@ -1,0 +1,1228 @@
+
+    <!DOCTYPE html>
+    <html lang="ru">
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <meta name="theme-color" content="#080b12">
+      <meta name="description" content="Витрина сервисов vitazgio.ru">
+      __ICONLINKS__
+      <link rel="manifest" href="/manifest.webmanifest">
+      <title>vitazgio.ru</title>
+      <style>
+        :root {
+          color-scheme: dark;
+          --bg: #0d1321;
+          --surface: rgba(25, 32, 48, 0.82);
+          --line: rgba(255, 255, 255, 0.1);
+          --text: #f7f8fc;
+          --muted: #989fb2;
+        }
+
+        * { box-sizing: border-box; }
+
+        html { scroll-behavior: smooth; }
+
+        body {
+          margin: 0;
+          min-width: 320px;
+          font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+          background:
+            radial-gradient(circle at 12% 8%, rgba(57, 126, 255, 0.24), transparent 32rem),
+            radial-gradient(circle at 88% 78%, rgba(149, 65, 255, 0.2), transparent 34rem),
+            var(--bg);
+          color: var(--text);
+        }
+
+        body::before {
+          content: "";
+          position: fixed;
+          inset: 0;
+          pointer-events: none;
+          opacity: 0.16;
+          background-image: linear-gradient(rgba(255,255,255,.035) 1px, transparent 1px),
+                            linear-gradient(90deg, rgba(255,255,255,.035) 1px, transparent 1px);
+          background-size: 44px 44px;
+          mask-image: linear-gradient(to bottom, black, transparent 80%);
+        }
+
+        .page {
+          min-height: 100svh;
+          display: flex;
+          flex-direction: column;
+          justify-content: center;
+          padding: clamp(32px, 6vw, 76px) 0 12px;
+          overflow: hidden;
+        }
+
+        .hero {
+          width: min(1380px, calc(100% - 40px));
+          margin: 0 auto clamp(34px, 5vw, 58px);
+        }
+
+        /* Верхняя строка героя: слева подпись с доменом, справа знак сайта.
+           Знак вынут из потока: он ростом со шрифт вывески, и в общей строке
+           растягивал её с восемнадцати пикселей до семидесяти — от этого
+           страница уезжала вниз, а подпись отрывалась от заголовка. Теперь
+           строка снова по высоте подписи, а знак висит поверх и заходит
+           вверх в поле страницы, которое там и так пустовало. */
+        .hero-top {
+          position: relative;
+          display: flex;
+          align-items: center;
+          margin-bottom: 22px;
+        }
+
+        .hero-mark {
+          position: absolute;
+          right: 0;
+          top: 50%;
+          /* Чуть выше середины строки: ровно по центру нижний край буквы G
+             ложился на верхнюю линию панели. Смещение в долях от роста, а не
+             в пикселях, — знак масштабируется вместе с вывеской. */
+          transform: translateY(-62%);
+          width: clamp(1.15rem, 4.7vw, 4.4rem);
+          height: clamp(1.15rem, 4.7vw, 4.4rem);
+          /* Никакого свечения и подложки — только сами буквы. */
+        }
+
+        .eyebrow {
+          display: inline-flex;
+          align-items: center;
+          gap: 10px;
+          color: #cdd2df;
+          font-size: 0.76rem;
+          font-weight: 700;
+          letter-spacing: 0.16em;
+          text-transform: uppercase;
+        }
+
+        .eyebrow::before {
+          content: "";
+          width: 7px;
+          height: 7px;
+          border-radius: 50%;
+          background: #64e6a5;
+          box-shadow: 0 0 16px #64e6a5;
+        }
+
+        .sr-only {
+          position: absolute;
+          width: 1px;
+          height: 1px;
+          padding: 0;
+          margin: -1px;
+          overflow: hidden;
+          clip: rect(0, 0, 0, 0);
+          white-space: nowrap;
+          border: 0;
+        }
+
+        .cyber-terminal {
+          position: relative;
+          min-height: 164px;
+          display: flex;
+          align-items: center;
+          margin: 0;
+          padding: 34px clamp(22px, 4vw, 54px);
+          overflow: hidden;
+          border: 1px solid rgba(54, 228, 255, .24);
+          background: linear-gradient(110deg, rgba(12, 28, 43, .92), rgba(20, 17, 38, .82));
+          clip-path: polygon(0 0, calc(100% - 25px) 0, 100% 25px, 100% 100%, 25px 100%, 0 calc(100% - 25px));
+          box-shadow: inset 0 0 38px rgba(38, 211, 255, .06);
+        }
+
+        .cyber-terminal::before,
+        .cyber-terminal::after {
+          content: "";
+          position: absolute;
+          height: 2px;
+          background: linear-gradient(90deg, transparent, #2de2ff, #ff3fa4, transparent);
+          opacity: .72;
+        }
+
+        .cyber-terminal::before { top: 0; left: 4%; width: 42%; }
+        .cyber-terminal::after { right: 5%; bottom: 0; width: 30%; }
+
+        .terminal-prompt {
+          margin-right: .35em;
+          color: #ff3fa4;
+          font-family: "Cascadia Code", Consolas, monospace;
+          font-size: clamp(1.4rem, 5vw, 4.7rem);
+          font-weight: 800;
+          text-shadow: 0 0 16px rgba(255, 63, 164, .7);
+        }
+
+        .cyber-text {
+          position: relative;
+          display: inline-block;
+          min-height: 1.1em;
+          white-space: nowrap;
+          color: #dffaff;
+          font-family: "Cascadia Code", Consolas, "Courier New", monospace;
+          font-size: clamp(1.15rem, 4.7vw, 4.4rem);
+          font-weight: 800;
+          letter-spacing: -.065em;
+          line-height: 1;
+          text-shadow: 2px 0 #ff3fa4, -2px 0 #21dcff, 0 0 20px rgba(33, 220, 255, .35);
+        }
+
+        .cyber-text::before,
+        .cyber-text::after {
+          content: attr(data-text);
+          position: absolute;
+          inset: 0;
+          pointer-events: none;
+          opacity: 0;
+        }
+
+        .cyber-text::before { color: #2de2ff; clip-path: inset(18% 0 57% 0); animation: glitch-top 4.2s infinite; }
+        .cyber-text::after { color: #ff3fa4; clip-path: inset(62% 0 16% 0); animation: glitch-bottom 4.2s infinite; }
+
+        .terminal-cursor {
+          width: .12em;
+          height: clamp(1.4rem, 4.7vw, 4.4rem);
+          margin-left: .14em;
+          background: #2de2ff;
+          box-shadow: 0 0 14px #2de2ff;
+          animation: cursor-blink .72s step-end infinite;
+        }
+
+        @keyframes cursor-blink { 50% { opacity: 0; } }
+        @keyframes glitch-top {
+          0%, 88%, 100% { opacity: 0; transform: translate(0); }
+          89% { opacity: .9; transform: translate(5px, -1px); }
+          91% { opacity: .65; transform: translate(-4px, 1px); }
+          93% { opacity: 0; }
+        }
+        @keyframes glitch-bottom {
+          0%, 91%, 100% { opacity: 0; transform: translate(0); }
+          92% { opacity: .85; transform: translate(-6px, 1px); }
+          94% { opacity: .6; transform: translate(3px, -1px); }
+          96% { opacity: 0; }
+        }
+
+        /* Барабан крутит скрипт, а не браузер: своей прокрутки у полосы нет.
+           С нативной не выходило гладко — она доводит ленту до карточки после
+           каждого маха, а поверх этого шла подмена копий, и вместе получалось
+           дёрганье. pan-y оставляет браузеру вертикаль: страница листается
+           пальцем как обычно, вбок распоряжаемся мы.
+
+           Стойка задаёт колонку — ту же, что у панели заголовка, — и служит
+           точкой отсчёта для стрелок. Раньше окно барабана было во всю
+           ширину окна с широкими полями: слева лента вставала вровень с
+           панелью, а справа уезжала за край экрана. Теперь обрезаем ровно
+           по колонке, и обе стороны совпадают с панелью. */
+        .services-deck {
+          position: relative;
+          width: min(1380px, calc(100% - 40px));
+          margin: 0 auto;
+        }
+
+        .services-wrap {
+          overflow: hidden;
+          padding: 14px 0 36px;
+          touch-action: pan-y;
+          cursor: grab;
+          /* Без этого зажатая мышь выделяла текст карточки вместо прокрутки. */
+          user-select: none;
+          -webkit-user-select: none;
+        }
+        .services-wrap.dragging { cursor: grabbing; }
+        .services { will-change: transform; }
+
+        /* Стрелки живут в полях по бокам колонки, за уровнем панели.
+           Треугольник приплюснутый: основание жирное, высота маленькая.
+           Отступ наружу появляется только когда экран шире колонки —
+           на узком поля всего по 20 пикселей, и клин садится в них впритык. */
+        .drum-arrow {
+          position: absolute;
+          top: 50%;
+          /* Минус 11 — половина разницы верхнего и нижнего полей окна:
+             так стрелка встаёт по центру карточек, а не по центру стойки. */
+          transform: translateY(calc(-50% - 11px));
+          width: 24px;
+          height: 58px;
+          display: grid;
+          place-items: center;
+          padding: 0;
+          border: 0;
+          background: none;
+          color: rgba(120, 208, 255, .62);
+          cursor: pointer;
+          transition: color .2s ease;
+        }
+
+        .drum-arrow:hover, .drum-arrow:focus-visible { color: #2de2ff; outline: none; }
+        .drum-arrow:active { color: #fff; }
+        .drum-arrow--prev { right: 100%; margin-right: clamp(0px, (100vw - 1420px) / 2, 26px); }
+        .drum-arrow--next { left: 100%; margin-left: clamp(0px, (100vw - 1420px) / 2, 26px); }
+
+        .drum-arrow b {
+          display: block;
+          width: 14px;
+          height: 40px;
+          background: currentColor;
+          filter: drop-shadow(0 0 7px currentColor);
+          transition: transform .2s ease;
+        }
+
+        .drum-arrow--prev b { clip-path: polygon(100% 0, 100% 100%, 0 50%); }
+        .drum-arrow--next b { clip-path: polygon(0 0, 0 100%, 100% 50%); }
+        .drum-arrow--prev:hover b { transform: translateX(-2px); }
+        .drum-arrow--next:hover b { transform: translateX(2px); }
+
+        /* Не сетка, а лента: карточки одной ширины идут в строку и
+           прокручиваются по кругу, как барабан. Ужимать их под число
+           сервисов больше не нужно — добавится восьмой, просто станет
+           на один оборот длиннее. Сама закольцовка живёт в скрипте. */
+        .services {
+          display: flex;
+          gap: 14px;
+          width: max-content;
+          margin: 0;
+        }
+        .service { flex: none; width: 264px; }
+
+        /* Картинки внутри карточки браузер норовит утащить как файл, а сама
+           карточка — ссылка, её он тащит как адрес. И то и другое обрывало
+           поток событий указателя, из-за чего лента переставала крутиться. */
+        .service img, .service svg { -webkit-user-drag: none; pointer-events: none; }
+
+        .service {
+          --accent: #6c8cff;
+          --glow: rgba(108, 140, 255, 0.2);
+          position: relative;
+          isolation: isolate;
+          min-height: 310px;
+          display: flex;
+          flex-direction: column;
+          padding: 26px;
+          overflow: hidden;
+          color: inherit;
+          text-decoration: none;
+          background: linear-gradient(145deg, rgba(27, 33, 48, .9), var(--surface));
+          border: 1px solid var(--line);
+          border-radius: 26px;
+          box-shadow: 0 20px 70px rgba(0, 0, 0, 0.25);
+          transition: transform .3s ease, border-color .3s ease, box-shadow .3s ease;
+        }
+
+        .service::before {
+          content: "";
+          position: absolute;
+          z-index: -1;
+          width: 180px;
+          height: 180px;
+          top: -95px;
+          right: -70px;
+          border-radius: 50%;
+          background: var(--accent);
+          filter: blur(55px);
+          opacity: .24;
+          transition: opacity .3s ease, transform .3s ease;
+        }
+
+        .service:hover,
+        .service:focus-visible {
+          transform: translateY(-9px);
+          border-color: color-mix(in srgb, var(--accent), white 18%);
+          box-shadow: 0 28px 80px rgba(0,0,0,.4), 0 0 38px var(--glow);
+          outline: none;
+        }
+
+        .service:hover::before { opacity: .42; transform: scale(1.15); }
+        .service--ha { --accent: #41bdf5; --glow: rgba(65,189,245,.2); }
+        .service--cloud { --accent: #1687d9; --glow: rgba(22,135,217,.22); }
+        .service--jellyfin { --accent: #aa5cc3; --glow: rgba(170,92,195,.22); }
+        .service--npm { --accent: #f04477; --glow: rgba(240,68,119,.2); }
+        .service--qb { --accent: #4fa8e8; --glow: rgba(79,168,232,.22); }
+        /* Знак GitHub официально чёрно-белый; на тёмной подложке
+           используется белый, поэтому и оттенок карточки светлый. */
+        .service--github { --accent: #dfe6ee; --glow: rgba(223,230,238,.16); }
+        .service--gitea { --accent: #609926; --glow: rgba(96,153,38,.24); }
+
+        .service-top { display: flex; align-items: flex-start; justify-content: space-between; }
+
+        .logo {
+          width: 62px;
+          height: 62px;
+          display: grid;
+          place-items: center;
+          border-radius: 18px;
+          color: var(--accent);
+          background: rgba(255,255,255,.055);
+          border: 1px solid rgba(255,255,255,.09);
+          box-shadow: inset 0 1px 0 rgba(255,255,255,.08);
+        }
+
+        .logo svg,
+        .logo img { width: 38px; height: 38px; object-fit: contain; }
+
+        .arrow {
+          width: 38px;
+          height: 38px;
+          display: grid;
+          place-items: center;
+          border-radius: 50%;
+          color: #b9c0d0;
+          background: rgba(255,255,255,.045);
+          transition: color .25s ease, background .25s ease, transform .25s ease;
+        }
+
+        .service:hover .arrow { color: #fff; background: var(--accent); transform: rotate(45deg); }
+        .arrow svg { width: 17px; }
+
+        .service-copy { margin-top: auto; }
+        .service h2 { margin: 0 0 8px; font-size: 1.42rem; letter-spacing: -.035em; }
+        .service p { min-height: 44px; margin: 0 0 18px; color: var(--muted); line-height: 1.45; }
+        /* Адрес в одну строку: рвать его посреди слова нельзя, читается
+           как ошибка. Если вдруг не влезет — обрежется многоточием. */
+        .domain { display: block; color: var(--accent); font-size: .74rem; font-weight: 750;
+                 letter-spacing: .08em; text-transform: uppercase;
+                 white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+        /* Подпись прижата к самому левому нижнему углу окна. Раньше она
+           жила в общей колонке шириной 1380px и на широком мониторе
+           повисала в воздухе далеко от края — колонка-то по центру. */
+        footer {
+          width: 100%;
+          display: flex;
+          justify-content: flex-start;
+          gap: 20px;
+          margin: auto 0 0;
+          padding: 28px 12px 0 clamp(12px, 1.4vw, 20px);
+          color: #686f80;
+          font-size: .82rem;
+        }
+
+        [hidden] { display: none !important; }
+
+        /* ── Полка с кнопками аркады ────────────────────────────────────── */
+        .arcade-bar {
+          width: min(1380px, calc(100% - 40px));
+          margin: clamp(26px, 4vw, 44px) auto 0;
+        }
+        .arcade-bar-line {
+          display: flex; align-items: center; gap: 14px;
+          color: #6b7590; font: 700 .68rem "Cascadia Code", Consolas, monospace;
+          letter-spacing: .32em;
+        }
+        .arcade-bar-line::before, .arcade-bar-line::after {
+          content: ""; flex: 1; height: 1px;
+          background: linear-gradient(90deg, transparent, rgba(255,255,255,.14), transparent);
+        }
+        .arcade-picks {
+          display: flex; flex-wrap: wrap; justify-content: center;
+          gap: 18px; margin-top: 18px;
+        }
+        /* Значки в «Рубке» вдвое крупнее и с подписью под каждым. Каждый —
+           это ячейка-колонка: сверху квадратная кнопка, снизу ярлык. */
+        .pick-cell {
+          display: flex; flex-direction: column; align-items: center; gap: 10px;
+          width: clamp(112px, 20vw, 156px);
+        }
+        .pick-cell .pick { width: 100%; }
+        .pick-label {
+          font: 700 .82rem "Cascadia Code", Consolas, monospace;
+          letter-spacing: .22em; color: #93a1b8; transition: color .2s;
+        }
+        .pick-cell:hover .pick-label,
+        .pick-cell:focus-within .pick-label { color: #eaf3ff; }
+        /* Красный замок в углу карточки: она под паролем. Со знакомого
+           устройства скрипт его убирает. */
+        .pick-lock {
+          position: absolute; top: 8px; right: 8px; z-index: 4;
+          width: 24px; height: 24px; display: grid; place-items: center;
+          color: #ff4d4d; filter: drop-shadow(0 0 6px rgba(255,60,60,.55));
+        }
+        .pick-lock svg { width: 100%; height: 100%; }
+        .pick {
+          --pc: #2de2ff;
+          position: relative; display: grid; place-items: center;
+          aspect-ratio: 1 / 1; padding: 14px; cursor: pointer; overflow: hidden;
+          border: 1px solid rgba(255,255,255,.1); border-radius: 14px;
+          background:
+            repeating-linear-gradient(45deg, rgba(255,255,255,.015) 0 8px, transparent 8px 16px),
+            linear-gradient(165deg, rgba(26,34,50,.95), rgba(9,13,20,.96));
+          transition: transform .2s cubic-bezier(.2,.9,.3,1.3), border-color .2s, box-shadow .2s;
+        }
+        .pick-art { position: relative; z-index: 2; width: 68%; display: block; }
+        .pick-art svg { width: 100%; height: auto; display: block;
+                        filter: drop-shadow(0 3px 6px rgba(0,0,0,.6)); }
+        /* мягкое пятно света под персонажем, разгорается при наведении */
+        .pick-glow {
+          position: absolute; z-index: 1; inset: auto 0 -40% 0; height: 80%;
+          background: radial-gradient(ellipse at 50% 100%, var(--pc), transparent 68%);
+          opacity: .1; transition: opacity .25s;
+        }
+        .pick::after {
+          content: ""; position: absolute; inset: 0; z-index: 3; pointer-events: none;
+          background: repeating-linear-gradient(180deg, rgba(0,0,0,.16) 0 2px, transparent 2px 4px);
+          opacity: .35;
+        }
+        .pick:hover, .pick:focus-visible {
+          transform: translateY(-5px);
+          border-color: var(--pc); outline: none;
+          box-shadow: 0 0 0 1px var(--pc), 0 16px 34px rgba(0,0,0,.5);
+        }
+        .pick:hover .pick-glow, .pick:focus-visible .pick-glow { opacity: .4; }
+        .pick:active { transform: translateY(-1px) scale(.97); }
+
+        .pick--cabinet { --pc: #2de2ff; }
+        .pick--rack    { --pc: #2de2ff; }
+        .pick--music   { --pc: #2de2ff; }
+        .pick--butler  { --pc: #b57cff; }
+        .pick--hero    { --pc: #5f9bff; }
+        .pick--pad     { --pc: #63f5ad; }
+        .pick--invader { --pc: #63f5ad; }
+        .pick--coin    { --pc: #ffd84a; }
+        .pick--cart    { --pc: #ff3fa4; }
+
+        /* Каждый персонаж живёт по-своему: у автомата мерцает экран, у героя
+           блестит меч, захватчик приплясывает, монета крутится. */
+        .pick-art .px-blink { animation: pxBlink 2.2s steps(1) infinite; }
+        @keyframes pxBlink { 0%, 82% { opacity: 1; } 86%, 100% { opacity: .25; } }
+        .pick--cabinet .px-screen { animation: pxFlicker 3.4s ease-in-out infinite; }
+        @keyframes pxFlicker { 0%, 100% { opacity: 1; } 47% { opacity: .72; } 51% { opacity: 1; } }
+        .pick--hero .pick-art svg { animation: pxHop 1.9s ease-in-out infinite; }
+        @keyframes pxHop { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6%); } }
+        .pick--hero .px-sword { animation: pxShine 2.6s ease-in-out infinite; }
+        @keyframes pxShine { 0%, 70%, 100% { fill: #cbd6e4; } 80% { fill: #ffffff; } }
+        .pick--invader .pick-art svg { animation: pxMarch 1.1s steps(2) infinite; }
+        @keyframes pxMarch { 0% { transform: translateX(-6%); } 50% { transform: translateX(6%); } }
+        .pick--coin .pick-art svg { animation: pxSpin 2.8s ease-in-out infinite; }
+        @keyframes pxSpin { 0%, 100% { transform: scaleX(1); } 50% { transform: scaleX(.18); } }
+        .pick--cart .pick-art svg { animation: pxSlot 3.2s ease-in-out infinite; }
+        @keyframes pxSlot { 0%, 62%, 100% { transform: translateY(0); } 74% { transform: translateY(10%); } }
+        /* Покачиваются все пять, на один и тот же угол, но с разной скоростью.
+           Разница нарочно мелкая: в такт полка выглядела бы одним механизмом,
+           а так каждая кнопка живёт сама по себе, и глаз это ловит, даже если
+           не может объяснить. */
+        .pick--pad .pick-art svg   { animation: pxTilt 3s ease-in-out infinite; }
+        .pick--diy .pick-art svg   { animation: pxTilt 3.2s ease-in-out infinite; }
+        .pick--rack .pick-art svg  { animation: pxTilt 3.45s ease-in-out infinite; }
+        .pick--music .pick-art svg { animation: pxTilt 3.6s ease-in-out infinite; }
+        .pick--butler .pick-art svg { animation: pxTilt 3.25s ease-in-out infinite; }
+        .pick--me .pick-art svg    { animation: pxTilt 3.85s ease-in-out infinite; }
+
+        /* Бегущая подсветка: строки кода на экране и отблеск в очках. */
+        @keyframes pxFlow { 0%, 100% { opacity: .2; } 18% { opacity: 1; } }
+        .pick-art .px-f1 { animation: pxFlow 1.6s linear infinite; }
+        .pick-art .px-f2 { animation: pxFlow 1.6s linear infinite .4s; }
+        .pick-art .px-f3 { animation: pxFlow 1.6s linear infinite .8s; }
+        .pick-art .px-f4 { animation: pxFlow 1.6s linear infinite 1.2s; }
+        @keyframes pxTilt { 0%, 100% { transform: rotate(-4deg); } 50% { transform: rotate(4deg); } }
+        /* У стойки лампы моргают вразнобой: одинаковый такт выглядит мёртво. */
+        .pick-art .px-blink2 { animation: pxBlink2 2.9s steps(1) infinite; }
+        @keyframes pxBlink2 { 0%, 58% { opacity: 1; } 64%, 100% { opacity: .18; } }
+        .pick-art .px-blink3 { animation: pxBlink3 1.3s steps(1) infinite; }
+        @keyframes pxBlink3 { 0%, 44% { opacity: 1; } 51%, 100% { opacity: .28; } }
+
+        @media (prefers-reduced-motion: reduce) {
+          .pick-art svg, .pick-art .px-blink, .pick-art .px-blink2,
+          .pick-art .px-blink3, .pick--cabinet .px-screen { animation: none; }
+        }
+
+        .auth-modal {
+          position: fixed;
+          z-index: 100;
+          inset: 0;
+          display: grid;
+          place-items: center;
+          padding: 20px;
+        }
+
+        .auth-backdrop {
+          position: absolute;
+          inset: 0;
+          background: rgba(3, 6, 13, .82);
+          backdrop-filter: blur(12px);
+        }
+
+        .auth-panel {
+          position: relative;
+          width: min(430px, 100%);
+          padding: 38px;
+          color: #e8fbff;
+          border: 1px solid rgba(45, 226, 255, .3);
+          background: linear-gradient(145deg, rgba(16, 30, 47, .98), rgba(20, 16, 37, .98));
+          clip-path: polygon(0 0, calc(100% - 22px) 0, 100% 22px, 100% 100%, 22px 100%, 0 calc(100% - 22px));
+          box-shadow: 0 32px 100px rgba(0,0,0,.65), inset 0 0 40px rgba(45,226,255,.05);
+        }
+
+        .auth-kicker { color: #2de2ff; font: 700 .7rem/1 "Cascadia Code", Consolas, monospace; letter-spacing: .16em; text-transform: uppercase; }
+        .auth-panel h2 { margin: 16px 0 8px; font: 800 clamp(2rem, 8vw, 3rem)/1 "Cascadia Code", Consolas, monospace; letter-spacing: -.07em; text-shadow: 2px 0 #ff3fa4, -2px 0 #2de2ff; }
+        .auth-hint { margin: 0 0 26px; color: #8792a6; line-height: 1.55; }
+        .auth-close { position: absolute; top: 15px; right: 17px; padding: 5px; color: #7d8799; font-size: 1.35rem; border: 0; background: none; cursor: pointer; }
+        .auth-close:hover { color: #fff; }
+        .auth-form label { display: block; margin-bottom: 9px; color: #b8c1d2; font-size: .78rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+        .auth-form input { width: 100%; height: 50px; padding: 0 15px; color: #f4fbff; font: 700 1rem "Cascadia Code", Consolas, monospace; border: 1px solid rgba(255,255,255,.12); outline: none; background: rgba(4,10,20,.65); }
+        .auth-form input:focus { border-color: #2de2ff; box-shadow: 0 0 0 3px rgba(45,226,255,.09); }
+        .auth-submit { width: 100%; height: 50px; margin-top: 14px; color: #071018; font: 800 .82rem "Cascadia Code", Consolas, monospace; letter-spacing: .08em; text-transform: uppercase; border: 0; background: linear-gradient(90deg, #2de2ff, #65f2bd); cursor: pointer; }
+        .auth-submit:hover { filter: brightness(1.08); }
+        .auth-submit:disabled { opacity: .55; cursor: wait; }
+        .auth-error { min-height: 20px; margin: 12px 0 0; color: #ff6ba8; font-size: .8rem; }
+        body.modal-open { overflow: hidden; }
+
+        @media (max-width: 700px) {
+          .page { justify-content: flex-start; }
+          .hero { margin-bottom: 22px; }
+          /* На узком экране размер, привязанный к ширине окна, схлопывался
+             до упора: «DOMAIN CONTROL» становился мельче подписи под ним,
+             хотя места в рамке оставалось на две таких строки. Здесь у
+             надписей свои, более щедрые размеры; на широком экране всё
+             остаётся как было. Потолок подобран по самой длинной из трёх
+             строк — «VITAZGIO NETWORK», шестнадцать знаков. */
+          .cyber-terminal { min-height: 112px; padding-inline: 12px; }
+          .terminal-prompt { margin-right: .18em; font-size: clamp(1.6rem, 7.9vw, 2.7rem); }
+          .cyber-text { letter-spacing: -.08em; font-size: clamp(1.6rem, 8.8vw, 2.9rem); }
+          /* Знак ростом со шрифт вывески, а он здесь свой — повторяем размер. */
+          .hero-mark { width: clamp(1.6rem, 8.8vw, 2.9rem); height: clamp(1.6rem, 8.8vw, 2.9rem); }
+          /* Отступ до панели держит строка целиком, а не подпись внутри неё —
+             иначе к нему прибавлялся отступ строки и выходило вдвое больше. */
+          .hero-top { margin-bottom: 18px; }
+          .eyebrow { font-size: .95rem; letter-spacing: .12em; }
+          .eyebrow::before { width: 9px; height: 9px; }
+          .arcade-bar-line { font-size: .86rem; letter-spacing: .26em; }
+          /* Пять кнопок в строку на телефоне не влезают — раскладываем
+             тремя и двумя, ширину считаем от полосы, а не подбираем. */
+          .arcade-picks { gap: 12px; }
+          .arcade-picks .pick-cell { width: calc((100% - 24px) / 3); max-width: 130px; }
+          .pick-label { font-size: .68rem; letter-spacing: .14em; }
+          footer { font-size: .95rem; }
+          .service { width: 78vw; min-height: 280px; }
+          /* На телефоне листают пальцем, а поля по бокам всего 20 пикселей —
+             стрелкам там не встать, да и незачем. */
+          .drum-arrow { display: none; }
+          footer { flex-direction: column; }
+          .auth-panel { padding: 34px 25px 28px; }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          * { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
+        }
+      </style>
+    </head>
+    <body>
+      <main class="page">
+        <section class="hero" aria-labelledby="page-title">
+          <div class="hero-top">
+            <div class="eyebrow">vitazgio.ru · мои домены</div>
+            <img class="hero-mark" src="/static/icons/vg-plain.svg" alt="Vitaz Gio"
+                 width="512" height="512">
+          </div>
+          <h1 id="page-title" class="cyber-terminal" aria-label="Мои веб-сервисы, Vitazgio Network, Domain Control">
+            <span class="terminal-prompt" aria-hidden="true">&gt;</span>
+            <span id="cyber-text" class="cyber-text" data-text="МОИ ВЕБ-СЕРВИСЫ" aria-hidden="true">МОИ ВЕБ-СЕРВИСЫ</span>
+            <span class="terminal-cursor" aria-hidden="true"></span>
+          </h1>
+        </section>
+
+        <div class="services-deck">
+          <button class="drum-arrow drum-arrow--prev" type="button" hidden
+                  data-drum="-1" aria-label="Предыдущий сервис"><b></b></button>
+          <button class="drum-arrow drum-arrow--next" type="button" hidden
+                  data-drum="1" aria-label="Следующий сервис"><b></b></button>
+        <nav class="services-wrap" aria-label="Сервисы vitazgio.ru">
+          <div class="services">
+            <a class="service service--ha" href="https://ha.vitazgio.ru" aria-label="Открыть Home Assistant">
+              <div class="service-top">
+                <span class="logo" aria-hidden="true"><img src="/static/home-assistant.png" alt=""></span>
+                <span class="arrow" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M7 17 17 7m0 0H8m9 0v9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+              </div>
+              <div class="service-copy"><h2>Home Assistant</h2><p>Умный дом и автоматизация</p><span class="domain">ha.vitazgio.ru</span></div>
+            </a>
+
+            <a class="service service--cloud" href="https://cloud.vitazgio.ru" aria-label="Открыть Nextcloud">
+              <div class="service-top">
+                <span class="logo" aria-hidden="true"><svg viewBox="0 0 48 48" fill="none"><circle cx="24" cy="24" r="9" stroke="currentColor" stroke-width="4"/><circle cx="7.5" cy="24" r="5.5" stroke="currentColor" stroke-width="4"/><circle cx="40.5" cy="24" r="5.5" stroke="currentColor" stroke-width="4"/></svg></span>
+                <span class="arrow" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M7 17 17 7m0 0H8m9 0v9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+              </div>
+              <div class="service-copy"><h2>Nextcloud</h2><p>Личное облачное хранилище</p><span class="domain">cloud.vitazgio.ru</span></div>
+            </a>
+
+            <a class="service service--jellyfin" href="https://jel.vitazgio.ru" aria-label="Открыть Jellyfin">
+              <div class="service-top">
+                <span class="logo" aria-hidden="true"><img src="/static/jellyfin.svg" alt=""></span>
+                <span class="arrow" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M7 17 17 7m0 0H8m9 0v9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+              </div>
+              <div class="service-copy"><h2>Jellyfin</h2><p>Фильмы и сериалы</p><span class="domain">jel.vitazgio.ru</span></div>
+            </a>
+
+            <a class="service service--npm" href="https://npm.vitazgio.ru" aria-label="Открыть Nginx Proxy Manager">
+              <div class="service-top">
+                <span class="logo" aria-hidden="true"><img src="/static/nginx-proxy-manager.svg" alt=""></span>
+                <span class="arrow" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M7 17 17 7m0 0H8m9 0v9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+              </div>
+              <div class="service-copy"><h2>Nginx Proxy</h2><p>Управление доменами и прокси</p><span class="domain">npm.vitazgio.ru</span></div>
+            </a>
+
+            <a class="service service--github" href="https://github.com/VITAZGIO"
+               aria-label="Открыть GitHub">
+              <div class="service-top">
+                <span class="logo" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg></span>
+                <span class="arrow" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M7 17 17 7m0 0H8m9 0v9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+              </div>
+              <div class="service-copy"><h2>GitHub</h2><p>Исходники проектов и история правок</p><span class="domain">github.com</span></div>
+            </a>
+
+            <a class="service service--qb" href="https://qb.vitazgio.ru" aria-label="Открыть qBittorrent">
+              <div class="service-top">
+                <span class="logo" aria-hidden="true">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+                    <defs><linearGradient x1="34.012%" y1="0%" x2="76.373%" y2="76.805%" id="qb-grad"><stop stop-color="#72B4F5" offset="0%"/><stop stop-color="#356EBF" offset="100%"/></linearGradient></defs>
+                    <g fill="none" fill-rule="evenodd">
+                      <circle stroke="#DAEFFF" stroke-width="32" fill="url(#qb-grad)" cx="512" cy="512" r="496"/>
+                      <path d="M712.898 332.399q66.657 0 103.38 45.671 37.03 45.364 37.03 128.684t-37.34 129.61q-37.03 45.98-103.07 45.98-33.02 0-60.484-12.035-27.156-12.344-45.672-37.649h-3.703l-10.8 43.512h-36.724V196h51.227v116.65q0 39.191-2.469 70.359h2.47q35.796-50.61 106.155-50.61zm-7.406 42.894q-52.46 0-75.605 30.242-23.145 29.934-23.145 101.219t23.762 102.145q23.761 30.55 76.222 30.55 47.215 0 70.36-34.254 23.144-34.562 23.144-99.058 0-66.04-23.144-98.442-23.145-32.402-71.594-32.402z" fill="#fff"/>
+                      <path d="M317.273 639.45q51.227 0 74.68-27.466 23.453-27.464 24.996-92.578v-11.418q0-70.976-24.07-102.144-24.07-31.168-76.223-31.168-45.055 0-69.125 35.18-23.762 34.87-23.762 98.75 0 63.879 23.454 97.515 23.761 33.328 70.05 33.328zm-7.715 42.894q-65.421 0-102.144-45.98-36.723-45.981-36.723-128.376 0-83.011 37.032-129.609 37.03-46.598 103.07-46.598 69.433 0 106.773 52.461h2.778l7.406-46.289h40.426V828h-51.227V683.27q0-30.86 3.395-52.461h-4.012q-35.488 51.535-106.774 51.535z" fill="#c8e8ff"/>
+                    </g>
+                  </svg>
+                </span>
+                <span class="arrow" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M7 17 17 7m0 0H8m9 0v9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+              </div>
+              <div class="service-copy"><h2>qBittorrent</h2><p>Веб-интерфейс торрент-клиента</p><span class="domain">qb.vitazgio.ru</span></div>
+            </a>
+
+            <a class="service service--gitea" href="https://git.vitazgio.ru"
+               aria-label="Открыть Gitea">
+              <div class="service-top">
+                <span class="logo" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M4.209 4.603c-.247 0-.525.02-.84.088-.333.07-1.28.283-2.054 1.027C-.403 7.25.035 9.685.089 10.052c.065.446.263 1.687 1.21 2.768 1.749 2.141 5.513 2.092 5.513 2.092s.462 1.103 1.168 2.119c.955 1.263 1.936 2.248 2.89 2.367 2.406 0 7.212-.004 7.212-.004s.458.004 1.08-.394c.535-.324 1.013-.893 1.013-.893s.492-.527 1.18-1.73c.21-.37.385-.729.538-1.068 0 0 2.107-4.471 2.107-8.823-.042-1.318-.367-1.55-.443-1.627-.156-.156-.366-.153-.366-.153s-4.475.252-6.792.306c-.508.011-1.012.023-1.512.027v4.474l-.634-.301c0-1.39-.004-4.17-.004-4.17-1.107.016-3.405-.084-3.405-.084s-5.399-.27-5.987-.324c-.187-.011-.401-.032-.648-.032zm.354 1.832h.111s.271 2.269.6 3.597C5.549 11.147 6.22 13 6.22 13s-.996-.119-1.641-.348c-.99-.324-1.409-.714-1.409-.714s-.73-.511-1.096-1.52C1.444 8.73 2.021 7.7 2.021 7.7s.32-.859 1.47-1.145c.395-.106.863-.12 1.072-.12zm8.33 2.554c.26.003.509.127.509.127l.868.422-.529 1.075a.686.686 0 0 0-.614.359.685.685 0 0 0 .072.756l-.939 1.924a.69.69 0 0 0-.66.527.687.687 0 0 0 .347.763.686.686 0 0 0 .867-.206.688.688 0 0 0-.069-.882l.916-1.874a.667.667 0 0 0 .237-.02.657.657 0 0 0 .271-.137 8.826 8.826 0 0 1 1.016.512.761.761 0 0 1 .286.282c.073.21-.073.569-.073.569-.087.29-.702 1.55-.702 1.55a.692.692 0 0 0-.676.477.681.681 0 1 0 1.157-.252c.073-.141.141-.282.214-.431.19-.397.515-1.16.515-1.16.035-.066.218-.394.103-.814-.095-.435-.48-.638-.48-.638-.467-.301-1.116-.58-1.116-.58s0-.156-.042-.27a.688.688 0 0 0-.148-.241l.516-1.062 2.89 1.401s.48.218.583.619c.073.282-.019.534-.069.657-.24.587-2.1 4.317-2.1 4.317s-.232.554-.748.588a1.065 1.065 0 0 1-.393-.045l-.202-.08-4.31-2.1s-.417-.218-.49-.596c-.083-.31.104-.691.104-.691l2.073-4.272s.183-.37.466-.497a.855.855 0 0 1 .35-.077z"/></svg></span>
+                <span class="arrow" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M7 17 17 7m0 0H8m9 0v9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+              </div>
+              <div class="service-copy"><h2>Gitea</h2><p>Свой git на домашнем сервере</p><span class="domain">git.vitazgio.ru</span></div>
+            </a>
+          </div>
+        </nav>
+        </div>
+
+        <!-- Полка с двумя кнопками: стойка ведёт в кабинет, геймпад — в игры.
+             Обе без единой буквы: подпись даёт aria-label и всплывающая
+             подсказка, а глазу хватает пиксельного значка. -->
+        <section class="arcade-bar" aria-label="Рубка">
+          <div class="arcade-bar-line"><span>РУБКА</span></div>
+          <!-- Порядок задан: игры, страна DIY, хозяйство, музыка, кабинет.
+               Стойка переехала сюда из кабинета — теперь она про сервера,
+               а у кабинета свой значок: человек за компом. -->
+          <div class="arcade-picks">
+            <span class="pick-cell pick--pad">
+              <button class="pick pick--pad" type="button" data-games
+                      title="Игры" aria-label="Открыть игры">
+                <span class="pick-art">__ICON_PAD__</span>
+                <span class="pick-glow"></span>
+              </button>
+              <span class="pick-label">GAMES</span>
+            </span>
+            <span class="pick-cell pick--diy">
+              <a class="pick pick--diy" href="/diy"
+                 title="Страна DIY" aria-label="Открыть страну DIY">
+                <span class="pick-art">__ICON_CODE__</span>
+                <span class="pick-glow"></span>
+              </a>
+              <span class="pick-label">DIY</span>
+            </span>
+            <span class="pick-cell pick--rack">
+              <a class="pick pick--rack" href="/servers"
+                 title="Хозяйство" aria-label="Открыть рассказ о серверах">
+                <span class="pick-art">__ICON_RACK__</span>
+                <span class="pick-glow"></span>
+              </a>
+              <span class="pick-label">SERVERS</span>
+            </span>
+            <span class="pick-cell pick--butler">
+              <a class="pick pick--butler" href="/sebastian"
+                 title="Себастьян" aria-label="Поговорить с дворецким">
+                <span class="pick-art">__ICON_BUTLER__</span>
+                <span class="pick-glow"></span>
+              </a>
+              <span class="pick-label">SEBASTIAN</span>
+            </span>
+            <span class="pick-cell pick--music">
+              <a class="pick pick--music" href="/music" id="music-pick"
+                 title="Музыка" aria-label="Открыть музыку">
+                <span class="pick-art">__ICON_SPEAKER__</span>
+                <span class="pick-glow"></span>
+                <span class="pick-lock" title="Под паролем" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><rect x="4.5" y="10.5" width="15" height="10" rx="2.2" fill="currentColor"/><path d="M8 10.5V7.6a4 4 0 0 1 8 0v2.9" stroke="currentColor" stroke-width="2.2"/></svg></span>
+              </a>
+              <span class="pick-label">MUSIC</span>
+            </span>
+            <span class="pick-cell pick--me">
+              <button class="pick pick--me" type="button" id="cabinet-pick"
+                      title="Личный кабинет" aria-label="Открыть личный кабинет">
+                <span class="pick-art">__ICON_ME__</span>
+                <span class="pick-glow"></span>
+                <span class="pick-lock" title="Под паролем" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><rect x="4.5" y="10.5" width="15" height="10" rx="2.2" fill="currentColor"/><path d="M8 10.5V7.6a4 4 0 0 1 8 0v2.9" stroke="currentColor" stroke-width="2.2"/></svg></span>
+              </button>
+              <span class="pick-label">TOP SECRET</span>
+            </span>
+          </div>
+        </section>
+
+        <footer><span>@Vitaz Gio · Основан 2:12 04.05.2026</span></footer>
+      </main>
+      <div id="auth-modal" class="auth-modal" hidden>
+        <div class="auth-backdrop" data-auth-close></div>
+        <section class="auth-panel" role="dialog" aria-modal="true" aria-labelledby="auth-title">
+          <button class="auth-close" type="button" data-auth-close aria-label="Закрыть">×</button>
+          <div class="auth-kicker">Restricted area // 01</div>
+          <h2 id="auth-title">Авторизация</h2>
+          <p class="auth-hint">Введите пароль для прав админа.</p>
+          <form id="auth-form" class="auth-form">
+            <label for="auth-password">Пароль</label>
+            <input id="auth-password" name="password" type="password" autocomplete="current-password" required>
+            <button class="auth-submit" type="submit">Получить доступ</button>
+            <p id="auth-error" class="auth-error" role="alert"></p>
+          </form>
+        </section>
+      </div>
+      <script>
+        /* Барабан сервисов: лента бесконечно едет вбок, а прокрутку ей
+           даём мы сами, а не браузер.
+
+           Почему сами. С нативной прокруткой лента дёргалась: браузер после
+           каждого маха доводил её до ближайшей карточки, а мы поверх этого
+           подменяли копии — и подмена посреди инерции оставляла пустое
+           место, потому что перерисовать уехавшее он не успевал.
+
+           Как устроено. Есть одно число — на сколько лента сдвинута. Для
+           показа оно заворачивается в пределы одного набора: дальше картинка
+           всё равно повторяется. Копий набора столько, чтобы окно было
+           закрыто карточками при любом сдвиге. Двигаем через transform: он
+           не заставляет браузер пересчитывать раскладку.
+
+           Отпустил палец — лента идёт свободным выбегом с трением. Как
+           только скорость падает до GRAB, её подхватывает магнит: считает,
+           где лента встала бы сама, округляет до ближайшей карточки и
+           доводит туда. Подхват происходит на ходу, задолго до остановки,
+           поэтому щелчка в конце не видно — лента просто плавно причаливает
+           карточкой к левому краю, ровно как при загрузке страницы. */
+        (() => {
+          const wrap = document.querySelector(".services-wrap");
+          const row = document.querySelector(".services");
+          if (!wrap || !row) return;
+
+          const GAP = 14;
+          const MAX_SPEED = 4.8;      // пикселей на миллисекунду, потолок разгона
+          const FRICTION = 0.955;     // сколько скорости остаётся за кадр в 16 мс
+          const GRAB = 1.35;          // на этой скорости магнит подхватывает ленту
+          const DRAG_SLOP = 8;        // сдвиг, после которого это уже не тык
+          const NUDGE = 1.6;          // скорость доводки по стрелке, px за мс
+          // Скорость тает по одному закону, значит весь остаток пути — это
+          // текущая скорость, помноженная на постоянную времени.
+          const TAU = 16 / Math.log(1 / FRICTION);
+
+          const originals = Array.prototype.slice.call(row.children);
+          const arrows = Array.prototype.slice.call(
+            document.querySelectorAll(".drum-arrow"));
+          // Карточка — ссылка, и браузер тащит её как адрес. Перетаскивание
+          // обрывало поток событий указателя: на компьютере зажатая мышь
+          // подсвечивала карточку, а лента при этом стояла.
+          originals.forEach((card) => { card.draggable = false; });
+          let clones = [];
+          let setWidth = 0;
+          let pitch = 0;              // шаг: карточка вместе с зазором
+          let offset = 0;             // на сколько лента сдвинута влево
+          let speed = 0;
+          let alive = false;
+          let raf = 0;
+
+          const measure = () => originals.reduce(
+            (sum, card) => sum + card.getBoundingClientRect().width + GAP, 0);
+
+          const addCopy = () => {
+            originals.forEach((card) => {
+              const twin = card.cloneNode(true);
+              twin.setAttribute("aria-hidden", "true");
+              twin.setAttribute("tabindex", "-1");
+              twin.dataset.twin = "1";
+              row.appendChild(twin);
+              clones.push(twin);
+            });
+          };
+
+          /* Само число сдвига не трогаем — заворачиваем только то, что
+             показываем. Иначе доводка до карточки спотыкалась бы каждый раз,
+             когда лента переваливает через конец набора. */
+          const place = () => {
+            const shown = ((offset % setWidth) + setWidth) % setWidth;
+            row.style.transform = "translate3d(" + (-shown).toFixed(2) + "px,0,0)";
+          };
+
+          const stopMotion = () => {
+            if (raf) cancelAnimationFrame(raf);
+            raf = 0;
+            speed = 0;
+          };
+
+          /* Доводка: едем к цели с замедлением к концу. Время подбираем под
+             ту скорость, с какой лента подошла, — тогда стыка со свободным
+             выбегом не видно. У этого замедления скорость наибольшая в самом
+             начале и вдвое выше средней, отсюда двойка в формуле.
+
+             Замедление именно квадратичное, а не более крутое: у крутого
+             длинный хвост — на последние двадцать пикселей уходило почти
+             полсекунды, и это читалось как «встало и потом дощёлкнуло». */
+          const easeTo = (target, entry) => {
+            const from = offset;
+            const dist = target - from;
+            const way = Math.abs(dist);
+            if (way < 0.5) { stopMotion(); offset = target; place(); return; }
+            const time = Math.max(140, Math.min(800, 2 * way / Math.max(entry, 0.2)));
+            const t0 = performance.now();
+            stopMotion();
+            const step = (now) => {
+              const k = Math.min(1, (now - t0) / time);
+              const ease = 1 - (1 - k) * (1 - k);
+              offset = from + dist * ease;
+              place();
+              raf = k < 1 ? requestAnimationFrame(step) : 0;
+            };
+            raf = requestAnimationFrame(step);
+          };
+
+          /* Магнит: прикидываем, где лента остановилась бы сама, округляем
+             до ближайшей карточки и причаливаем туда с той же скоростью. */
+          const magnet = () => {
+            if (!alive || !pitch) return;
+            const stopAt = offset + speed * TAU;
+            easeTo(Math.round(stopAt / pitch) * pitch, Math.abs(speed));
+          };
+
+          /* Свободный выбег. Пока лента идёт быстрее GRAB, ей никто не
+             мешает — крутится сколько накрутили. Замедлилась — передаём
+             магниту, и он доводит её до карточки уже на ходу. */
+          const coast = () => {
+            if (!alive) return;
+            if (Math.abs(speed) <= GRAB) { magnet(); return; }
+            let last = performance.now();
+            const step = (now) => {
+              const dt = Math.min(48, now - last);
+              last = now;
+              offset += speed * dt;
+              speed *= Math.pow(FRICTION, dt / 16);
+              place();
+              if (Math.abs(speed) <= GRAB) { raf = 0; magnet(); return; }
+              raf = requestAnimationFrame(step);
+            };
+            if (raf) cancelAnimationFrame(raf);
+            raf = requestAnimationFrame(step);
+          };
+
+          /* Шаг по стрелке: ровно одна карточка от текущего положения. */
+          const nudge = (dir) => {
+            if (!alive || !pitch) return;
+            speed = 0;
+            easeTo((Math.round(offset / pitch) + dir) * pitch, NUDGE);
+          };
+
+          const build = () => {
+            clones.forEach((twin) => twin.remove());
+            clones = [];
+            stopMotion();
+            alive = false;
+            offset = 0;
+            row.style.transform = "";
+            arrows.forEach((key) => { key.hidden = true; });
+            setWidth = measure();
+            pitch = originals[0].getBoundingClientRect().width + GAP;
+            // Видимая ширина — без боковых полей. По полной ширине блока
+            // считать нельзя: на мониторе 2560 поля съедают по 590 пикселей,
+            // и лента в 1932 казалась помещающейся, хотя видно от неё 1380.
+            const pad = getComputedStyle(wrap);
+            const room = wrap.clientWidth
+              - parseFloat(pad.paddingLeft) - parseFloat(pad.paddingRight);
+            // Всё влезло — крутить нечего.
+            if (setWidth - GAP <= room + 1) return;
+            // Копий столько, чтобы окно было закрыто при любом сдвиге:
+            // видно участок от сдвига до сдвига плюс ширина окна, а сдвиг
+            // меньше длины набора. Одна лишняя копия — на всякий случай.
+            const need = Math.ceil((setWidth + room) / setWidth) + 1;
+            for (let i = 1; i < need; i++) addCopy();
+            alive = true;
+            arrows.forEach((key) => { key.hidden = false; });
+            place();
+          };
+
+          /* ── Палец и мышь ──────────────────────────────────────────── */
+          let dragging = false;
+          let lastX = 0;
+          let lastT = 0;
+          let travelled = 0;
+          let pointer = 0;
+          let held = false;           // взят ли захват указателя
+
+          const onDown = (e) => {
+            if (!alive || e.button > 0) return;
+            dragging = true;
+            pointer = e.pointerId;
+            lastX = e.clientX;
+            lastT = e.timeStamp;
+            travelled = 0;
+            held = false;
+            stopMotion();
+            wrap.classList.add("dragging");
+          };
+
+          const onMove = (e) => {
+            if (!dragging) return;
+            const dx = e.clientX - lastX;
+            const dt = Math.max(1, e.timeStamp - lastT);
+            offset -= dx;
+            travelled += Math.abs(dx);
+            /* Захват нужен, чтобы палец, уехавший за пределы полосы, всё
+               равно продолжал крутить ленту. Но берём его только когда
+               протяжка уже началась: пока указатель захвачен, браузер
+               адресует щелчок самой полосе, и тык по карточке не открывал
+               сервис. Иногда захват не даётся — например, если событие
+               пришло не от живого указателя; тогда обойдёмся без него. */
+            if (!held && travelled > DRAG_SLOP) {
+              held = true;
+              try { wrap.setPointerCapture(pointer); } catch (err) { /* обойдёмся */ }
+            }
+            // Скорость считаем по последнему отрезку, но с оглядкой на
+            // прежнюю: от одного дёрганого кадра лента не должна улетать.
+            const raw = -dx / dt;
+            speed = Math.max(-MAX_SPEED, Math.min(MAX_SPEED, speed * 0.4 + raw * 0.6));
+            lastX = e.clientX;
+            lastT = e.timeStamp;
+            place();
+          };
+
+          const onUp = () => {
+            if (!dragging) return;
+            dragging = false;
+            wrap.classList.remove("dragging");
+            if (held) {
+              held = false;
+              try { wrap.releasePointerCapture(pointer); } catch (err) { /* уже отпущен */ }
+            }
+            coast();
+          };
+
+          wrap.addEventListener("pointerdown", onDown);
+          wrap.addEventListener("pointermove", onMove);
+          wrap.addEventListener("pointerup", onUp);
+          wrap.addEventListener("pointercancel", onUp);
+          // Последний рубеж против нативного переноса: у картинок его гасит
+          // стиль, у ссылки — свойство, но с выделенного текста он всё равно
+          // может начаться, и тогда лента замирает на полпути.
+          wrap.addEventListener("dragstart", (e) => e.preventDefault());
+
+          arrows.forEach((key) => {
+            key.addEventListener("click", () => nudge(Number(key.dataset.drum)));
+          });
+
+          // Протащил ленту — значит не по карточке жал, переход отменяем.
+          wrap.addEventListener("click", (e) => {
+            if (travelled > DRAG_SLOP) { e.preventDefault(); e.stopPropagation(); }
+          }, true);
+
+          // Окно обрезает ленту, но остаётся прокручиваемым: браузер может
+          // сам увести его вбок, подтягивая карточку под фокус. Держим на нуле,
+          // иначе его сдвиг сложится с нашим и раскладка поедет.
+          wrap.addEventListener("scroll", () => { if (wrap.scrollLeft) wrap.scrollLeft = 0; });
+
+          // Колесо: вбок крутим ленту, вниз оставляем странице. Доводку
+          // запускаем, когда колесо замерло, — иначе она мешала бы крутить.
+          let wheelIdle = 0;
+          wrap.addEventListener("wheel", (e) => {
+            if (!alive) return;
+            const dx = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX
+                     : (e.shiftKey ? e.deltaY : 0);
+            if (!dx) return;
+            e.preventDefault();
+            stopMotion();
+            offset += dx;
+            place();
+            clearTimeout(wheelIdle);
+            wheelIdle = setTimeout(() => { speed = 0; magnet(); }, 140);
+          }, { passive: false });
+
+          /* Переход табом по ссылкам: своей прокрутки у полосы нет, поэтому
+             подводим ленту к карточке сами, иначе фокус уезжал бы за экран. */
+          wrap.addEventListener("focusin", (e) => {
+            if (!alive) return;
+            const card = e.target.closest(".service");
+            if (!card) return;
+            const box = card.getBoundingClientRect();
+            const view = wrap.getBoundingClientRect();
+            const pad = parseFloat(getComputedStyle(wrap).paddingLeft);
+            if (box.left >= view.left + pad - 1 && box.right <= view.right) return;
+            speed = 0;
+            easeTo(Math.round((offset + box.left - view.left - pad) / pitch) * pitch, NUDGE);
+          });
+
+          build();
+
+          let resizeTimer = 0;
+          window.addEventListener("resize", () => {
+            clearTimeout(resizeTimer);
+            resizeTimer = setTimeout(build, 180);
+          });
+        })();
+
+        (() => {
+          const output = document.getElementById("cyber-text");
+          const phrases = ["МОИ ВЕБ-СЕРВИСЫ", "VITAZGIO NETWORK", "DOMAIN CONTROL"];
+          const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+          const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+          const render = (text) => {
+            output.textContent = text;
+            output.dataset.text = text;
+          };
+
+          if (reduceMotion) {
+            render(phrases[0]);
+            return;
+          }
+
+          const runTerminal = async () => {
+            let phraseIndex = 0;
+            while (true) {
+              const phrase = phrases[phraseIndex];
+              render("");
+              for (let index = 1; index <= phrase.length; index += 1) {
+                render(phrase.slice(0, index));
+                await wait(78);
+              }
+              await wait(1450);
+              for (let index = phrase.length - 1; index >= 0; index -= 1) {
+                render(phrase.slice(0, index));
+                await wait(42);
+              }
+              await wait(260);
+              phraseIndex = (phraseIndex + 1) % phrases.length;
+            }
+          };
+
+          runTerminal();
+        })();
+
+        (() => {
+          const cabinetPick = document.getElementById("cabinet-pick");
+          const musicPick = document.getElementById("music-pick");
+          const modal = document.getElementById("auth-modal");
+          const form = document.getElementById("auth-form");
+          const password = document.getElementById("auth-password");
+          const error = document.getElementById("auth-error");
+          const submit = form.querySelector("button[type='submit']");
+
+          // Куда уйти после входа. Обе закрытые карточки — кабинет и музыка —
+          // открывают одно окно; отличается только пункт назначения.
+          let authDest = "/cabinet";
+          let lastTrigger = cabinetPick;
+
+          const openModal = () => {
+            modal.hidden = false;
+            document.body.classList.add("modal-open");
+            error.textContent = "";
+            requestAnimationFrame(() => password.focus());
+          };
+
+          const closeModal = () => {
+            modal.hidden = true;
+            document.body.classList.remove("modal-open");
+            form.reset();
+            error.textContent = "";
+            if (lastTrigger) lastTrigger.focus();
+          };
+
+          // Помнит устройство — сразу пускаем, не помнит — просим пароль.
+          const guard = (dest, el) => async (event) => {
+            if (event) event.preventDefault();
+            authDest = dest;
+            lastTrigger = el;
+            try {
+              const response = await fetch("/api/session/probe", { credentials: "same-origin" });
+              const result = await response.json();
+              if (result.trusted) {
+                window.location.assign(dest);
+                return;
+              }
+            } catch {}
+            openModal();
+          };
+
+          cabinetPick.addEventListener("click", guard("/cabinet", cabinetPick));
+          if (musicPick) musicPick.addEventListener("click", guard("/music", musicPick));
+          modal.querySelectorAll("[data-auth-close]").forEach((element) => element.addEventListener("click", closeModal));
+          document.addEventListener("keydown", (event) => {
+            if (event.key === "Escape" && !modal.hidden) closeModal();
+          });
+
+          form.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            error.textContent = "";
+            submit.disabled = true;
+            try {
+              const response = await fetch("/api/login", {
+                method: "POST",
+                credentials: "same-origin",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ password: password.value }),
+              });
+              const result = await response.json();
+              if (!response.ok) {
+                error.textContent = result.error || "Не удалось выполнить вход.";
+                password.select();
+                return;
+              }
+              window.location.assign(result.redirect || authDest);
+            } catch {
+              error.textContent = "Сервер недоступен. Повторите попытку.";
+            } finally {
+              submit.disabled = false;
+            }
+          });
+        })();
+
+        // Красный замок на «Музыке» и «Кабинете» снимаем, если сервер помнит
+        // это устройство: тогда пароль не спросят, и замку неоткуда взяться.
+        (async () => {
+          try {
+            const r = await fetch("/api/session/probe", { credentials: "same-origin" });
+            const d = await r.json();
+            if (d && d.trusted) {
+              document.querySelectorAll(".pick-lock").forEach((el) => el.remove());
+            }
+          } catch {}
+        })();
+
+        // Service worker регистрируем и здесь: приложение стартует с главной,
+        // и без него запасная страница с лисой в офлайне просто не покажется.
+        if ("serviceWorker" in navigator) {
+          navigator.serviceWorker.register("/sw.js").catch(() => {});
+        }
+
+        // ── Игры: кнопки на полке ARCADE и код Konami ──
+        // Сама аркада живёт в /static/games/ и подгружается только по требованию:
+        // на обычном заходе на витрину эти килобайты никто не качает.
+        (() => {
+          let pending = null;
+          const openArcade = (game) => {
+            if (window.VitazArcade) { window.VitazArcade.open(game); return; }
+            if (pending) return;
+            pending = document.createElement("script");
+            pending.src = "/static/games/arcade.js";
+            pending.onload = () => { pending = null; window.VitazArcade.open(game); };
+            pending.onerror = () => { pending = null; };
+            document.head.appendChild(pending);
+          };
+
+          document.querySelectorAll("[data-games]").forEach(btn => {
+            btn.addEventListener("click", () => openArcade());
+          });
+
+          // Пасхалка осталась прежней, только теперь ведёт сразу в змейку.
+          const SEQ = ["ArrowUp","ArrowUp","ArrowDown","ArrowDown","ArrowLeft","ArrowRight","ArrowLeft","ArrowRight","b","a"];
+          let pos = 0;
+          document.addEventListener("keydown", e => {
+            if (e.key === SEQ[pos]) { pos++; if (pos === SEQ.length) { pos = 0; openArcade("snake"); } }
+            else { pos = e.key === SEQ[0] ? 1 : 0; }
+          });
+        })();
+      </script>
+      <script src="/vg-player.js" defer></script>
+    </body>
+    </html>
+    
