@@ -51,9 +51,13 @@ jobs:
             # при падении до prune скрипт выходил по set -e раньше него.
             docker builder prune -af
             docker compose up -d --build web
+            # Проверяем по тому же адресу, по которому реально ходит nginx
+            # (npm) на этой VPS — 172.17.0.1, не 127.0.0.1 (см. CLAUDE.md,
+            # раздел про топологию прокси). У приложения нет network_mode:
+            # host-соседа на loopback, только на docker0-шлюзе.
             ok=
             for i in $(seq 1 20); do
-              if curl -fsS --max-time 2 http://127.0.0.1:5000/ >/dev/null; then
+              if curl -fsS --max-time 2 http://172.17.0.1:5000/ >/dev/null; then
                 ok=1
                 break
               fi
