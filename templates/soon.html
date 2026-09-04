@@ -1,0 +1,77 @@
+<!doctype html>
+    <html lang="ru">
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <meta name="theme-color" content="#080b12">
+      <meta name="description" content="__LEAD__">
+      __ICONLINKS__
+      <link rel="manifest" href="/manifest.webmanifest">
+      <title>__NAME__ · vitazgio.ru</title>
+      <style>
+        :root { color-scheme: dark; --line: rgba(255,255,255,.1); --muted: #989fb2; }
+        * { box-sizing: border-box; }
+        body {
+          margin: 0; min-height: 100svh; display: flex; flex-direction: column;
+          font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+          background:
+            radial-gradient(circle at 12% 8%, rgba(57,126,255,.22), transparent 32rem),
+            radial-gradient(circle at 88% 78%, rgba(149,65,255,.18), transparent 34rem),
+            #0d1321;
+          color: #f7f8fc;
+        }
+        .page { width: min(1380px, calc(100% - 40px)); margin: 0 auto;
+                padding: clamp(24px, 5vw, 56px) 0 40px; }
+        .top { position: relative; display: flex; align-items: center; gap: 14px; margin-bottom: 22px; }
+        .back { display: inline-flex; align-items: center; justify-content: center;
+                width: 42px; height: 42px; flex: none; color: #7ce0ff; text-decoration: none;
+                border: 1px solid rgba(45,226,255,.3); border-radius: 50%;
+                background: rgba(45,226,255,.07); transition: .18s; }
+        .back svg { width: 20px; height: 20px; }
+        .back:hover { color: #fff; border-color: var(--pc); background: rgba(45,226,255,.18); }
+        .eyebrow { display: inline-flex; align-items: center; gap: 10px; color: #cdd2df;
+                   font-size: .76rem; font-weight: 700; letter-spacing: .16em;
+                   text-transform: uppercase; text-decoration: none; }
+        .eyebrow::before { content: ""; width: 7px; height: 7px; border-radius: 50%;
+                           background: #64e6a5; box-shadow: 0 0 16px #64e6a5; }
+        .eyebrow:hover { color: #fff; }
+        .mark { position: absolute; right: 0; top: 50%; transform: translateY(-62%);
+                width: clamp(1.15rem, 4.7vw, 4.4rem); height: clamp(1.15rem, 4.7vw, 4.4rem); }
+        h1 { position: relative; min-height: 132px; display: flex; align-items: center;
+             margin: 0; padding: 28px clamp(22px, 4vw, 54px);
+             font-family: "Cascadia Code", Consolas, "Courier New", monospace;
+             font-size: clamp(1.15rem, 4.7vw, 4rem); font-weight: 800;
+             letter-spacing: -.05em; color: #dffaff;
+             border: 1px solid rgba(54,228,255,.24);
+             background: linear-gradient(110deg, rgba(12,28,43,.92), rgba(20,17,38,.82));
+             clip-path: polygon(0 0, calc(100% - 25px) 0, 100% 25px, 100% 100%, 25px 100%, 0 calc(100% - 25px));
+             text-shadow: 2px 0 #ff3fa4, -2px 0 #21dcff; }
+        .lead { max-width: 62ch; margin: 26px 0 0; color: var(--muted); font-size: 1.05rem; line-height: 1.6; }
+        .soon { display: inline-block; margin-top: 26px; padding: 6px 14px;
+                color: #04121a; background: #2de2ff; border-radius: 999px;
+                font: 700 .7rem "Cascadia Code", Consolas, monospace;
+                letter-spacing: .16em; text-transform: uppercase; }
+        ul { max-width: 62ch; margin: 20px 0 0; padding-left: 20px;
+             color: var(--muted); line-height: 1.75; }
+        li::marker { color: #2de2ff; }
+        footer { margin-top: auto; padding: 28px 0 0; color: #686f80; font-size: .82rem; }
+      </style>
+    </head>
+    <body>
+      <main class="page">
+        <div class="top">
+          <a class="back" href="/" title="На главную" aria-label="На главную"><svg viewBox="0 0 24 24" fill="none"><path d="M19 12H5m0 0 6-6m-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
+          <a class="eyebrow" href="/">__KICKER__</a>
+          <img class="mark" src="/static/icons/vg-plain.svg" alt="Vitaz Gio"
+               width="512" height="512">
+        </div>
+        <h1>__HEADLINE__</h1>
+        <div class="soon">в работе</div>
+        <p class="lead">__LEAD__</p>
+        <ul>__ITEMS__</ul>
+        <footer>@Vitaz Gio · раздел готовится</footer>
+      </main>
+      <script src="/vg-player.js" defer></script>
+    </body>
+    </html>
+    
