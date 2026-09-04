@@ -1,0 +1,887 @@
+<!doctype html>
+    <html lang="ru">
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <meta name="theme-color" content="#080b12">
+      <meta name="description" content="Программы, поделки и чертежи vitazgio.ru">
+      __ICONLINKS__
+      <link rel="manifest" href="/manifest.webmanifest">
+      <title>Страна DIY · vitazgio.ru</title>
+      <style>
+        :root {
+          color-scheme: dark;
+          --bg: #0d1321; --line: rgba(255,255,255,.1); --muted: #989fb2;
+          --pc: #2de2ff; --warm: #ffd84a;
+          /* Цвет выбранной тематики. Меняется скриптом при переключении полки
+             и красит кнопки, полосы прокрутки и подсветку карточек. */
+          --th: #2de2ff;
+        }
+        * { box-sizing: border-box; }
+        body { margin: 0; min-width: 320px; padding-bottom: 60px;
+               font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+               background:
+                 radial-gradient(circle at 12% 8%, rgba(57,126,255,.22), transparent 32rem),
+                 radial-gradient(circle at 88% 78%, rgba(149,65,255,.18), transparent 34rem),
+                 var(--bg);
+               color: #f7f8fc; }
+        .page { width: min(1380px, calc(100% - 40px)); margin: 0 auto;
+                padding: clamp(24px, 5vw, 52px) 0 0; }
+
+        .top { position: relative; display: flex; align-items: center; gap: 14px; margin-bottom: 22px; }
+        .back { display: inline-flex; align-items: center; justify-content: center;
+                width: 42px; height: 42px; flex: none; color: #7ce0ff; text-decoration: none;
+                border: 1px solid rgba(45,226,255,.3); border-radius: 50%;
+                background: rgba(45,226,255,.07); transition: .18s; }
+        .back svg { width: 20px; height: 20px; }
+        .back:hover { color: #fff; border-color: var(--pc); background: rgba(45,226,255,.18); }
+        .eyebrow { display: inline-flex; align-items: center; gap: 10px; color: #cdd2df;
+                   font-size: .76rem; font-weight: 700; letter-spacing: .16em;
+                   text-transform: uppercase; text-decoration: none; }
+        .eyebrow::before { content: ""; width: 7px; height: 7px; border-radius: 50%;
+                           background: #64e6a5; box-shadow: 0 0 16px #64e6a5; }
+        .eyebrow:hover { color: #fff; }
+        .mark { position: absolute; right: 0; top: 50%; transform: translateY(-62%);
+                width: clamp(1.15rem, 4.7vw, 4.4rem); height: clamp(1.15rem, 4.7vw, 4.4rem); }
+
+        h1 { position: relative; min-height: 118px; display: flex; align-items: center;
+             margin: 0; padding: 24px clamp(20px, 4vw, 48px);
+             font-family: "Cascadia Code", Consolas, monospace;
+             font-size: clamp(1.1rem, 4.2vw, 3.4rem); font-weight: 800;
+             letter-spacing: -.05em; color: #dffaff;
+             border: 1px solid rgba(54,228,255,.24);
+             background: linear-gradient(110deg, rgba(12,28,43,.92), rgba(20,17,38,.82));
+             clip-path: polygon(0 0, calc(100% - 25px) 0, 100% 25px, 100% 100%, 25px 100%, 0 calc(100% - 25px));
+             text-shadow: 2px 0 #ff3fa4, -2px 0 #21dcff; }
+
+        /* Полоса хозяина. Видна, только когда сайт узнал своего. */
+        .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+               margin: 22px 0 0; }
+        .badge { display: inline-flex; align-items: center; gap: 8px; height: 34px;
+                 padding: 0 13px; color: #04121a; background: var(--pc);
+                 border-radius: 999px;
+                 font: 700 .68rem "Cascadia Code", Consolas, monospace;
+                 letter-spacing: .14em; text-transform: uppercase; }
+        .btn { display: inline-flex; align-items: center; gap: 8px; height: 38px;
+               padding: 0 16px; color: #cdd6e6; cursor: pointer;
+               font: 600 .84rem inherit; white-space: nowrap;
+               background: rgba(255,255,255,.05); border: 1px solid var(--line);
+               border-radius: 10px; transition: .18s; }
+        .btn:hover { color: #fff; border-color: var(--pc); background: rgba(45,226,255,.1); }
+        .btn.go { color: #04121a; background: var(--pc); border-color: var(--pc); }
+        .btn.go:hover { filter: brightness(1.1); }
+        .btn.bad { color: #ff9aa6; border-color: rgba(255,90,110,.35); }
+        .btn.bad:hover { border-color: #ff5a6e; background: rgba(255,90,110,.14); }
+        .btn svg { width: 16px; height: 16px; flex: none; }
+        .bar .spacer { margin-left: auto; }
+
+        /* ── Полки и пять способов листать ──────────────────────────────
+           Сверху выбираются тематики — программы, устройства, сервера,
+           разное, — и у каждой свой цвет: он подхватывается через --th и
+           красит кнопки, полосы прокрутки и подсветку карточек. Разметка
+           карточки одна и та же, меняется только раскладка: класс на самой
+           ленте решает, сетка это, барабан, кладка, веер или соты.
+           Выбранный вид запоминается для каждой полки отдельно. */
+        .shelfrow { display: flex; align-items: center; gap: 8px; margin: 26px 0 0; min-width: 0; }
+        .shelf { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+        .shelf .lbl { color: var(--muted); font-size: .68rem; letter-spacing: .14em;
+                     text-transform: uppercase; margin-right: 4px; }
+        .shelf button { --tc: var(--pc); display: inline-flex; align-items: center; gap: 8px;
+                        height: 36px; padding: 0 14px; cursor: pointer; color: #b9c6d8;
+                        font: 600 .84rem inherit; border-radius: 11px;
+                        border: 1px solid var(--line); background: rgba(255,255,255,.04);
+                        transition: color .16s, border-color .16s, background .16s; }
+        .shelf button i { font-style: normal; width: 8px; height: 8px; border-radius: 50%;
+                          background: var(--tc); box-shadow: 0 0 10px var(--tc); }
+        .shelf button u { text-decoration: none; color: #6f7f93;
+                          font: 700 .68rem "Cascadia Code", Consolas, monospace; }
+        .shelf button:hover { color: #fff;
+                              border-color: color-mix(in srgb, var(--tc) 55%, transparent);
+                              background: color-mix(in srgb, var(--tc) 10%, transparent); }
+        .shelf button.on { color: #fff; border-color: var(--tc);
+                           background: color-mix(in srgb, var(--tc) 16%, transparent);
+                           box-shadow: 0 0 24px color-mix(in srgb, var(--tc) 18%, transparent); }
+        .shelf button.on u { color: color-mix(in srgb, var(--tc) 80%, #ffffff); }
+        .shelf-hint { margin: 8px 0 0; color: #7c8ba0; font-size: .76rem; }
+        /* На телефоне полки не переносим в три ряда, а даём листать вбок:
+           так шапка страницы не разъезжается на пол-экрана. */
+        @media (max-width: 620px) {
+          .shelf { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none;
+                   padding-bottom: 4px; }
+          .shelf::-webkit-scrollbar { display: none; }
+          .shelf button { flex: none; }
+        }
+
+        /* Своя прокрутка на каждой полке: ползунок красится цветом тематики. */
+        .grid { margin: 18px 0 0; scrollbar-width: thin;
+                scrollbar-color: color-mix(in srgb, var(--th) 60%, transparent) transparent; }
+        .grid::-webkit-scrollbar { height: 9px; width: 9px; }
+        .grid::-webkit-scrollbar-track { background: rgba(255,255,255,.04); border-radius: 999px; }
+        .grid::-webkit-scrollbar-thumb { border-radius: 999px;
+                background: linear-gradient(90deg, var(--th),
+                            color-mix(in srgb, var(--th) 35%, transparent)); }
+
+        /* Карточки выплывают по очереди, когда до них доходит прокрутка. */
+        .work.up { opacity: 0; transform: translateY(18px); }
+        .work.up.seen { opacity: 1; transform: none;
+                        transition: opacity .5s ease, transform .5s cubic-bezier(.22,1,.36,1); }
+
+        /* Кладка: настоящий masonry на JS. Каждую карточку кладём в самую
+           короткую колонку, поэтому в одной может быть 3, а в другой 5 —
+           заполняем по фактической высоте, а не поровну. CSS-колонки
+           (column-count) с высокими карточками и break-inside:avoid
+           сваливали всё в первый столбец, поэтому раскладку делает скрипт. */
+        .grid.m-mosaic { display: flex; align-items: flex-start; gap: 16px; }
+        .grid.m-mosaic .mcol { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
+        .grid.m-mosaic .work { width: 100%; display: flex; }
+        /* Здесь обложка живёт своей высотой — из-за этого кладка и получается */
+        .grid.m-mosaic .shot { aspect-ratio: auto; }
+        .grid.m-mosaic .shot img { height: auto; max-height: 520px; object-fit: cover; }
+        .grid.m-mosaic .shot-bg { display: none; }
+        .grid.m-mosaic .shot.none { aspect-ratio: 16 / 11; }
+        .grid.m-mosaic .work:nth-child(3n+2) .shot.none { aspect-ratio: 4 / 5; }
+        .grid.m-mosaic .work:nth-child(3n+3) .shot.none { aspect-ratio: 16 / 8; }
+        /* Цвет карточки задаётся в шапке кода строкой «цвет:», отсюда --ac. */
+        .work { --ac: var(--pc); position: relative; display: flex; flex-direction: column;
+                overflow: hidden; background: rgba(25,32,48,.82);
+                border: 1px solid var(--line); border-radius: 18px;
+                transition: transform .2s, border-color .2s, box-shadow .2s; }
+        .work::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 3px; z-index: 2;
+                        background: linear-gradient(90deg, var(--ac), transparent 78%); }
+        .work:hover { transform: translateY(-4px);
+                      border-color: color-mix(in srgb, var(--ac) 55%, transparent);
+                      box-shadow: 0 20px 50px rgba(0,0,0,.4),
+                                  0 0 34px color-mix(in srgb, var(--ac) 12%, transparent); }
+        .work.draft { border-style: dashed; opacity: .82; }
+        .shot { position: relative; aspect-ratio: 16 / 10; overflow: hidden; background: #0a0f18;
+                border-bottom: 1px solid var(--line); }
+        .shot-bg { position: absolute; inset: -12%; background: center/cover no-repeat;
+                   filter: blur(18px) saturate(1.15) brightness(.55); }
+        .shot img { position: relative; z-index: 1; width: 100%; height: 100%;
+                    object-fit: contain; display: block; }
+        /* лёгкое затемнение снизу, чтобы обложка не спорила с текстом */
+        .shot::after { content: ""; position: absolute; inset: 0; z-index: 2;
+                       background: linear-gradient(180deg, transparent 62%, rgba(10,15,24,.5)); }
+        .tagrow { display: flex; flex-wrap: wrap; gap: 6px; }
+        .tagrow i { font-style: normal; padding: 3px 9px; border-radius: 7px; font-size: .68rem;
+                    color: #cfe0f0; background: rgba(255,255,255,.05);
+                    border: 1px solid var(--line); }
+        /* Своя обложка, когда фото нет: цвет записи, штриховка и монограмма. */
+        .shot.none { display: grid; place-items: center; overflow: hidden;
+                     background:
+                       repeating-linear-gradient(135deg, rgba(255,255,255,.03) 0 10px, transparent 10px 20px),
+                       radial-gradient(120% 100% at 20% 0%, color-mix(in srgb, var(--ac) 38%, transparent), transparent 68%),
+                       linear-gradient(160deg, rgba(22,30,46,.95), rgba(9,14,24,.95)); }
+        .shot.none .mono { font: 800 2.4rem "Cascadia Code", Consolas, monospace;
+                           letter-spacing: -.04em; text-transform: uppercase;
+                           color: color-mix(in srgb, var(--ac) 75%, #ffffff);
+                           text-shadow: 0 0 26px color-mix(in srgb, var(--ac) 45%, transparent);
+                           opacity: .9; }
+        .body { flex: 1; display: flex; flex-direction: column; gap: 10px; padding: 16px 18px 18px; }
+        .kind { align-self: flex-start; padding: 3px 10px;
+                color: color-mix(in srgb, var(--kc, var(--pc)) 72%, #ffffff);
+                background: color-mix(in srgb, var(--kc, var(--pc)) 14%, transparent);
+                border: 1px solid color-mix(in srgb, var(--kc, var(--pc)) 28%, transparent);
+                border-radius: 999px;
+                font: 700 .64rem "Cascadia Code", Consolas, monospace;
+                letter-spacing: .12em; text-transform: uppercase; }
+        .work h2 { margin: 0; font-size: 1.18rem; letter-spacing: -.02em; }
+        .work p { margin: 0; color: var(--muted); font-size: .9rem; line-height: 1.5;
+                  white-space: pre-wrap; }
+        .links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 2px; }
+        .links a { display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px;
+                   color: #cfe6ff; text-decoration: none; font-size: .78rem;
+                   background: rgba(255,255,255,.06); border: 1px solid var(--line);
+                   border-radius: 8px; }
+        .links a:hover { color: #04121a; background: var(--pc); border-color: var(--pc); }
+        .flags { display: flex; gap: 6px; }
+        .flag { padding: 2px 8px; border-radius: 999px;
+                font: 700 .6rem "Cascadia Code", Consolas, monospace;
+                letter-spacing: .1em; text-transform: uppercase; }
+        .flag.hid { color: #ffd0a0; background: rgba(255,140,60,.16); }
+        .flag.pin { color: #04121a; background: var(--warm); }
+        /* Кнопки правки прижаты к низу: в ряду карточки разной высоты,
+           и без этого «Править» гуляет по вертикали. */
+        .tools { display: flex; gap: 8px; margin-top: auto; padding-top: 4px; }
+        .tools .btn { height: 32px; padding: 0 12px; font-size: .78rem; }
+
+        .empty { padding: 60px 20px; color: var(--muted); text-align: center; }
+
+        /* Окно правки */
+        .veil { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center;
+                padding: 20px; overflow: auto; background: rgba(6,9,16,.76); }
+        .sheet { width: min(560px, 100%); padding: 24px;
+                 background: linear-gradient(160deg, rgba(24,32,48,.98), rgba(12,16,26,.98));
+                 border: 1px solid var(--line); border-radius: 18px; }
+        .sheet h3 { margin: 0 0 18px; font-size: 1.15rem; }
+        .field { display: block; margin-bottom: 14px; }
+        .field span { display: block; margin-bottom: 6px; color: var(--muted);
+                      font-size: .74rem; letter-spacing: .1em; text-transform: uppercase; }
+        .field input, .field textarea, .field select {
+          width: 100%; padding: 10px 12px; color: #f7f8fc; font: inherit;
+          background: rgba(0,0,0,.35); border: 1px solid var(--line); border-radius: 10px; }
+        .field textarea { min-height: 96px; resize: vertical; }
+        .field input:focus, .field textarea:focus, .field select:focus {
+          outline: none; border-color: var(--pc); }
+        .row2 { display: flex; gap: 8px; margin-bottom: 8px; }
+        .row2 input:first-child { flex: 0 0 34%; }
+        .row2 input:nth-child(2) { flex: 1; }
+        .row2 button { flex: none; width: 38px; }
+        .checks { display: flex; flex-wrap: wrap; gap: 16px; margin: 4px 0 18px; }
+        .checks label { display: inline-flex; align-items: center; gap: 8px;
+                        color: #cdd6e6; font-size: .86rem; cursor: pointer; }
+        .checks input { width: 17px; height: 17px; accent-color: var(--pc); }
+        .cover { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
+        .cover .pic { width: 108px; aspect-ratio: 16/9; flex: none; border-radius: 8px;
+                      background: #0a0f18 center/cover no-repeat; border: 1px solid var(--line); }
+        .sheet-keys { display: flex; gap: 10px; }
+        .sheet-keys .btn { flex: 1; justify-content: center; }
+        .note { margin: 0 0 14px; color: #ff9aa6; font-size: .82rem; min-height: 1em; }
+
+        /* Код статьи — моноширинное поле пошире: сюда ложится HTML творения. */
+        .field textarea.code { min-height: 220px; font-family: "Cascadia Code", Consolas, monospace;
+                               font-size: .82rem; line-height: 1.5; white-space: pre; overflow-wrap: normal; }
+        .hint { margin: -8px 0 14px; color: #7f8aa0; font-size: .74rem; line-height: 1.5; }
+        .hint code { padding: 1px 5px; color: #cfe6ff; background: rgba(255,255,255,.08);
+                     border-radius: 5px; font-size: .92em; }
+        /* Список вложений: каждое — имя (тык копирует {{имя}}), вес и «×». */
+        .assets { display: flex; flex-direction: column; gap: 6px; margin: 4px 0 8px; }
+        .asset { display: flex; align-items: center; gap: 10px; padding: 8px 10px;
+                 background: rgba(0,0,0,.3); border: 1px solid var(--line); border-radius: 9px; }
+        .asset .tk { flex: none; width: 26px; height: 26px; display: grid; place-items: center;
+                     border-radius: 6px; color: #04121a; font-size: .62rem; font-weight: 800; }
+        .asset .tk.img { background: #63f5ad; }
+        .asset .tk.file { background: var(--warm); }
+        .asset .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+                     white-space: nowrap; color: #dbe4f2; font-size: .82rem; cursor: copy;
+                     font-family: "Cascadia Code", Consolas, monospace; }
+        .asset .nm:hover { color: var(--pc); }
+        .asset .sz { flex: none; color: var(--muted); font-size: .72rem; }
+        .asset .rm { flex: none; width: 26px; height: 26px; padding: 0; cursor: pointer;
+                     color: #ff9aa6; background: transparent; border: 1px solid rgba(255,90,110,.3);
+                     border-radius: 7px; }
+        .asset .rm:hover { background: rgba(255,90,110,.14); border-color: #ff5a6e; }
+        .asset-keys { display: flex; gap: 8px; }
+        .asset-keys .btn { flex: 1; justify-content: center; height: 34px; font-size: .8rem; }
+        /* «Открыть» на карточке — заметная строка снизу для всех гостей. */
+        .open-row { margin-top: auto; padding-top: 4px; }
+        .open-row .btn { width: 100%; justify-content: center; color: #04121a;
+                         background: var(--pc); border-color: var(--pc); height: 34px; }
+        .open-row .btn:hover { filter: brightness(1.08); }
+        .work .shot { cursor: pointer; }
+
+        .toast { position: fixed; left: 50%; bottom: 26px; z-index: 90;
+                 transform: translateX(-50%); padding: 11px 18px;
+                 color: #04121a; background: var(--pc); border-radius: 10px;
+                 font-weight: 700; font-size: .86rem; }
+        .toast.bad { color: #fff; background: #d93a52; }
+
+        [hidden] { display: none !important; }
+
+        /* Окно ввода пароля — один в один как на главной у кабинета. */
+        .auth-modal { position: fixed; z-index: 100; inset: 0; display: grid; place-items: center; padding: 20px; }
+        .auth-backdrop { position: absolute; inset: 0; background: rgba(3,6,13,.82); backdrop-filter: blur(12px); }
+        .auth-panel { position: relative; width: min(430px, 100%); padding: 38px; color: #e8fbff;
+                      border: 1px solid rgba(45,226,255,.3);
+                      background: linear-gradient(145deg, rgba(16,30,47,.98), rgba(20,16,37,.98));
+                      clip-path: polygon(0 0, calc(100% - 22px) 0, 100% 22px, 100% 100%, 22px 100%, 0 calc(100% - 22px));
+                      box-shadow: 0 32px 100px rgba(0,0,0,.65), inset 0 0 40px rgba(45,226,255,.05); }
+        .auth-kicker { color: #2de2ff; font: 700 .7rem/1 "Cascadia Code", Consolas, monospace; letter-spacing: .16em; text-transform: uppercase; }
+        .auth-panel h2 { margin: 16px 0 8px; font: 800 clamp(2rem,8vw,3rem)/1 "Cascadia Code", Consolas, monospace; letter-spacing: -.07em; text-shadow: 2px 0 #ff3fa4, -2px 0 #2de2ff; }
+        .auth-hint { margin: 0 0 26px; color: #8792a6; line-height: 1.55; }
+        .auth-close { position: absolute; top: 15px; right: 17px; padding: 5px; color: #7d8799; font-size: 1.35rem; border: 0; background: none; cursor: pointer; }
+        .auth-close:hover { color: #fff; }
+        .auth-form label { display: block; margin-bottom: 9px; color: #b8c1d2; font-size: .78rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+        .auth-form input { width: 100%; height: 50px; padding: 0 15px; color: #f4fbff; font: 700 1rem "Cascadia Code", Consolas, monospace; border: 1px solid rgba(255,255,255,.12); outline: none; background: rgba(4,10,20,.65); }
+        .auth-form input:focus { border-color: #2de2ff; box-shadow: 0 0 0 3px rgba(45,226,255,.09); }
+        .auth-submit { width: 100%; height: 50px; margin-top: 14px; color: #071018; font: 800 .82rem "Cascadia Code", Consolas, monospace; letter-spacing: .08em; text-transform: uppercase; border: 0; background: linear-gradient(90deg, #2de2ff, #65f2bd); cursor: pointer; }
+        .auth-submit:hover { filter: brightness(1.08); }
+        .auth-submit:disabled { opacity: .55; cursor: wait; }
+        .auth-error { min-height: 20px; margin: 12px 0 0; color: #ff6ba8; font-size: .8rem; }
+        body.modal-open { overflow: hidden; }
+
+        @media (max-width: 620px) {
+          .grid { grid-template-columns: 1fr; }
+          .row2 { flex-wrap: wrap; }
+          .row2 input:first-child { flex: 1 1 100%; }
+          .auth-panel { padding: 34px 25px 28px; }
+        }
+        @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+      </style>
+    </head>
+    <body>
+      <main class="page">
+        <div class="top">
+          <a class="back" href="/" title="На главную" aria-label="На главную"><svg viewBox="0 0 24 24" fill="none"><path d="M19 12H5m0 0 6-6m-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
+          <a class="eyebrow" href="/">vitazgio.ru · страна diy</a>
+          <img class="mark" src="/static/icons/vg-plain.svg" alt="Vitaz Gio"
+               width="512" height="512">
+        </div>
+        <h1>СТРАНА DIY</h1>
+
+        <div class="bar" id="bar"></div>
+        <div class="shelfrow"><span class="lbl">полка</span>
+          <div class="shelf" id="shelf"></div></div>
+        <p class="shelf-hint" id="shelfhint"></p>
+        <section class="grid m-mosaic" id="grid"></section>
+        <p class="empty" id="empty" hidden>Пока пусто</p>
+      </main>
+
+      <input type="file" id="pick" accept="image/*" hidden>
+      <input type="file" id="pick-img" accept="image/*" hidden>
+      <input type="file" id="pick-file" hidden>
+
+      <div id="auth-modal" class="auth-modal" hidden>
+        <div class="auth-backdrop" data-auth-close></div>
+        <section class="auth-panel" role="dialog" aria-modal="true" aria-labelledby="auth-title">
+          <button class="auth-close" type="button" data-auth-close aria-label="Закрыть">×</button>
+          <div class="auth-kicker">Restricted area // 01</div>
+          <h2 id="auth-title">Авторизация</h2>
+          <p class="auth-hint">Введите пароль для прав админа.</p>
+          <form id="auth-form" class="auth-form">
+            <label for="auth-password">Пароль</label>
+            <input id="auth-password" name="password" type="password" autocomplete="current-password" required>
+            <button class="auth-submit" type="submit">Получить доступ</button>
+            <p id="auth-error" class="auth-error" role="alert"></p>
+          </form>
+        </section>
+      </div>
+
+      <script>
+      (() => {
+        "use strict";
+        const $ = (id) => document.getElementById(id);
+        const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g,
+          (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+        const fmtBytes = (n) => {
+          n = n || 0;
+          if (n < 1024) return n + " Б";
+          if (n < 1048576) return (n / 1024).toFixed(0) + " КБ";
+          return (n / 1048576).toFixed(1) + " МБ";
+        };
+
+        const SVG = {
+          plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
+          pen: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><path d="m4 20 4-1 11-11-3-3L5 16z"/></svg>',
+          del: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M4 7h16M9 7V5h6v2m-8 0 1 13h8l1-13"/></svg>',
+          key: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><circle cx="8" cy="12" r="4"/><path d="M12 12h9m-3 0v4m-3-4v3"/></svg>',
+          eye: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M2 12s3.6-6 10-6 10 6 10 6-3.6 6-10 6-10-6-10-6z"/><circle cx="12" cy="12" r="2.6"/></svg>',
+        };
+
+        let works = [];
+        let kinds = ["разное"];
+        let canEdit = false;
+        let asGuest = false;      // хозяин смотрит витрину чужими глазами
+
+        const admin = () => canEdit && !asGuest;
+
+        const load = async () => {
+          const r = await fetch("/api/diy", { credentials: "same-origin" });
+          const d = await r.json();
+          works = d.works || [];
+          kinds = d.kinds || kinds;
+          if (d.themes && d.themes.length) themes = [ALL].concat(d.themes);
+          canEdit = !!d.can_edit;
+          // Полка могла исчезнуть между заходами — тогда возвращаемся ко «всему»
+          if (theme && !themes.some((t) => t.id === theme)) theme = "";
+          draw();
+        };
+
+        const send = async (url, how, body) => {
+          const r = await fetch(url, {
+            method: how, credentials: "same-origin",
+            headers: body ? { "Content-Type": "application/json" } : undefined,
+            body: body ? JSON.stringify(body) : undefined,
+          });
+          const d = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(d.error || "Не вышло.");
+          return d;
+        };
+
+        let toastTimer = 0;
+        const toast = (text, bad) => {
+          document.querySelectorAll(".toast").forEach((t) => t.remove());
+          const el = document.createElement("div");
+          el.className = "toast" + (bad ? " bad" : "");
+          el.textContent = text;
+          document.body.appendChild(el);
+          clearTimeout(toastTimer);
+          toastTimer = setTimeout(() => el.remove(), 3200);
+        };
+
+        /* ── окно ввода пароля (как на главной у кабинета) ──────────── */
+        const authModal = $("auth-modal");
+        const authForm = $("auth-form");
+        const authPass = $("auth-password");
+        const authErr = $("auth-error");
+        const authOkBtn = authForm.querySelector("button[type='submit']");
+        const openAuth = () => {
+          authModal.hidden = false;
+          document.body.classList.add("modal-open");
+          authErr.textContent = "";
+          requestAnimationFrame(() => authPass.focus());
+        };
+        const closeAuth = () => {
+          authModal.hidden = true;
+          document.body.classList.remove("modal-open");
+          authForm.reset();
+          authErr.textContent = "";
+        };
+        authModal.querySelectorAll("[data-auth-close]").forEach((el) =>
+          el.addEventListener("click", closeAuth));
+        document.addEventListener("keydown", (e) => {
+          if (e.key === "Escape" && !authModal.hidden) closeAuth();
+        });
+        authForm.addEventListener("submit", async (e) => {
+          e.preventDefault();
+          authErr.textContent = "";
+          authOkBtn.disabled = true;
+          try {
+            const r = await fetch("/api/login", {
+              method: "POST", credentials: "same-origin",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ password: authPass.value }) });
+            const d = await r.json().catch(() => ({}));
+            if (!r.ok) { authErr.textContent = d.error || "Не удалось войти."; authPass.select(); return; }
+            closeAuth();
+            await load();                       // режим хозяина включён — не уходим со страницы
+            toast("Режим хозяина включён");
+          } catch { authErr.textContent = "Сервер недоступен."; }
+          finally { authOkBtn.disabled = false; }
+        });
+
+        /* ── полоса сверху ─────────────────────────────────────────── */
+        const drawBar = () => {
+          const bar = $("bar");
+          if (!canEdit) {
+            bar.innerHTML = '<button class="btn" data-act="login">' + SVG.key +
+              "<span>Я хозяин</span></button>";
+            return;
+          }
+          bar.innerHTML =
+            '<span class="badge">режим хозяина</span>' +
+            '<button class="btn go" data-act="new">' + SVG.plus + "<span>Добавить</span></button>" +
+            '<button class="btn spacer" data-act="guest">' + SVG.eye +
+            "<span>" + (asGuest ? "Вернуть правку" : "Глазами гостя") + "</span></button>";
+        };
+
+        const linkChips = (list) => (list || []).map((l) =>
+          '<a href="' + esc(l.url) + '" target="_blank" rel="noopener">' +
+          esc(l.label) + "</a>").join("");
+
+        /* ── Полки и пять способов листать ────────────────────────────
+           Сначала выбирается тематика, потом — как её листать. Разметка
+           карточки общая, меняется раскладка и — у барабана, веера и сот —
+           ещё и поведение. Для каждой полки свой запомненный вид. */
+        /* Раньше тут было пять способов листать полку (сетка/барабан/
+           кладка/веер/соты) — оставили только кладку (настоящий masonry),
+           остальные виды и переключатель между ними убраны. */
+        const ALL = { id: "", name: "Всё", color: "#2de2ff",
+                      hint: "все творения подряд, от свежих к старым" };
+        let themes = [ALL];
+        let theme = "";
+        try { theme = localStorage.getItem("vgDiyShelf") || ""; } catch (e) { theme = ""; }
+
+        const themeOf = (id) => themes.find((t) => t.id === id) || ALL;
+
+        const shotSrc = (w) => w.shot
+          ? "/diy/asset/" + w.id + "/" + encodeURIComponent(w.shot)
+          : (w.cover ? "/diy/cover/" + w.id : "");
+
+        /* Записи выбранной полки. Пустая полка — значит, всё подряд. */
+        const shelfList = () => {
+          const list = asGuest ? works.filter((w) => !w.hidden) : works;
+          return theme ? list.filter((w) => w.kind === theme) : list;
+        };
+
+        const drawShelf = () => {
+          const seen = asGuest ? works.filter((w) => !w.hidden) : works;
+          const count = (id) => id ? seen.filter((w) => w.kind === id).length : seen.length;
+          const chip = (t) =>
+            '<button data-shelf="' + esc(t.id) + '" style="--tc:' + esc(t.color) + '"' +
+            (theme === t.id ? ' class="on"' : "") + "><i></i>" + esc(t.name) +
+            "<u>" + count(t.id) + "</u></button>";
+          $("shelf").innerHTML =
+            [ALL].concat(themes.filter((t) => t.id)).map(chip).join("");
+          $("shelfhint").textContent = themeOf(theme).hint;
+          document.documentElement.style.setProperty("--th", themeOf(theme).color);
+          // выбранную полку подтягиваем в видимую часть ленты на телефоне
+          const on = $("shelf").querySelector("button.on");
+          if (on && on.scrollIntoView) on.scrollIntoView({ block: "nearest", inline: "nearest" });
+        };
+
+        /* Появление карточек по мере прокрутки. Наблюдатель заводится заново
+           на каждую перерисовку — старые карточки к тому времени уже выкинуты. */
+        let eye = null;
+        const reveal = (grid) => {
+          if (eye) { eye.disconnect(); eye = null; }
+          // Карточки лежат внутри колонок кладки, поэтому берём их не как
+          // прямых детей, а как потомков .work.
+          const cards = [...grid.querySelectorAll(".work")];
+          const slow = matchMedia("(prefers-reduced-motion: reduce)").matches;
+          if (slow || !("IntersectionObserver" in window)) return;
+          cards.forEach((el) => el.classList.add("up"));
+          eye = new IntersectionObserver((rows) => {
+            rows.forEach((r) => {
+              if (!r.isIntersecting) return;
+              const i = cards.indexOf(r.target);
+              setTimeout(() => r.target.classList.add("seen"), Math.min(i, 6) * 55);
+              eye.unobserve(r.target);
+            });
+          }, { threshold: .12, rootMargin: "0px 0px -40px" });
+          cards.forEach((el) => eye.observe(el));
+        };
+
+        /* Кладка (masonry): раскладываем карточки по колонкам, каждую — в самую
+           короткую на данный момент. Так столбцы получаются разной длины, но
+           одинаковой высоты — заполняем по фактическому размеру карточек. */
+        const mosaicColumns = () => {
+          const w = window.innerWidth;
+          return w <= 640 ? 1 : w <= 980 ? 2 : 3;
+        };
+        let mosaicCards = [];
+        const layoutMosaic = (grid) => {
+          if (!mosaicCards.length) return;
+          const n = mosaicColumns();
+          grid.innerHTML = "";
+          const cols = [];
+          for (let i = 0; i < n; i++) {
+            const c = document.createElement("div");
+            c.className = "mcol";
+            grid.appendChild(c);
+            cols.push(c);
+          }
+          mosaicCards.forEach((card) => {
+            let best = cols[0];
+            for (const c of cols) if (c.offsetHeight < best.offsetHeight) best = c;
+            best.appendChild(card);
+          });
+        };
+        let mosaicRaf = 0;
+        const relayoutMosaic = () => {
+          cancelAnimationFrame(mosaicRaf);
+          mosaicRaf = requestAnimationFrame(() => layoutMosaic($("grid")));
+        };
+        window.addEventListener("resize", relayoutMosaic);
+
+        const drawGrid = () => {
+          const grid = $("grid");
+          const list = shelfList();
+          $("empty").hidden = list.length > 0;
+          $("empty").textContent = admin()
+            ? (theme ? "На этой полке пусто. Нажми «Добавить»."
+                     : "Пока пусто. Нажми «Добавить» — и появится первая запись.")
+            : (theme ? "На этой полке пока пусто" : "Пока пусто");
+          drawShelf();
+
+          grid.innerHTML = list.map((w) => {
+            // Обложка: сперва картинка, названная в шапке кода, потом старая
+            // загруженная обложка, и только если нет ни той ни другой — заглушка.
+            const src = shotSrc(w);
+            // Картинку показываем целиком: вертикальные скриншоты программ
+            // при обрезке по центру превращались в кашу. Фон — та же картинка,
+            // размытая и растянутая, чтобы не было пустых полей по бокам.
+            const shot = src
+              ? '<div class="shot" data-open="' + w.id + '">' +
+                  '<div class="shot-bg" style="background-image:url(' + src + ')"></div>' +
+                  '<img src="' + src + '" alt="" loading="lazy">' +
+                '</div>'
+              // Нет картинки — рисуем свою: градиент из цвета записи, косая
+              // штриховка и монограмма.
+              : '<div class="shot none" data-open="' + w.id + '">' +
+                  '<span class="mono">' + esc((w.title || "?").trim().slice(0, 2)) + "</span>" +
+                "</div>";
+            const flags = [];
+            if (w.hidden) flags.push('<span class="flag hid">черновик</span>');
+            if (w.pinned) flags.push('<span class="flag pin">закреплено</span>');
+            const tools = admin()
+              ? '<div class="tools">' +
+                '<button class="btn" data-edit="' + w.id + '">' + SVG.pen + "<span>Править</span></button>" +
+                '<button class="btn bad" data-kill="' + w.id + '">' + SVG.del + "<span>Удалить</span></button>" +
+                "</div>"
+              : "";
+            const tags = (w.tags || []).length
+              ? '<div class="tagrow">' + w.tags.map((t) => "<i>" + esc(t) + "</i>").join("") + "</div>"
+              : "";
+            // Цвет записи — свой, цвет плашки с названием полки — полки.
+            const shelfColor = themeOf(w.kind).color;
+            const style = ' style="--kc:' + esc(shelfColor) +
+              (w.accent ? ";--ac:" + esc(w.accent) : "") + '"';
+            return '<article class="work' + (w.hidden ? " draft" : "") + '"' + style + '>' + shot +
+              '<div class="body">' +
+              (flags.length ? '<div class="flags">' + flags.join("") + "</div>" : "") +
+              '<span class="kind">' + esc(w.kind) + "</span>" +
+              "<h2>" + esc(w.title) + "</h2>" +
+              (w.summary ? "<p>" + esc(w.summary) + "</p>" : "") +
+              tags +
+              (w.links && w.links.length ? '<div class="links">' + linkChips(w.links) + "</div>" : "") +
+              '<div class="open-row"><button class="btn" data-open="' + w.id + '">Открыть статью →</button></div>' +
+              tools + "</div></article>";
+          }).join("");
+
+          // Собираем карточки и раскладываем masonry-скриптом. Если на
+          // карточках есть картинки, их высота узнаётся только после
+          // загрузки — тогда перекладываем ещё раз.
+          mosaicCards = [...grid.querySelectorAll(".work")];
+          layoutMosaic(grid);
+          grid.querySelectorAll(".work img").forEach((img) => {
+            if (!img.complete) img.addEventListener("load", relayoutMosaic, { once: true });
+          });
+
+          reveal(grid);
+        };
+
+        /* Переключение полки */
+        $("shelf").addEventListener("click", (e) => {
+          const b = e.target.closest("[data-shelf]");
+          if (!b) return;
+          theme = b.dataset.shelf;
+          try { localStorage.setItem("vgDiyShelf", theme); } catch (err) { /* и ладно */ }
+          drawGrid();
+        });
+        const draw = () => { drawBar(); drawGrid(); };
+
+        /* ── окно правки ───────────────────────────────────────────── */
+        let sheet = null;
+
+        const linkRow = (label, url) =>
+          '<div class="row2"><input placeholder="подпись" maxlength="40" value="' + esc(label) + '">' +
+          '<input placeholder="https://…" value="' + esc(url) + '">' +
+          '<button class="btn" type="button" data-drop>×</button></div>';
+
+        const openSheet = (work) => {
+          const fresh = !work;
+          work = work || { title: "", summary: "", kind: kinds[0], links: [],
+                           cover: false, hidden: false, pinned: false };
+          const veil = document.createElement("div");
+          veil.className = "veil";
+          veil.innerHTML =
+            '<section class="sheet" role="dialog" aria-modal="true">' +
+            "<h3>" + (fresh ? "Новое творение" : "Правим запись") + "</h3>" +
+            '<label class="field"><span>Название</span>' +
+            '<input id="f-title" maxlength="80" value="' + esc(work.title) + '"></label>' +
+            '<label class="field"><span>Полка</span><select id="f-kind">' +
+            kinds.map((k) => '<option' + (k === work.kind ? " selected" : "") + ">" + esc(k) + "</option>").join("") +
+            "</select></label>" +
+            '<label class="field"><span>Код статьи</span>' +
+            '<textarea id="f-body" class="code" spellcheck="false" ' +
+            'placeholder="---&#10;кратко: о чём это в двух строках&#10;теги: ESP32, Zigbee&#10;цвет: #2de2ff&#10;обложка: главное-фото.jpg&#10;ссылка: https://github.com/…&#10;---&#10;&#10;&lt;p&gt;Текст статьи…&lt;/p&gt;">' +
+            esc(work.body || "") + "</textarea></label>" +
+            '<p class="hint"><b>Шапка</b> между строками из трёх дефисов задаёт короткую ' +
+            'карточку: <code>кратко</code>, <code>теги</code>, <code>цвет</code>, ' +
+            '<code>обложка</code> (имя фото), <code>ссылка</code>. Ниже — обычный HTML. ' +
+            'Фото: <code>&lt;img src="{{плата.jpg}}"&gt;</code>, ряд фото — ' +
+            '<code>&lt;div class="shots"&gt;…&lt;/div&gt;</code>, файл: ' +
+            '<code>&lt;a class="dl" href="{{прошивка.zip}}"&gt;Скачать&lt;/a&gt;</code>. ' +
+            'Готовые блоки: <code>note</code>, <code>warn</code>, <code>ok</code>, ' +
+            '<code>cards</code>, <code>steps</code>, <code>chips</code>. ' +
+            'Тык по имени вложения копирует <code>{{…}}</code>.</p>' +
+            '<div class="field"><span>Фото и файлы</span>' +
+            '<div class="assets" id="f-assets"></div>' +
+            '<div class="asset-keys">' +
+            '<button class="btn" type="button" id="f-add-img">Загрузить фото</button>' +
+            '<button class="btn" type="button" id="f-add-file">Загрузить файл</button>' +
+            "</div></div>" +
+            '<div class="cover"><div class="pic" id="f-pic"' +
+            (work.cover ? ' style="background-image:url(/diy/cover/' + work.id + '?t=' + Date.now() + ')"' : "") +
+            '></div><button class="btn" type="button" id="f-shot">Фото</button>' +
+            '<button class="btn bad" type="button" id="f-noshot"' +
+            (work.cover ? "" : " hidden") + ">Убрать</button></div>" +
+            '<div class="checks">' +
+            '<label><input type="checkbox" id="f-hidden"' + (work.hidden ? " checked" : "") + "> Черновик</label>" +
+            '<label><input type="checkbox" id="f-pinned"' + (work.pinned ? " checked" : "") + "> Закрепить сверху</label>" +
+            "</div>" +
+            '<p class="note" id="f-note"></p>' +
+            '<div class="sheet-keys">' +
+            '<button class="btn" type="button" id="f-no">Отмена</button>' +
+            '<button class="btn go" type="button" id="f-ok">Сохранить</button>' +
+            "</div></section>";
+          document.body.appendChild(veil);
+          sheet = { veil, work, fresh, id: work.id || null };
+          sheet.assets = (work.assets || []).slice();
+          veil.querySelector("#f-title").focus();
+
+          // Список вложений: имя (тык копирует {{имя}}), вес и удаление.
+          const paintAssets = () => {
+            const box = veil.querySelector("#f-assets");
+            if (!sheet.assets.length) {
+              box.innerHTML = '<p class="hint" style="margin:0">Пока нет вложений.</p>';
+              return;
+            }
+            box.innerHTML = sheet.assets.map((a) =>
+              '<div class="asset">' +
+              '<span class="tk ' + (a.kind === "image" ? "img" : "file") + '">' +
+              (a.kind === "image" ? "IMG" : "ФАЙЛ") + "</span>" +
+              '<span class="nm" data-copy="' + esc(a.name) + '" title="Скопировать тег">' +
+              esc(a.name) + "</span>" +
+              '<span class="sz">' + fmtBytes(a.size) + "</span>" +
+              '<button class="rm" type="button" data-rmasset="' + esc(a.name) + '">×</button>' +
+              "</div>").join("");
+          };
+          paintAssets();
+          sheet.paintAssets = paintAssets;
+
+          const needSaved = () => {
+            if (sheet.id) return true;
+            note("Сначала сохрани запись — вложения цепляются к ней.");
+            return false;
+          };
+          veil.querySelector("#f-add-img").addEventListener("click", () => {
+            if (needSaved()) $("pick-img").click();
+          });
+          veil.querySelector("#f-add-file").addEventListener("click", () => {
+            if (needSaved()) $("pick-file").click();
+          });
+          veil.querySelector("#f-assets").addEventListener("click", async (e) => {
+            const copy = e.target.closest("[data-copy]");
+            if (copy) {
+              const tag = "{{" + copy.dataset.copy + "}}";
+              try { await navigator.clipboard.writeText(tag); toast("Скопировано: " + tag); }
+              catch (err) { toast(tag, false); }
+              return;
+            }
+            const rm = e.target.closest("[data-rmasset]");
+            if (rm && sheet.id) {
+              const name = rm.dataset.rmasset;
+              try {
+                await send("/api/diy/" + sheet.id + "/asset/" +
+                  encodeURIComponent(name), "DELETE");
+              } catch (err) { toast(err.message, true); return; }
+              sheet.assets = sheet.assets.filter((a) => a.name !== name);
+              paintAssets();
+            }
+          });
+
+          const shut = () => { veil.remove(); sheet = null; };
+          veil.addEventListener("click", (e) => { if (e.target === veil) shut(); });
+          veil.querySelector("#f-no").addEventListener("click", shut);
+          veil.querySelector("#f-shot").addEventListener("click", () => {
+            if (!sheet.id) { note("Сначала сохрани запись — фото цепляется к ней."); return; }
+            $("pick").click();
+          });
+          veil.querySelector("#f-noshot").addEventListener("click", async () => {
+            if (!sheet.id) return;
+            await send("/api/diy/" + sheet.id + "/cover", "DELETE");
+            veil.querySelector("#f-pic").style.backgroundImage = "";
+            veil.querySelector("#f-noshot").hidden = true;
+            await load();
+          });
+          veil.querySelector("#f-ok").addEventListener("click", save);
+          const note = (text) => { veil.querySelector("#f-note").textContent = text || ""; };
+          sheet.note = note;
+          sheet.shut = shut;
+        };
+
+        const readSheet = () => {
+          const veil = sheet.veil;
+          return {
+            title: veil.querySelector("#f-title").value,
+            kind: veil.querySelector("#f-kind").value,
+            body: veil.querySelector("#f-body").value,
+            hidden: veil.querySelector("#f-hidden").checked,
+            pinned: veil.querySelector("#f-pinned").checked,
+          };
+        };
+
+        const save = async () => {
+          const data = readSheet();
+          if (!data.title.trim()) { sheet.note("Без названия не сохранить."); return; }
+          try {
+            if (sheet.id) await send("/api/diy/" + sheet.id, "PATCH", data);
+            else {
+              const made = await send("/api/diy", "POST", data);
+              sheet.id = made.id;
+            }
+          } catch (err) { sheet.note(err.message); return; }
+          const shut = sheet.shut;
+          await load();
+          shut();
+          toast("Сохранено");
+        };
+
+        // Фото цепляем к уже сохранённой записи: до этого ей некуда лечь.
+        $("pick").addEventListener("change", async (e) => {
+          const file = e.target.files[0];
+          e.target.value = "";
+          if (!file || !sheet || !sheet.id) return;
+          const form = new FormData();
+          form.append("file", file);
+          try {
+            const r = await fetch("/api/diy/" + sheet.id + "/cover",
+              { method: "POST", credentials: "same-origin", body: form });
+            const d = await r.json();
+            if (!r.ok) throw new Error(d.error || "Не вышло.");
+            const pic = sheet.veil.querySelector("#f-pic");
+            pic.style.backgroundImage = "url(/diy/cover/" + sheet.id + "?t=" + Date.now() + ")";
+            sheet.veil.querySelector("#f-noshot").hidden = false;
+            toast("Фото загружено, " + Math.round(d.size / 1024) + " КБ");
+            await load();
+          } catch (err) { sheet.note(err.message); }
+        });
+
+        // Вложения статьи (фото и файлы). Грузятся к сохранённой записи и
+        // сразу появляются в списке — оттуда хозяин копирует их имена в код.
+        const uploadAsset = async (input) => {
+          const file = input.files[0];
+          input.value = "";
+          if (!file || !sheet || !sheet.id) return;
+          const form = new FormData();
+          form.append("file", file);
+          try {
+            const r = await fetch("/api/diy/" + sheet.id + "/asset",
+              { method: "POST", credentials: "same-origin", body: form });
+            const d = await r.json().catch(() => ({}));
+            if (!r.ok) throw new Error(d.error || "Не вышло.");
+            sheet.assets = sheet.assets.filter((a) => a.name !== d.name);
+            sheet.assets.push({ name: d.name, kind: d.kind, size: d.size });
+            if (sheet.paintAssets) sheet.paintAssets();
+            toast("Загружено: " + d.name);
+          } catch (err) { if (sheet) sheet.note(err.message); }
+        };
+        $("pick-img").addEventListener("change", (e) => uploadAsset(e.target));
+        $("pick-file").addEventListener("change", (e) => uploadAsset(e.target));
+
+        /* ── общие нажатия ─────────────────────────────────────────── */
+        document.addEventListener("click", async (e) => {
+          const open = e.target.closest("[data-open]");
+          if (open) {
+            window.open("/diy/a/" + open.dataset.open, "_blank", "noopener");
+            return;
+          }
+          const act = e.target.closest("[data-act]");
+          if (act) {
+            const what = act.dataset.act;
+            if (what === "new") openSheet(null);
+            if (what === "guest") { asGuest = !asGuest; draw(); }
+            if (what === "login") openAuth();
+            return;
+          }
+          const edit = e.target.closest("[data-edit]");
+          if (edit) {
+            openSheet(works.find((w) => w.id === edit.dataset.edit));
+            return;
+          }
+          const kill = e.target.closest("[data-kill]");
+          if (kill) {
+            const work = works.find((w) => w.id === kill.dataset.kill);
+            if (!confirm("Удалить «" + work.title + "»?")) return;
+            try { await send("/api/diy/" + work.id, "DELETE"); }
+            catch (err) { toast(err.message, true); return; }
+            await load();
+            toast("Удалено");
+          }
+        });
+
+        document.addEventListener("keydown", (e) => {
+          if (e.key === "Escape" && sheet) sheet.shut();
+        });
+
+        load().catch(() => {
+          $("grid").innerHTML = '<p class="empty">не отвечает</p>';
+        });
+      })();
+      </script>
+      <script src="/vg-player.js" defer></script>
+    </body>
+    </html>
+    
