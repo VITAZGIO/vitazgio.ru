@@ -43,6 +43,7 @@ from blueprints.home import create_home_blueprint
 from blueprints.music import create_music_blueprint
 from blueprints.notebook import create_notebook_blueprint
 from blueprints.pwa import ICON_LINKS, create_pwa_blueprint
+from blueprints.remote import create_remote_blueprint
 
 app = Flask(__name__)
 app.config.update(
@@ -1577,131 +1578,7 @@ def session_probe():
     return jsonify(trusted=trusted)
 
 
-@app.get("/api/netbird/status")
-@login_required
-def netbird_status_api():
-    with netbird_status_lock:
-        return jsonify(netbird_status)
 
-
-@app.post("/api/console/login")
-@login_required
-def console_login():
-    if not SSH_GATE_PASSWORD_PREFIX:
-        return jsonify(error="Консоль не настроена."), 503
-
-    client = _client_ip()
-    if _rate_blocked(console_login_attempts, console_login_attempts_lock, client,
-                     CONSOLE_LOGIN_WINDOW_SECONDS, CONSOLE_LOGIN_MAX_ATTEMPTS):
-        return jsonify(error="Слишком много попыток. Попробуйте через 5 минут."), 429
-
-    payload = request.get_json(silent=True) or {}
-    password = payload.get("password", "")
-    if not isinstance(password, str) or not hmac.compare_digest(
-        password.encode(), console_password_today().encode()
-    ):
-        _rate_hit(console_login_attempts, console_login_attempts_lock, client)
-        _log_login("неверный суточный пароль (консоль)", kind="fail")
-        return jsonify(error="Неверный пароль."), 401
-
-    _rate_clear(console_login_attempts, console_login_attempts_lock, client)
-    session["console_authenticated"] = True
-    return jsonify(ok=True)
-
-
-@sock.route("/ws/console/<ip>")
-def console_ws(ws, ip):
-    if not session.get("authenticated") or not session.get("console_authenticated"):
-        ws.close()
-        return
-    if ip not in ssh_enabled_ips:
-        ws.close()
-        return
-
-    message = ws.receive(timeout=15)
-    try:
-        auth = json.loads(message) if message else {}
-    except ValueError:
-        auth = {}
-    username = auth.get("username") if auth.get("type") == "auth" else None
-    password = auth.get("password") if auth.get("type") == "auth" else None
-    if not username or not password:
-        ws.close()
-        return
-
-    client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    try:
-        client.connect(
-            ip, username=username, password=password, timeout=5, look_for_keys=False, allow_agent=False
-        )
-    except (paramiko.SSHException, OSError):
-        ws.send(json.dumps({"type": "data", "data": "\r\nНе удалось подключиться (проверь логин/пароль).\r\n"}))
-        ws.close()
-        return
-
-    client.get_transport().set_keepalive(20)
-    channel = client.invoke_shell(term="xterm")
-    channel.settimeout(0.0)
-
-    stop_event = threading.Event()
-
-    def pump_channel_to_ws():
-        try:
-            while not stop_event.is_set():
-                if channel.recv_ready():
-                    chunk = channel.recv(4096)
-                    if not chunk:
-                        break
-                    ws.send(json.dumps({"type": "data", "data": chunk.decode(errors="replace")}))
-                else:
-                    time.sleep(0.03)
-                if channel.closed:
-                    break
-        except Exception:
-            pass
-        finally:
-            stop_event.set()
-
-    reader = threading.Thread(target=pump_channel_to_ws, daemon=True)
-    reader.start()
-
-    def ssh_keepalive():
-        while not stop_event.is_set():
-            time.sleep(10)
-            if stop_event.is_set():
-                break
-            try:
-                ws.send(json.dumps({"type": "ping"}))
-            except Exception:
-                stop_event.set()
-
-    threading.Thread(target=ssh_keepalive, daemon=True).start()
-
-    try:
-        while not stop_event.is_set():
-            message = ws.receive(timeout=120)
-            if message is None:
-                continue
-            try:
-                payload = json.loads(message)
-            except ValueError:
-                continue
-            ptype = payload.get("type")
-            if ptype == "data":
-                channel.send(payload.get("data", ""))
-            elif ptype == "resize":
-                cols = int(payload.get("cols", 80))
-                rows = int(payload.get("rows", 24))
-                channel.resize_pty(width=cols, height=rows)
-            elif ptype == "ping":
-                ws.send(json.dumps({"type": "pong"}))
-    except Exception:
-        pass
-    finally:
-        stop_event.set()
-        channel.close()
-        client.close()
 
 
 
@@ -1794,223 +1671,6 @@ def _claude_free_name(tabs):
 
 
 
-@sock.route("/ws/claude")
-def claude_ws(ws):
-    """Один канал на весь разговор: и список вкладок, и сам терминал.
-
-    Пароль SSH приходит ровно один раз, в первом сообщении, и дальше живёт
-    только в этом соединении — на диск и в журналы он не попадает."""
-    if not session.get("authenticated") or not session.get("console_authenticated"):
-        ws.close()
-        return
-    if not _claude_ready():
-        ws.close()
-        return
-
-    message = ws.receive(timeout=15)
-    try:
-        auth = json.loads(message) if message else {}
-    except ValueError:
-        auth = {}
-    if auth.get("type") != "auth":
-        ws.close()
-        return
-    username = auth.get("username")
-    password = auth.get("password")
-    if not username or not password:
-        ws.close()
-        return
-
-    client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    try:
-        client.connect(CLAUDE_HOST, username=username, password=password,
-                       timeout=6, look_for_keys=False, allow_agent=False)
-    except (paramiko.SSHException, OSError):
-        try:
-            ws.send(json.dumps({"type": "fail",
-                                "text": "Не удалось зайти на машину — проверь логин и пароль."}))
-        except Exception:
-            pass
-        ws.close()
-        return
-
-    client.get_transport().set_keepalive(20)
-
-    # Проверяем, что на машине вообще есть чем работать. Молча падать в пустой
-    # чёрный экран — худший из возможных ответов.
-    code, _out = _claude_run(client, "command -v tmux >/dev/null 2>&1")
-    if code != 0:
-        ws.send(json.dumps({"type": "fail",
-                            "text": "На машине нет tmux. Поставь: sudo apt install tmux"}))
-        client.close()
-        ws.close()
-        return
-    code, _out = _claude_run(client, f"command -v {shlex.quote(CLAUDE_BIN)} >/dev/null 2>&1")
-    if code != 0:
-        ws.send(json.dumps({"type": "fail",
-                            "text": f"На машине нет команды «{CLAUDE_BIN}». "
-                                    "Поставь Claude Code и зайди в него один раз: claude"}))
-        client.close()
-        ws.close()
-        return
-
-    state = {"channel": None, "tab": None, "cols": 100, "rows": 30}
-    stop_event = threading.Event()
-    send_lock = threading.Lock()
-
-    def say(payload):
-        with send_lock:
-            ws.send(json.dumps(payload))
-
-    def tabs_out():
-        say({"type": "tabs", "tabs": _claude_tabs(client), "open": state["tab"]})
-
-    def tabs_out_when(name):
-        """То же, но дождавшись, пока tmux заведёт сессию.
-
-        Команда уходит в оболочку и выполняется не мгновенно: если спросить
-        список сразу, только что созданной вкладки в нём ещё нет. Ждём в
-        сторонке, чтобы не задерживать разговор."""
-        def wait():
-            for _ in range(16):
-                if stop_event.is_set():
-                    return
-                tabs = _claude_tabs(client)
-                if name in {t["id"] for t in tabs}:
-                    say({"type": "tabs", "tabs": tabs, "open": state["tab"]})
-                    return
-                time.sleep(0.25)
-            tabs_out()
-
-        threading.Thread(target=wait, daemon=True).start()
-
-    def open_tab(name):
-        """Прицепиться к вкладке, а если её нет — завести."""
-        if not CLAUDE_NAME_RE.match(name or ""):
-            say({"type": "fail", "text": "Странное имя вкладки."})
-            return
-        tabs = _claude_tabs(client)
-        if name not in {t["id"] for t in tabs} and len(tabs) >= CLAUDE_TABS_MAX:
-            say({"type": "fail", "text": f"Больше {CLAUDE_TABS_MAX} вкладок сразу не держим."})
-            return
-
-        close_tab_channel()
-        session_name = shlex.quote(CLAUDE_PREFIX + name)
-        # -A: есть такая сессия — прицепиться, нет — создать с нашей командой.
-        # -D: отцепить того, кто смотрел её раньше, иначе размер экрана прыгает.
-        start = f"tmux new-session -A -D -s {session_name}"
-        if CLAUDE_DIR:
-            start += f" -c {shlex.quote(CLAUDE_DIR)}"
-        start += f" {shlex.quote(CLAUDE_BIN)}"
-
-        channel = client.invoke_shell(term="xterm-256color",
-                                      width=state["cols"], height=state["rows"])
-        channel.settimeout(0.0)
-        channel.send(start + "\n")
-        state["channel"] = channel
-        state["tab"] = name
-
-        def pump():
-            try:
-                while not stop_event.is_set() and state["channel"] is channel:
-                    if channel.recv_ready():
-                        chunk = channel.recv(8192)
-                        if not chunk:
-                            break
-                        say({"type": "data", "data": chunk.decode(errors="replace")})
-                    else:
-                        time.sleep(0.03)
-                    if channel.closed:
-                        break
-            except Exception:
-                pass
-            finally:
-                if state["channel"] is channel:
-                    state["channel"] = None
-                    state["tab"] = None
-
-        threading.Thread(target=pump, daemon=True).start()
-        say({"type": "open", "tab": name})
-        tabs_out_when(name)
-
-    def close_tab_channel():
-        """Отцепиться от вкладки, не трогая саму сессию — она живёт дальше."""
-        channel = state["channel"]
-        state["channel"] = None
-        state["tab"] = None
-        if channel:
-            try:
-                channel.close()
-            except Exception:
-                pass
-
-    def kill_tab(name):
-        if not CLAUDE_NAME_RE.match(name or ""):
-            return
-        if state["tab"] == name:
-            close_tab_channel()
-        _claude_run(client, f"tmux kill-session -t {shlex.quote(CLAUDE_PREFIX + name)} 2>/dev/null || true")
-        tabs_out()
-
-    def keepalive():
-        while not stop_event.is_set():
-            time.sleep(10)
-            if stop_event.is_set():
-                break
-            try:
-                say({"type": "ping"})
-            except Exception:
-                stop_event.set()
-
-    threading.Thread(target=keepalive, daemon=True).start()
-
-    try:
-        say({"type": "ready", "host": _claude_host_name(), "dir": CLAUDE_DIR})
-        tabs_out()
-        while not stop_event.is_set():
-            message = ws.receive(timeout=120)
-            if message is None:
-                continue
-            try:
-                payload = json.loads(message)
-            except ValueError:
-                continue
-            kind = payload.get("type")
-            if kind == "data":
-                channel = state["channel"]
-                if channel:
-                    channel.send(payload.get("data", ""))
-            elif kind == "resize":
-                try:
-                    state["cols"] = max(20, min(500, int(payload.get("cols", 100))))
-                    state["rows"] = max(5, min(200, int(payload.get("rows", 30))))
-                except (TypeError, ValueError):
-                    continue
-                channel = state["channel"]
-                if channel:
-                    channel.resize_pty(width=state["cols"], height=state["rows"])
-            elif kind == "open":
-                open_tab(str(payload.get("tab", "")))
-            elif kind == "new":
-                tabs = _claude_tabs(client)
-                name = _claude_free_name(tabs)
-                if not name:
-                    say({"type": "fail", "text": f"Больше {CLAUDE_TABS_MAX} вкладок сразу не держим."})
-                else:
-                    open_tab(name)
-            elif kind == "kill":
-                kill_tab(str(payload.get("tab", "")))
-            elif kind == "list":
-                tabs_out()
-            elif kind == "ping":
-                say({"type": "pong"})
-    except Exception:
-        pass
-    finally:
-        stop_event.set()
-        close_tab_channel()
-        client.close()
 rdp_enabled_ips = {device["ip"] for device in NETBIRD_DEVICES if device.get("rdp_enabled")}
 vnc_enabled_ips = {device["ip"] for device in NETBIRD_DEVICES if device.get("vnc_enabled")}
 
@@ -2091,99 +1751,6 @@ def _guac_handshake(guac_sock, hostname, username, password, width, height, qual
     guac_sock.sendall(_guac_encode("connect", *connect_values))
 
 
-@sock.route("/ws/rdp/<ip>")
-def rdp_ws(ws, ip):
-    if not session.get("authenticated") or not session.get("console_authenticated"):
-        ws.close()
-        return
-    if ip not in rdp_enabled_ips:
-        ws.close()
-        return
-
-    message = ws.receive(timeout=15)
-    try:
-        auth = json.loads(message) if message else {}
-    except ValueError:
-        auth = {}
-    if auth.get("type") != "auth":
-        ws.close()
-        return
-    username = auth.get("username")
-    password = auth.get("password")
-    width = int(auth.get("width", 1280))
-    height = int(auth.get("height", 720))
-    quality = auth.get("quality") if auth.get("quality") in RDP_QUALITY else "medium"
-    if not username or not password:
-        ws.close()
-        return
-
-    try:
-        guac_sock = socket.create_connection((GUACD_HOST, GUACD_PORT), timeout=5)
-    except OSError as e:
-        print(f"[rdp] guacd connect error ({ip}): {e}", flush=True)
-        ws.close()
-        return
-
-    try:
-        _guac_handshake(guac_sock, ip, username, password, width, height, quality)
-    except Exception as e:
-        print(f"[rdp] handshake error ({ip}): {e}", flush=True)
-        guac_sock.close()
-        ws.close()
-        return
-
-    # After handshake, switch to short recv timeout so the pump thread
-    # can periodically check stop_event when the screen is static.
-    # Without this, create_connection's timeout=5 causes recv() to raise
-    # socket.timeout after 5 s of idle screen, silently killing the session.
-    guac_sock.settimeout(2.0)
-
-    stop_event = threading.Event()
-
-    def pump_guac_to_ws():
-        decoder = codecs.getincrementaldecoder("utf-8")()
-        try:
-            while not stop_event.is_set():
-                try:
-                    data = guac_sock.recv(8192)
-                except socket.timeout:
-                    continue  # screen idle — no data from guacd, keep waiting
-                if not data:
-                    print(f"[rdp] guacd closed connection ({ip})", flush=True)
-                    break
-                text = decoder.decode(data)
-                if text:
-                    ws.send(text)
-        except Exception as e:
-            print(f"[rdp] pump error ({ip}): {e}", flush=True)
-        finally:
-            stop_event.set()
-
-    threading.Thread(target=pump_guac_to_ws, daemon=True).start()
-
-    def rdp_keepalive():
-        while not stop_event.is_set():
-            time.sleep(10)
-            if stop_event.is_set():
-                break
-            try:
-                ws.send("3.nop;")
-            except Exception:
-                stop_event.set()
-
-    threading.Thread(target=rdp_keepalive, daemon=True).start()
-
-    try:
-        while not stop_event.is_set():
-            message = ws.receive(timeout=120)
-            if message is None:
-                continue
-            guac_sock.sendall(message.encode() if isinstance(message, str) else message)
-    except Exception as e:
-        print(f"[rdp] ws error ({ip}): {e}", flush=True)
-    finally:
-        stop_event.set()
-        guac_sock.close()
 
 
 def _guac_handshake_vnc(guac_sock, hostname, password, width, height):
@@ -2208,88 +1775,6 @@ def _guac_handshake_vnc(guac_sock, hostname, password, width, height):
     guac_sock.sendall(_guac_encode("connect", *connect_values))
 
 
-@sock.route("/ws/vnc/<ip>")
-def vnc_ws(ws, ip):
-    if not session.get("authenticated") or not session.get("console_authenticated"):
-        ws.close()
-        return
-    if ip not in vnc_enabled_ips:
-        ws.close()
-        return
-
-    message = ws.receive(timeout=15)
-    try:
-        auth = json.loads(message) if message else {}
-    except ValueError:
-        auth = {}
-    if auth.get("type") != "auth":
-        ws.close()
-        return
-    password = auth.get("password", "")
-    width = int(auth.get("width", 1280))
-    height = int(auth.get("height", 720))
-
-    try:
-        guac_sock = socket.create_connection((GUACD_HOST, GUACD_PORT), timeout=5)
-    except OSError as e:
-        print(f"[vnc] guacd connect error ({ip}): {e}", flush=True)
-        ws.close()
-        return
-
-    try:
-        _guac_handshake_vnc(guac_sock, ip, password, width, height)
-    except Exception as e:
-        print(f"[vnc] handshake error ({ip}): {e}", flush=True)
-        guac_sock.close()
-        ws.close()
-        return
-
-    guac_sock.settimeout(2.0)
-    stop_event = threading.Event()
-
-    def pump_guac_to_ws():
-        decoder = codecs.getincrementaldecoder("utf-8")()
-        try:
-            while not stop_event.is_set():
-                try:
-                    data = guac_sock.recv(8192)
-                except socket.timeout:
-                    continue
-                if not data:
-                    break
-                text = decoder.decode(data)
-                if text:
-                    ws.send(text)
-        except Exception as e:
-            print(f"[vnc] pump error ({ip}): {e}", flush=True)
-        finally:
-            stop_event.set()
-
-    threading.Thread(target=pump_guac_to_ws, daemon=True).start()
-
-    def vnc_keepalive():
-        while not stop_event.is_set():
-            time.sleep(10)
-            if stop_event.is_set():
-                break
-            try:
-                ws.send("3.nop;")
-            except Exception:
-                stop_event.set()
-
-    threading.Thread(target=vnc_keepalive, daemon=True).start()
-
-    try:
-        while not stop_event.is_set():
-            message = ws.receive(timeout=120)
-            if message is None:
-                continue
-            guac_sock.sendall(message.encode() if isinstance(message, str) else message)
-    except Exception as e:
-        print(f"[vnc] ws error ({ip}): {e}", flush=True)
-    finally:
-        stop_event.set()
-        guac_sock.close()
 
 
 @app.get("/api/metrics")
@@ -2303,24 +1788,6 @@ def metrics_api():
     return jsonify(result)
 
 
-@app.post("/api/pc/shutdown")
-@login_required
-def pc_shutdown():
-    host = os.environ.get("PC_SHUTDOWN_HOST")
-    user = os.environ.get("PC_SHUTDOWN_USER")
-    key_path = os.environ.get("PC_SHUTDOWN_KEY")
-    if not host or not user or not key_path:
-        return jsonify(error="PC_SHUTDOWN_* не настроены в .env"), 503
-    try:
-        client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        client.connect(host, username=user, key_filename=key_path,
-                       timeout=6, look_for_keys=False, allow_agent=False)
-        client.exec_command("shutdown /s /t 0")
-        client.close()
-        return jsonify(ok=True)
-    except Exception as e:
-        return jsonify(error=str(e)), 500
 
 
 WOL_RELAY_HOST = os.environ.get("WOL_RELAY_HOST", "100.104.221.91")   # домашний сервер
@@ -2359,30 +1826,6 @@ def _wol_relay(hex_packet):
         client.close()
 
 
-@app.post("/api/wol")
-@login_required
-def wol():
-    payload = request.get_json(silent=True) or {}
-    mac = payload.get("mac", "")
-    mac_clean = mac.replace(":", "").replace("-", "").upper()
-    if len(mac_clean) != 12 or not all(c in "0123456789ABCDEF" for c in mac_clean):
-        return jsonify(error="Неверный MAC-адрес."), 400
-
-    packet_hex = "ff" * 6 + (mac_clean.lower() * 16)
-    problem = _wol_relay(packet_hex)
-    if problem:
-        return jsonify(error=f"Не удалось разбудить: {problem}"), 502
-
-    # Заодно шлём из своей подсети — на случай, если приложение всё-таки
-    # окажется в одной сети с машиной.
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-            for addr in WOL_BROADCASTS:
-                s.sendto(bytes.fromhex(packet_hex), (addr, 9))
-    except OSError:
-        pass
-    return jsonify(ok=True)
 
 
 @app.get("/api/uptime")
@@ -3038,34 +2481,6 @@ def _drop_music_delete(item_id):
             music_folders.pop(k, None)
         _music_write_index()
     return jsonify(ok=True)
-@app.get("/cabinet")
-@login_required
-def cabinet():
-    device_items = "".join(
-        f'<li class="device" data-ip="{device["ip"]}">'
-        f'<button class="copy-ip" type="button" data-ip="{device["ip"]}">{device["ip"]}</button>'
-        f'<span class="device-name">{device["name"]}</span>'
-        f'<span class="device-status" data-status>проверка…</span>'
-        + (
-            f'<button class="wol-btn" type="button" data-mac="{device["wol_mac"]}" title="Wake-on-LAN">⚡</button>'
-            if device.get("wol_mac") else '<span class="wol-empty"></span>'
-        )
-        + (
-            f'<button class="connect-btn" type="button" data-ip="{device["ip"]}" data-name="{device["name"]}" data-type="ssh">SSH</button>'
-            if device.get("ssh_enabled")
-            else f'<button class="connect-btn" type="button" data-ip="{device["ip"]}" data-name="{device["name"]}" data-type="rdp">RDP</button>'
-            if device.get("rdp_enabled")
-            else f'<button class="connect-btn" type="button" data-ip="{device["ip"]}" data-name="{device["name"]}" data-type="vnc">VNC</button>'
-            if device.get("vnc_enabled")
-            else '<span class="connect-btn-empty"></span>'
-        )
-        + '<span class="copy-status">Скопировано</span>'
-        + "</li>"
-        for device in NETBIRD_DEVICES
-    )
-    html = _template("cabinet.html")
-    return html.replace("{{DEVICE_ITEMS}}", device_items) \
-               .replace("__ICONLINKS__", ICON_LINKS)
 
 # ---- Пиксельные значки для кнопок игр ---------------------------------------
 # Спрайт описан строками: символ — цвет из палитры, точка — прозрачно.
@@ -4960,14 +4375,6 @@ def _ai_run_stream(chat_id, ctx, use_vision, imgs_b64, requested_model, model):
     return gen
 
 
-
-
-
-
-
-
-
-
 app.register_blueprint(create_home_blueprint(
     template=_template,
     icon_links=ICON_LINKS,
@@ -5206,6 +4613,48 @@ app.register_blueprint(create_ai_blueprint(
     ai_smart_title=_ai_smart_title,
     ai_run_stream=lambda *args, **kwargs: _ai_run_stream(*args, **kwargs),
     sse=_sse,
+))
+
+app.register_blueprint(create_remote_blueprint(
+    sock=sock,
+    template=_template,
+    icon_links=ICON_LINKS,
+    login_required=login_required,
+    netbird_devices=NETBIRD_DEVICES,
+    netbird_status=netbird_status,
+    netbird_status_lock=netbird_status_lock,
+    ssh_gate_password_prefix=SSH_GATE_PASSWORD_PREFIX,
+    console_password_today=console_password_today,
+    client_ip=_client_ip,
+    rate_blocked=_rate_blocked,
+    rate_hit=_rate_hit,
+    rate_clear=_rate_clear,
+    console_login_attempts=console_login_attempts,
+    console_login_attempts_lock=console_login_attempts_lock,
+    console_login_window_seconds=CONSOLE_LOGIN_WINDOW_SECONDS,
+    console_login_max_attempts=CONSOLE_LOGIN_MAX_ATTEMPTS,
+    log_login=_log_login,
+    ssh_enabled_ips=ssh_enabled_ips,
+    rdp_enabled_ips=rdp_enabled_ips,
+    vnc_enabled_ips=vnc_enabled_ips,
+    claude_ready=lambda: _claude_ready(),
+    claude_host=lambda: CLAUDE_HOST,
+    claude_host_name=lambda: _claude_host_name(),
+    claude_dir=CLAUDE_DIR,
+    claude_bin=CLAUDE_BIN,
+    claude_tabs_max=CLAUDE_TABS_MAX,
+    claude_prefix=CLAUDE_PREFIX,
+    claude_name_re=CLAUDE_NAME_RE,
+    claude_run=lambda *args, **kwargs: _claude_run(*args, **kwargs),
+    claude_tabs=lambda *args, **kwargs: _claude_tabs(*args, **kwargs),
+    claude_free_name=lambda *args, **kwargs: _claude_free_name(*args, **kwargs),
+    guacd_host=GUACD_HOST,
+    guacd_port=GUACD_PORT,
+    rdp_quality=RDP_QUALITY,
+    guac_handshake=lambda *args, **kwargs: _guac_handshake(*args, **kwargs),
+    guac_handshake_vnc=lambda *args, **kwargs: _guac_handshake_vnc(*args, **kwargs),
+    wol_relay=lambda *args, **kwargs: _wol_relay(*args, **kwargs),
+    wol_broadcasts=WOL_BROADCASTS,
 ))
 
 app.register_blueprint(create_pwa_blueprint(
