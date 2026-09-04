@@ -35,6 +35,7 @@ from markupsafe import escape
 from flask_sock import Sock
 from werkzeug.middleware.proxy_fix import ProxyFix
 
+from blueprints.debts import create_debts_blueprint
 from blueprints.home import create_home_blueprint
 from blueprints.pwa import ICON_LINKS, create_pwa_blueprint
 
@@ -1535,209 +1536,11 @@ def login():
         session["debtor_id"] = debtor["id"]
         session.permanent = False
         _log_login(f"вход должника: {debtor['name']}")
-        return jsonify(redirect=url_for("debts_me_page"))
+        return jsonify(redirect=url_for("debts.debts_me_page"))
 
     _rate_hit(login_attempts, login_attempts_lock, client)
     _log_login("неверный пароль", kind="fail")
     return jsonify(error="Неверный пароль."), 401
-
-
-@app.post("/api/debts/unlock")
-def debts_unlock_api():
-    if not session.get("authenticated"):
-        fresh = _device_check(request.cookies.get(DEVICE_COOKIE))
-        if not fresh:
-            return jsonify(error="Нужен вход в кабинет."), 403
-        session["authenticated"] = True
-        g.new_device_cookie = fresh
-        _log_login("доверенное устройство")
-
-    client = _client_ip()
-    if _rate_blocked(console_login_attempts, console_login_attempts_lock, client,
-                     CONSOLE_LOGIN_WINDOW_SECONDS, CONSOLE_LOGIN_MAX_ATTEMPTS):
-        return jsonify(error="Слишком много попыток. Попробуйте через 5 минут."), 429
-
-    payload = request.get_json(silent=True) or {}
-    password = payload.get("password", "")
-    if not isinstance(password, str) or not hmac.compare_digest(
-        password.encode(), console_password_today().encode()
-    ):
-        _rate_hit(console_login_attempts, console_login_attempts_lock, client)
-        return jsonify(error="Неверный ежедневный пароль."), 401
-
-    _rate_clear(console_login_attempts, console_login_attempts_lock, client)
-    session["debts_owner_authenticated"] = True
-    session["debts_owner_day"] = _today_iso()
-    return jsonify(ok=True)
-
-
-@app.get("/api/debts")
-@debts_owner_required
-def debts_api():
-    with debts_lock:
-        return jsonify(_debts_snapshot_locked())
-
-
-@app.post("/api/debts/users")
-@debts_owner_required
-def debts_user_create_api():
-    payload = request.get_json(silent=True) or {}
-    name = str(payload.get("name") or "").strip()
-    password = payload.get("password", "")
-    if not name:
-        return jsonify(error="Введите имя."), 400
-    if len(name) > 60:
-        return jsonify(error="Имя слишком длинное."), 400
-    if not isinstance(password, str) or len(password.strip()) < 3:
-        return jsonify(error="Пароль должен быть хотя бы 3 символа."), 400
-    password = password.strip()
-    if password_matches(password):
-        return jsonify(error="Не используй пароль владельца для должника."), 400
-
-    salt, password_hash = _debt_hash_password(password)
-    now = datetime.now(ZoneInfo("Europe/Moscow")).isoformat(timespec="seconds")
-    user_id = uuid.uuid4().hex
-    with debts_lock:
-        if any(u.get("name", "").lower() == name.lower() for u in debts_data["users"]):
-            return jsonify(error="Такой человек уже есть."), 400
-        if any(_debt_password_matches(u, password) for u in debts_data["users"]):
-            return jsonify(error="Такой пароль уже занят."), 400
-        debts_data["users"].append({
-            "id": user_id,
-            "name": name,
-            "password_plain": password,
-            "salt": salt,
-            "password_hash": password_hash,
-            "created": now,
-        })
-        _debts_write_locked()
-        snapshot = _debts_snapshot_locked()
-        snapshot["selected_id"] = user_id
-        return jsonify(snapshot)
-
-
-@app.post("/api/debts/entries")
-@debts_owner_required
-def debts_entry_create_api():
-    payload = request.get_json(silent=True) or {}
-    user_id = str(payload.get("user_id") or "")
-    kind = str(payload.get("kind") or "debt")
-    if kind not in ("debt", "return"):
-        return jsonify(error="Неверный тип записи."), 400
-    try:
-        amount_cents = _debt_amount_cents(payload.get("amount"))
-        entry_date = _debt_clean_date(payload.get("date"))
-    except ValueError as err:
-        return jsonify(error=str(err)), 400
-    comment = str(payload.get("comment") or "").strip()[:220] or "—"
-    now = datetime.now(ZoneInfo("Europe/Moscow")).isoformat(timespec="seconds")
-
-    with debts_lock:
-        if not any(u.get("id") == user_id for u in debts_data["users"]):
-            return jsonify(error="Выберите человека."), 400
-        debts_data["entries"].append({
-            "id": uuid.uuid4().hex,
-            "user_id": user_id,
-            "kind": kind,
-            "date": entry_date,
-            "amount_cents": amount_cents,
-            "comment": comment,
-            "created": now,
-        })
-        _debts_write_locked()
-        return jsonify(_debts_snapshot_locked())
-
-
-@app.delete("/api/debts/entries/<entry_id>")
-@debts_owner_required
-def debts_entry_delete_api(entry_id):
-    with debts_lock:
-        before = len(debts_data["entries"])
-        debts_data["entries"] = [e for e in debts_data["entries"] if e.get("id") != entry_id]
-        if len(debts_data["entries"]) == before:
-            return jsonify(error="Запись не найдена."), 404
-        _debts_write_locked()
-        return jsonify(_debts_snapshot_locked())
-
-
-@app.get("/api/debts/me")
-def debts_me_api():
-    user_id = session.get("debtor_id")
-    if not user_id:
-        return jsonify(error="Нужен вход."), 403
-    with debts_lock:
-        user = next((u for u in debts_data["users"] if u.get("id") == user_id), None)
-        if not user:
-            session.pop("debtor_id", None)
-            return jsonify(error="Пользователь не найден."), 404
-        snapshot = _debts_snapshot_locked(user_id)
-        snapshot["me"] = _debt_user_public_locked(user)
-        return jsonify(snapshot)
-
-
-@app.delete("/api/debts/users/<user_id>")
-@debts_owner_required
-def debts_user_delete_api(user_id):
-    with debts_lock:
-        before = len(debts_data["users"])
-        debts_data["users"] = [u for u in debts_data["users"] if u.get("id") != user_id]
-        if len(debts_data["users"]) == before:
-            return jsonify(error="Пользователь не найден."), 404
-        debts_data["entries"] = [e for e in debts_data["entries"] if e.get("user_id") != user_id]
-        _debts_write_locked()
-        return jsonify(_debts_snapshot_locked())
-
-
-@app.post("/api/debts/users/<user_id>/password")
-@debts_owner_required
-def debts_user_password_api(user_id):
-    payload = request.get_json(silent=True) or {}
-    password = payload.get("password", "")
-    if not isinstance(password, str) or len(password.strip()) < 3:
-        return jsonify(error="Пароль должен быть хотя бы 3 символа."), 400
-    password = password.strip()
-    if password_matches(password):
-        return jsonify(error="Не используй пароль владельца для должника."), 400
-    salt, password_hash = _debt_hash_password(password)
-    with debts_lock:
-        user = next((u for u in debts_data["users"] if u.get("id") == user_id), None)
-        if not user:
-            return jsonify(error="Пользователь не найден."), 404
-        if any(u.get("id") != user_id and _debt_password_matches(u, password) for u in debts_data["users"]):
-            return jsonify(error="Такой пароль уже занят."), 400
-        user["password_plain"] = password
-        user["salt"] = salt
-        user["password_hash"] = password_hash
-        _debts_write_locked()
-        return jsonify(_debts_snapshot_locked())
-
-
-@app.get("/debts/me")
-@debtor_required
-def debts_me_page():
-    return _debts_page_html(owner=False)
-
-
-@app.get("/debts")
-@login_required
-def debts_page():
-    return _debts_page_html(owner=True)
-
-
-def _debts_page_html(owner=True):
-    mode = "owner" if owner else "debtor"
-    title = "Долги" if owner else "Мои долги"
-    back_href = "/cabinet" if owner else "/"
-    owner_unlocked = owner and _debts_owner_unlocked()
-    html = _template("debts.html")
-    return (html.replace("**MODE**", mode)
-                .replace("**TITLE**", title)
-                .replace("**TITLE_FIRST**", title.split()[0])
-                .replace("**TITLE_REST**", " ".join(title.split()[1:]))
-                .replace("**BACK_HREF**", back_href)
-                .replace("**UNLOCK_HIDDEN**", "hidden" if not owner or owner_unlocked else "")
-                .replace("**OWNER_APP_HIDDEN**", "hidden" if not owner or not owner_unlocked else "")
-                .replace("**DEBTOR_APP_HIDDEN**", "hidden" if owner else ""))
 
 
 @app.post("/logout")
@@ -7174,6 +6977,37 @@ app.register_blueprint(create_home_blueprint(
     log_login=_log_login,
     ssh_gate_password_prefix=SSH_GATE_PASSWORD_PREFIX,
     console_password_today=console_password_today,
+))
+
+app.register_blueprint(create_debts_blueprint(
+    template=_template,
+    login_required=login_required,
+    debts_owner_required=debts_owner_required,
+    debtor_required=debtor_required,
+    debts_lock=debts_lock,
+    debts_data=lambda: debts_data,
+    debts_owner_unlocked=_debts_owner_unlocked,
+    debts_snapshot_locked=_debts_snapshot_locked,
+    debts_write_locked=_debts_write_locked,
+    debt_hash_password=_debt_hash_password,
+    debt_password_matches=_debt_password_matches,
+    debt_user_public_locked=_debt_user_public_locked,
+    debt_amount_cents=_debt_amount_cents,
+    debt_clean_date=_debt_clean_date,
+    today_iso=_today_iso,
+    password_matches=password_matches,
+    device_check=_device_check,
+    device_cookie=DEVICE_COOKIE,
+    client_ip=_client_ip,
+    rate_blocked=_rate_blocked,
+    rate_hit=_rate_hit,
+    rate_clear=_rate_clear,
+    console_login_attempts=console_login_attempts,
+    console_login_attempts_lock=console_login_attempts_lock,
+    console_login_window_seconds=CONSOLE_LOGIN_WINDOW_SECONDS,
+    console_login_max_attempts=CONSOLE_LOGIN_MAX_ATTEMPTS,
+    console_password_today=console_password_today,
+    log_login=_log_login,
 ))
 
 app.register_blueprint(create_pwa_blueprint(
