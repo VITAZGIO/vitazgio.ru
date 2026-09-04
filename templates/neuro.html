@@ -1,0 +1,120 @@
+<!doctype html>
+    <html lang="ru" data-tab="mm">
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <meta name="theme-color" content="#0b1020">
+      <meta name="robots" content="noindex">
+      __ICONLINKS__
+      <link rel="manifest" href="/manifest.webmanifest">
+      <title>Нейронки · vitazgio.ru</title>
+      <style>
+        :root { color-scheme:dark; --line:rgba(255,255,255,.1);
+                --mm1:#ff3d9a; --mm2:#ff8fc4;   /* MiniMax: розовый */
+                --nv1:#76c900; --nv2:#39ff14;   /* NVIDIA: зелёный */
+                --cl1:#d97757; --cl2:#f0a184;   /* Claude: оранжевый */
+                --ac:var(--mm1); --ac2:var(--mm2); }
+        html[data-tab="nv"] { --ac:var(--nv1); --ac2:var(--nv2); }
+        html[data-tab="cl"] { --ac:var(--cl1); --ac2:var(--cl2); }
+        * { box-sizing:border-box; }
+        html, body { height:100%; margin:0; }
+        body { display:flex; flex-direction:column; overflow:hidden; color:#eef2fb;
+               font-family:"Cascadia Code", Consolas, monospace;
+               background:#0b1020; }
+
+        /* Полоса вкладок — как шапка браузера: вкладки «стоят» на контенте. */
+        .tabbar { flex:none; display:flex; align-items:flex-end; gap:6px;
+                  padding:8px clamp(8px,2vw,16px) 0; border-bottom:1px solid var(--line);
+                  background:linear-gradient(180deg,
+                    color-mix(in srgb, var(--ac) 14%, #0b1020), #0b1020);
+                  transition:background .25s; }
+        .home { width:38px; height:38px; margin:0 4px 7px 0; flex:none; display:grid;
+                place-items:center; color:#aeb8cf; text-decoration:none; border-radius:10px;
+                border:1px solid var(--line); background:rgba(255,255,255,.04); transition:.16s; }
+        .home:hover { color:#fff; border-color:color-mix(in srgb, var(--ac) 55%, transparent);
+                      background:color-mix(in srgb, var(--ac) 14%, transparent); }
+        .home svg { width:18px; height:18px; }
+
+        .tab { position:relative; top:1px; display:flex; align-items:center; gap:9px; cursor:pointer;
+               padding:10px 16px; max-width:210px; color:#9fa9bf; font:600 .84rem inherit;
+               border:1px solid transparent; border-bottom:none;
+               border-radius:12px 12px 0 0; background:transparent; transition:color .16s, background .16s; }
+        .tab:hover { color:#e6ecf8; background:rgba(255,255,255,.04); }
+        .tab i { width:9px; height:9px; flex:none; border-radius:50%; }
+        .tab.mm i { background:linear-gradient(160deg,var(--mm1),var(--mm2)); box-shadow:0 0 10px var(--mm1); }
+        .tab.nv i { background:linear-gradient(160deg,var(--nv1),var(--nv2)); box-shadow:0 0 10px var(--nv1); }
+        .tab.cl i { background:linear-gradient(160deg,var(--cl1),var(--cl2)); box-shadow:0 0 10px var(--cl1); }
+        .tab b { font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .tab.on { color:#fff; background:#0b1020; border-color:var(--line);
+                  box-shadow:0 -3px 18px color-mix(in srgb, var(--ac) 22%, transparent); }
+        /* язычок, «сливающий» активную вкладку с полем ниже */
+        .tab.on::after { content:""; position:absolute; left:0; right:0; bottom:-1px; height:2px; background:#0b1020; }
+        .tab.on::before { content:""; position:absolute; left:0; right:0; top:0; height:3px;
+                          border-radius:12px 12px 0 0;
+                          background:linear-gradient(90deg, var(--ac), var(--ac2)); }
+
+        .stage { flex:1; min-height:0; position:relative; background:#0b1020; }
+        .stage iframe { position:absolute; inset:0; width:100%; height:100%; border:0; display:none; }
+        .stage iframe.on { display:block; }
+        .stage .spin { position:absolute; inset:0; display:grid; place-items:center;
+                       color:#7c8ba0; font-size:.8rem; }
+
+        @media (max-width:560px) {
+          .tab { padding:9px 12px; font-size:.8rem; }
+          .tab b { max-width:96px; }
+        }
+      </style>
+    </head>
+    <body>
+      <div class="tabbar">
+        <a class="home" href="/cabinet" title="В кабинет" aria-label="В кабинет"><svg viewBox="0 0 24 24" fill="none"><path d="M19 12H5m0 0 6-6m-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
+        <button class="tab mm on" type="button" data-tab="mm"><i></i><b>MiniMax</b></button>
+        <button class="tab nv" type="button" data-tab="nv"><i></i><b>NVIDIA</b></button>
+        <button class="tab cl" type="button" data-tab="cl"><i></i><b>Claude</b></button>
+      </div>
+      <div class="stage">
+        <div class="spin" id="spin">открываю…</div>
+        <iframe id="fr-mm" class="on" title="MiniMax" src="/ai?m=minimax%2Fminimax-m3%3Afree" loading="eager" allow="clipboard-write"></iframe>
+        <iframe id="fr-nv" title="NVIDIA" data-src="/ai?m=nvidia%2Fnemotron-3-ultra-550b-a55b%3Afree" allow="clipboard-write"></iframe>
+        <iframe id="fr-cl" title="Claude" data-src="/claude"></iframe>
+      </div>
+
+      <script>
+      (() => {
+        "use strict";
+        const root = document.documentElement;
+        const tabs = Array.from(document.querySelectorAll(".tab"));
+        const frames = { mm: document.getElementById("fr-mm"),
+                         nv: document.getElementById("fr-nv"),
+                         cl: document.getElementById("fr-cl") };
+        const spin = document.getElementById("spin");
+        const loaded = { mm: true, nv: false, cl: false };
+
+        frames.mm.addEventListener("load", () => { if (root.getAttribute("data-tab") === "mm") spin.style.display = "none"; });
+        frames.nv.addEventListener("load", () => { loaded.nv = true; if (root.getAttribute("data-tab") === "nv") spin.style.display = "none"; });
+        frames.cl.addEventListener("load", () => { loaded.cl = true; if (root.getAttribute("data-tab") === "cl") spin.style.display = "none"; });
+
+        const show = (id) => {
+          root.setAttribute("data-tab", id);
+          tabs.forEach((t) => t.classList.toggle("on", t.dataset.tab === id));
+          Object.keys(frames).forEach((k) => frames[k].classList.toggle("on", k === id));
+          // ленивое подключение второй вкладки при первом заходе
+          if (!loaded[id] && frames[id].dataset.src) {
+            spin.style.display = "grid";
+            frames[id].src = frames[id].dataset.src;
+          } else {
+            spin.style.display = "none";
+          }
+          try { localStorage.setItem("neuroTab", id); } catch (e) {}
+        };
+
+        tabs.forEach((t) => t.addEventListener("click", () => show(t.dataset.tab)));
+
+        let start = "mm";
+        try { const s = localStorage.getItem("neuroTab"); if (s === "cl" || s === "nv" || s === "mm") start = s; } catch (e) {}
+        show(start);
+      })();
+      </script>
+    </body>
+    </html>
+    
