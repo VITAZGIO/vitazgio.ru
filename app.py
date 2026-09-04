@@ -58,6 +58,13 @@ app.wsgi_app = ProxyFix(
 
 sock = Sock(app)
 
+TEMPLATE_DIR = Path(__file__).parent / "templates"
+
+
+def _template(name):
+    return (TEMPLATE_DIR / name).read_text(encoding="utf-8")
+
+
 # Репозиторий публичный, поэтому соль и хэш живут только в .env. Запасных
 # значений в коде нет намеренно: раньше они тут лежали, и любой желающий мог
 # скачать их вместе с исходниками и спокойно подбирать пароль у себя дома,
@@ -1719,7 +1726,7 @@ def _debts_page_html(owner=True):
     title = "Долги" if owner else "Мои долги"
     back_href = "/cabinet" if owner else "/"
     owner_unlocked = owner and _debts_owner_unlocked()
-    html = (Path(__file__).parent / "templates" / "debts.html").read_text(encoding="utf-8")
+    html = _template("debts.html")
     return (html.replace("**MODE**", mode)
                 .replace("**TITLE**", title)
                 .replace("**TITLE_FIRST**", title.split()[0])
@@ -4151,7 +4158,7 @@ def _drop_view_page(token, item, kind):
         body = f'<audio src="{raw}" controls preload="metadata"></audio>'
     else:
         body = f'<iframe src="{raw}" title="{name}"></iframe>'
-    html = (Path(__file__).parent / "templates" / "drop_view.html").read_text(encoding="utf-8")
+    html = _template("drop_view.html")
     return (html.replace("__ICONLINKS__", ICON_LINKS)
                 .replace("__NAME__", name)
                 .replace("__SIZE__", size)
@@ -4341,7 +4348,7 @@ def cabinet():
         + "</li>"
         for device in NETBIRD_DEVICES
     )
-    html = (Path(__file__).parent / "templates" / "cabinet.html").read_text(encoding="utf-8")
+    html = _template("cabinet.html")
     return html.replace("{{DEVICE_ITEMS}}", device_items) \
                .replace("__ICONLINKS__", ICON_LINKS)
 
@@ -4410,7 +4417,7 @@ def service_worker():
     пока сеть жива, поэтому любая правка на сервере видна в приложении сразу,
     без переустановки. Из кэша достаётся только запасная страница — и только
     когда сети нет вовсе."""
-    js = (Path(__file__).parent / "templates" / "service_worker.js.tpl").read_text(encoding="utf-8")
+    js = _template("service_worker.js.tpl")
     return Response(js, mimetype="application/javascript")
 
 
@@ -4921,7 +4928,7 @@ def themes_page():
             f'</g>'
         )
 
-    html = (Path(__file__).parent / "templates" / "themes.html").read_text(encoding="utf-8")
+    html = _template("themes.html")
     return html.replace("__NODES__", "".join(cards)) \
                .replace("__ICONLINKS__", ICON_LINKS)
 
@@ -4929,7 +4936,7 @@ def themes_page():
 @app.get("/drop")
 @login_required
 def drop_page():
-    html = (Path(__file__).parent / "templates" / "drop.html").read_text(encoding="utf-8")
+    html = _template("drop.html")
     return html.replace("__ICONLINKS__", ICON_LINKS)
 
 
@@ -5870,7 +5877,7 @@ def diy_article_page(item_id):
         links_html = f'<div class="links">{chips}</div>'
     draft = ('<span class="draft">черновик</span>' if snapshot["hidden"] else "")
 
-    html = (Path(__file__).parent / "templates" / "diy_article.html").read_text(encoding="utf-8")
+    html = _template("diy_article.html")
     summary_html = (f'<p class="summary">{escape(snapshot["summary"])}</p>'
                     if snapshot["summary"] else "")
     tags = "".join([
@@ -6171,7 +6178,7 @@ def notebook_pdf_view(eid):
 def notebook_page():
     """Блокнот: страницы-вкладки как в браузере, записи трёх видов. Оформлен
     в едином тёмном стиле сайта — бирюзовый акцент, шрифт Cascadia."""
-    html = (Path(__file__).parent / "templates" / "notebook.html").read_text(encoding="utf-8")
+    html = _template("notebook.html")
     return html.replace("__ICONLINKS__", ICON_LINKS)
 
 
@@ -6180,7 +6187,7 @@ def _soon_page(name, kicker, headline, lead, points):
     содержимое появится позже. Пустая страница выглядела бы поломкой,
     поэтому честно пишем, что здесь будет."""
     items = "".join(f"<li>{escape(p)}</li>" for p in points)
-    html = (Path(__file__).parent / "templates" / "soon.html").read_text(encoding="utf-8")
+    html = _template("soon.html")
     return (html.replace("__ICONLINKS__", ICON_LINKS)
                 .replace("__NAME__", escape(name))
                 .replace("__KICKER__", escape(kicker))
@@ -6246,7 +6253,7 @@ def vg_player_js():
     Страница музыки подключает тот же движок без своего оверлея (VGP_HEADLESS)
     и рулит им своей большой панелью — поэтому панель и виджет всегда показывают
     одно и то же."""
-    js = (Path(__file__).parent / "templates" / "vg_player.js.tpl").read_text(encoding="utf-8")
+    js = _template("vg_player.js.tpl")
     response = Response(js, mimetype="application/javascript; charset=utf-8")
     # Движок ОБЯЗАН перепроверяться при каждой загрузке страницы, а не жить
     # своей жизнью в кэше. Раньше стояло max-age=300 без ETag: после деплоя
@@ -6299,7 +6306,7 @@ def claude_page():
     остальное происходит на домашней машине. Закрыл вкладку браузера — разговор
     остался висеть в tmux и ждёт возвращения."""
     g.frameable = True
-    html = (Path(__file__).parent / "templates" / "claude.html").read_text(encoding="utf-8")
+    html = _template("claude.html")
     return html.replace("__ICONLINKS__", ICON_LINKS)
 @app.get("/diy")
 def diy_page():
@@ -6307,7 +6314,7 @@ def diy_page():
 
     Смотреть может кто угодно, добавлять — хозяин. Отдельного входа не просим:
     если сайт уже помнит устройство по кабинету, режим правки включается сам."""
-    html = (Path(__file__).parent / "templates" / "diy.html").read_text(encoding="utf-8")
+    html = _template("diy.html")
     return html.replace("__ICONLINKS__", ICON_LINKS)
 
 
@@ -6637,7 +6644,7 @@ def sebastian_ask_api():
 def sebastian_page():
     """Разговор с дворецким. Открыт всем: управлять домом отсюда нельзя,
     поэтому пускать можно кого угодно."""
-    html = (Path(__file__).parent / "templates" / "sebastian.html").read_text(encoding="utf-8")
+    html = _template("sebastian.html")
     return (html.replace("__ICONLINKS__", ICON_LINKS)
                 .replace("__ICON_BUTLER__", _GAME_ICONS.get(SEBASTIAN_ICON, "")))
 
@@ -7369,7 +7376,7 @@ def neuro_page():
     (сине-фиолетовая) и Claude (оранжевая). Сами чаты — уже готовые страницы
     /ai и /claude; тут только верхние вкладки, которые их показывают в iframe.
     Каждая несёт свою тему, так что переключение меняет и цвет шапки."""
-    html = (Path(__file__).parent / "templates" / "neuro.html").read_text(encoding="utf-8")
+    html = _template("neuro.html")
     return html.replace("__ICONLINKS__", ICON_LINKS)
 
 
@@ -7386,7 +7393,7 @@ def ai_page():
     Разрешаем встраивание в свой же iframe — страница «Нейронки» показывает её
     вкладкой рядом с Claude."""
     g.frameable = True
-    html = (Path(__file__).parent / "templates" / "ai.html").read_text(encoding="utf-8")
+    html = _template("ai.html")
     return html.replace("__ICONLINKS__", ICON_LINKS).replace("%%PRESET%%", _preset.replace("\"", "\\\"")).replace("%%NET%%", _net)
 
 
@@ -7397,7 +7404,7 @@ def servers_page():
     Страница открыта всем, поэтому наружу не выносим ни публичный адрес VPS,
     ни адреса mesh-сети — только домашние 192.168.x, которые одинаковы у
     половины страны и ничего не выдают."""
-    html = (Path(__file__).parent / "templates" / "servers.html").read_text(encoding="utf-8")
+    html = _template("servers.html")
     return html.replace("__ICONLINKS__", ICON_LINKS)
 
 
@@ -7418,13 +7425,13 @@ def music_page():
     файлы сервер не выдаёт. Кнопки правки появляются, только когда сервер в
     ответе на список сказал can_edit — запрет живёт на сервере, здесь лишь
     чтобы не мозолить глаза."""
-    html = (Path(__file__).parent / "templates" / "music.html").read_text(encoding="utf-8")
+    html = _template("music.html")
     return html.replace("__ICONLINKS__", ICON_LINKS)
 
 
 @app.route("/")
 def home():
-    html = (Path(__file__).parent / "templates" / "home.html").read_text(encoding="utf-8")
+    html = _template("home.html")
     for name, svg in _GAME_ICONS.items():
         html = html.replace("__ICON_%s__" % name.upper(), svg)
     html = html.replace("__ICONLINKS__", ICON_LINKS)
