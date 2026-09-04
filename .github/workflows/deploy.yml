@@ -43,6 +43,13 @@ jobs:
             cd /opt/sites/vitazgio.ru
             git fetch origin
             git reset --hard origin/main
+            # Кэш чистим ДО сборки, не только после: если прошлая сборка
+            # оборвалась (диск кончился, демон перезапустили), запись о
+            # слое в BuildKit остаётся, а файла на диске уже нет — сборка
+            # падает на первом же шаге (WORKDIR) с "failed to stat parent".
+            # Прошлый порядок (только после успешной сборки) не лечил себя:
+            # при падении до prune скрипт выходил по set -e раньше него.
+            docker builder prune -af
             docker compose up -d --build web
             docker builder prune -f
             docker image prune -f
