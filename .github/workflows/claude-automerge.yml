@@ -25,7 +25,10 @@ concurrency:
 
 jobs:
   merge:
-    runs-on: self-hosted
+    # Чистый git (clone/merge/push) — дому и Амстердаму не нужен, поэтому
+    # едет на облачной виртуалке GitHub, а не на self-hosted: зависание
+    # любой из наших машин больше не блокирует даже простой merge в main.
+    runs-on: ubuntu-latest
     if: ${{ !contains(github.event.head_commit.message, '[hold]') }}
 
     steps:

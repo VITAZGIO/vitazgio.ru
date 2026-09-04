@@ -11,7 +11,11 @@ on:
 
 jobs:
   deploy:
-    runs-on: self-hosted
+    # Раннер стоит прямо на VPS в Амстердаме — сборка и старт идут на
+    # месте, без SSH-прыжка через домашнюю машину. Метка vps-amsterdam
+    # (не просто self-hosted) — чтобы не задело домашний раннер, если он
+    # ещё зарегистрирован.
+    runs-on: [self-hosted, vps-amsterdam]
 
     steps:
       - name: Sync code from GitHub
@@ -20,54 +24,37 @@ jobs:
           git fetch origin
           git reset --hard origin/main
 
-      # Дома живёт только guacd — сайт переехал в Амстердам.
-      - name: Restart guacd at home
-        run: |
-          cd /opt/sites/vitazgio.ru
-          docker compose up -d guacd
-
+      # Кэш чистим ДО сборки, не только после: если прошлая сборка
+      # оборвалась (диск кончился, демон перезапустили), запись о слое в
+      # BuildKit остаётся, а файла на диске уже нет — сборка падает на
+      # первом же шаге (WORKDIR) с "failed to stat parent". Прошлый
+      # порядок (только после успешной сборки) не лечил себя: при падении
+      # до prune скрипт выходил раньше него.
       - name: Clean up Docker cache
         run: |
-          docker builder prune -f
+          docker builder prune -af
           docker image prune -f
 
-      # Идёт последним: даже если Амстердам недоступен, дом уже обновлён.
-      # Падение шага видно красным крестиком в Actions — молча не проглатываем.
-      - name: Deploy to Amsterdam VPS
+      - name: Build and deploy
         run: |
-          ssh -i /home/vitaz/.ssh/id_ed25519_amsterdam \
-              -o StrictHostKeyChecking=accept-new \
-              -o ConnectTimeout=10 \
-              root@100.104.94.83 '
-            set -e
-            cd /opt/sites/vitazgio.ru
-            git fetch origin
-            git reset --hard origin/main
-            # Кэш чистим ДО сборки, не только после: если прошлая сборка
-            # оборвалась (диск кончился, демон перезапустили), запись о
-            # слое в BuildKit остаётся, а файла на диске уже нет — сборка
-            # падает на первом же шаге (WORKDIR) с "failed to stat parent".
-            # Прошлый порядок (только после успешной сборки) не лечил себя:
-            # при падении до prune скрипт выходил по set -e раньше него.
-            docker builder prune -af
-            docker compose up -d --build web
-            # Проверяем по тому же адресу, по которому реально ходит nginx
-            # (npm) на этой VPS — 172.17.0.1, не 127.0.0.1 (см. CLAUDE.md,
-            # раздел про топологию прокси). У приложения нет network_mode:
-            # host-соседа на loopback, только на docker0-шлюзе.
-            ok=
-            for i in $(seq 1 20); do
-              if curl -fsS --max-time 2 http://172.17.0.1:5000/ >/dev/null; then
-                ok=1
-                break
-              fi
-              sleep 1
-            done
-            if [ "$ok" != 1 ]; then
-              docker compose ps
-              docker logs --tail=200 vitazgio-site || true
-              exit 1
+          cd /opt/sites/vitazgio.ru
+          docker compose up -d --build web
+          # Проверяем по тому же адресу, по которому реально ходит nginx
+          # (npm) на этой VPS — 172.17.0.1, не 127.0.0.1 (см. CLAUDE.md,
+          # раздел про топологию прокси). У приложения нет network_mode:
+          # host-соседа на loopback, только на docker0-шлюзе.
+          ok=
+          for i in $(seq 1 20); do
+            if curl -fsS --max-time 2 http://172.17.0.1:5000/ >/dev/null; then
+              ok=1
+              break
             fi
-            docker builder prune -f
-            docker image prune -f
-          '
+            sleep 1
+          done
+          if [ "$ok" != 1 ]; then
+            docker compose ps
+            docker logs --tail=200 vitazgio-site || true
+            exit 1
+          fi
+          docker builder prune -f
+          docker image prune -f
