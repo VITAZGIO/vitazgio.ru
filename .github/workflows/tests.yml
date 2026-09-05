@@ -1,0 +1,31 @@
+name: Tests
+
+# Отдельным файлом и только по вызову (workflow_call): его зовут оба пути,
+# которыми код доезжает до сервера, — автослияние веток claude/** (до
+# слияния в main) и деплой (до сборки на VPS). Один файл на оба гейта,
+# чтобы проверка не разъехалась между ними.
+on:
+  workflow_call:
+
+jobs:
+  pytest:
+    # Облачная виртуалка GitHub, а не self-hosted: тестам не нужны ни
+    # NetBird, ни доступ к VPS, а зависание домашней машины не должно
+    # блокировать проверку.
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          # Та же версия, что в образе (Dockerfile: python:3.11-slim) —
+          # иначе тесты гоняли бы не тот интерпретатор, что прод.
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Run pytest
+        run: pytest -q
