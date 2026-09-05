@@ -159,14 +159,8 @@ def client(app_module):
 @pytest.fixture
 def auth_client(app_module):
     """Хозяин: вошёл настоящим паролем через /api/login, а не подделкой
-    сессии — так проверяется в том числе и то, что пароль вообще работает.
-
-    Код ответа тут намеренно не проверяется: сегодня успешный вход отдаёт
-    500 (см. `tests/test_auth.py`, про url_for('cabinet')), хотя сессию
-    при этом открывает. Проверяем по существу — что доступ появился.
-    Когда 500 починят, эта проверка останется верной.
-    """
+    сессии — так проверяется в том числе и то, что вход вообще работает."""
     c = app_module.app.test_client()
-    c.post("/api/login", json={"password": TEST_PASSWORD})
-    assert c.get("/cabinet").status_code == 200, "вход не открыл сессию"
+    resp = c.post("/api/login", json={"password": TEST_PASSWORD})
+    assert resp.status_code == 200, f"вход не удался: {resp.data!r}"
     return c

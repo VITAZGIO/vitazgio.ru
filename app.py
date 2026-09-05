@@ -1527,7 +1527,12 @@ def login():
         session["authenticated"] = True
         session.permanent = False
         _log_login()
-        return jsonify(redirect=url_for("cabinet"))
+        # Именно "remote.cabinet", а не "cabinet": страница кабинета живёт
+        # в blueprints/remote.py, а у видов внутри blueprint'а имя эндпоинта
+        # всегда с приставкой. Без неё url_for роняет BuildError, и успешный
+        # вход отдаёт 500 вместо адреса перехода — так и было после переезда
+        # кабинета в blueprint, пока не поймали тестом.
+        return jsonify(redirect=url_for("remote.cabinet"))
 
     debtor = _debt_find_user_by_password(password)
     if debtor:
