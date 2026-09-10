@@ -1,0 +1,98 @@
+
+    <!DOCTYPE html>
+    <html lang="ru">
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <meta name="robots" content="noindex, nofollow">
+      <title>Журнал входов · vitazgio.ru</title>
+      __ICONLINKS__
+      <style>
+        * { box-sizing: border-box; }
+        body { margin: 0; min-height: 100svh; color: #e9fbff; font-family: "Cascadia Code", Consolas, monospace; background: radial-gradient(circle at top left, #192a44, #0d1321 55%); }
+        [hidden] { display: none !important; }
+        a { color: inherit; }
+        .wrap { max-width: 760px; margin: 0 auto; padding: clamp(24px, 4vw, 54px); }
+        .head { display: flex; align-items: center; gap: 18px; margin-bottom: 26px; }
+        .back { width: 44px; height: 44px; flex: none; display: grid; place-items: center;
+          color: #2de2ff; text-decoration: none; border: 1px solid rgba(45,226,255,.35); border-radius: 50%;
+          background: rgba(45,226,255,.08); transition: all .18s; }
+        .back:hover { color: #fff; border-color: #2de2ff; background: rgba(45,226,255,.2); }
+        .back svg { width: 20px; height: 20px; display: block; }
+        .head-ic { width: 52px; height: 52px; flex: none; display: grid; place-items: center; }
+        .head-ic svg { width: 100%; height: 100%; }
+        h1 { margin: 0; font-size: clamp(1.7rem, 3.6vw, 2.4rem); font-weight: 700; letter-spacing: -.02em;
+             color: #eaf6ff; text-shadow: 0 0 22px rgba(45,226,255,.35); }
+        .sub { margin: 3px 0 0; color: #8b93a6; font-size: .84rem; }
+        .panel { border: 1px solid rgba(45,226,255,.22); background: rgba(16,24,40,.55); }
+        .panel-body { padding: 20px 22px; }
+        .widget-empty { color: #4a5060; font-size: .8rem; margin: 0; padding: 4px 0; }
+
+        .log-row { display: grid; grid-template-columns: 150px 1fr; gap: 4px 10px; padding: 9px 0; border-bottom: 1px solid rgba(255,255,255,.06); font-size: .8rem; }
+        .log-row:last-child { border-bottom: 0; }
+        .log-ts { color: #6b7385; white-space: nowrap; }
+        .log-ip { color: #69e8ff; }
+        .log-ua { color: #4a5060; font-size: .7rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; grid-column: 1 / -1; }
+        .log-bad .log-ip { color: #ff6b81; }
+        .log-bad .log-ip::before { content: "✕ "; }
+        .log-alarm { margin: 0 0 10px; padding: 7px 10px; color: #ffb35c; font-size: .76rem; border-left: 2px solid #ff6b81; background: rgba(255,107,129,.07); }
+        @media (max-width: 560px) {
+          .wrap { padding-inline: 16px; }
+          .log-row { grid-template-columns: 1fr; }
+        }
+      </style>
+    </head>
+    <body>
+      <main class="wrap">
+        <header class="head">
+          <a class="back" href="/cabinet" title="В кабинет" aria-label="В кабинет">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M19 12H5m0 0 6-6m-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </a>
+          <span class="head-ic">
+            <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
+              <circle cx="24" cy="24" r="17" stroke="#2de2ff" stroke-width="2.6" stroke-opacity=".55"/>
+              <path d="M24 13v11l7.5 4.5" stroke="#7fe9ff" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M24 7a17 17 0 0 1 14.6 25.7" stroke="#2de2ff" stroke-width="2.6" stroke-linecap="round"/>
+              <circle cx="24" cy="24" r="2.6" fill="#7fe9ff"/>
+            </svg>
+          </span>
+          <div>
+            <h1>Журнал входов</h1>
+            <p class="sub">кто и когда заходил, за две недели</p>
+          </div>
+        </header>
+
+        <section class="panel">
+          <div class="panel-body">
+            <div id="loginlog-list"><p class="widget-empty">Загрузка…</p></div>
+          </div>
+        </section>
+      </main>
+      <script>
+      {
+        const esc = s => String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+        const listEl = document.getElementById("loginlog-list");
+
+        const draw = rows => {
+          if (!rows.length) { listEl.innerHTML = '<p class="widget-empty">Нет записей</p>'; return; }
+          const fails = rows.filter(e => e.kind && e.kind !== "ok").length;
+          const head = fails
+            ? `<p class="log-alarm">Неудачных попыток за две недели: ${fails}</p>` : "";
+          listEl.innerHTML = head + rows.map(e => {
+            const bad = e.kind && e.kind !== "ok";
+            return `<div class="log-row${bad ? " log-bad" : ""}"><span class="log-ts">${esc(e.ts)}</span><span class="log-ip">${esc(e.ip)}</span><span class="log-ua">${esc(e.ua)}</span></div>`;
+          }).join("");
+        };
+
+        (async () => {
+          try {
+            const r = await fetch("/api/login-log", { credentials: "same-origin" });
+            draw(await r.json());
+          } catch { listEl.innerHTML = '<p class="widget-empty">Не удалось загрузить.</p>'; }
+        })();
+      }
+      </script>
+    </body>
+    </html>

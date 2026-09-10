@@ -3,7 +3,7 @@
 Baseline before blueprint split:
 
 - Source: `app.py`
-- Route decorators: `128`
+- Route decorators: `131`
 - Code changes in this inventory: none
 - Исправление 2026-09-04: в первой версии описи (задача 17) забыли 4
   вебсокет-роута (`@sock.route`, не `@app.*`) — реальных роутов в коде
@@ -22,17 +22,37 @@ Guards column includes route decorators such as `login_required`, `debtor_requir
 | `/api/login` | `@app.post("/api/login")` | `login` | - |
 | `/logout` | `@app.post("/logout")` | `logout` | - |
 | `/api/session/probe` | `@app.get("/api/session/probe")` | `session_probe` | - |
-| `/api/login-log` | `@app.get("/api/login-log")` | `login_log_api` | `login_required` |
+
+## devices
+
+Вкладка кабинета «Запомнить устройства» — своя страница, не аккордеон.
+
+| URL | Decorator | Function | Guards |
+| --- | --- | --- | --- |
+| `/devices` | `@app.get("/devices")` | `devices_page` | `login_required` |
 | `/api/devices/trust` | `@app.post("/api/devices/trust")` | `device_trust` | `login_required` |
 | `/api/devices` | `@app.get("/api/devices")` | `devices_list_api` | `login_required` |
 | `/api/devices/<selector>` | `@app.patch("/api/devices/<selector>")` | `device_rename_api` | `login_required` |
 | `/api/devices/<selector>` | `@app.delete("/api/devices/<selector>")` | `device_forget_api` | `login_required` |
 
+## login_log
+
+Вкладка кабинета «Журнал входов» — своя страница, не аккордеон.
+
+| URL | Decorator | Function | Guards |
+| --- | --- | --- | --- |
+| `/login-log` | `@app.get("/login-log")` | `login_log_page` | `login_required` |
+| `/api/login-log` | `@app.get("/api/login-log")` | `login_log_api` | `login_required` |
+
 ## cabinet
+
+`/netbird` живёт тут же (`blueprints/remote.py`) — рядом со статусом
+устройств и SSH/RDP/VNC-консолью, которыми и управляет.
 
 | URL | Decorator | Function | Guards |
 | --- | --- | --- | --- |
 | `/cabinet` | `@app.get("/cabinet")` | `cabinet` | `login_required` |
+| `/netbird` | `@app.get("/netbird")` | `netbird_page` | `login_required` |
 | `/api/metrics` | `@app.get("/api/metrics")` | `metrics_api` | `login_required` |
 | `/api/uptime` | `@app.get("/api/uptime")` | `uptime_api` | `login_required` |
 
@@ -177,8 +197,11 @@ Guards column includes route decorators such as `login_required`, `debtor_requir
 
 ## backup
 
+Вкладка кабинета «Резервная копия» — своя страница, не аккордеон.
+
 | URL | Decorator | Function | Guards |
 | --- | --- | --- | --- |
+| `/backup` | `@app.get("/backup")` | `backup_page` | `login_required` |
 | `/api/backup/state` | `@app.get("/api/backup/state")` | `backup_state_api` | `login_required` |
 | `/api/backup/export` | `@app.get("/api/backup/export")` | `backup_export_api` | - |
 | `/api/backup/import` | `@app.post("/api/backup/import")` | `backup_import_api` | `login_required` |

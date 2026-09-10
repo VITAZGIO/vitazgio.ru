@@ -1,0 +1,1102 @@
+
+    <!DOCTYPE html>
+    <html lang="ru">
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <meta name="robots" content="noindex, nofollow">
+      <title>NetBird · vitazgio.ru</title>
+      __ICONLINKS__
+      <style>
+        * { box-sizing: border-box; }
+        body { margin: 0; min-height: 100svh; color: #e9fbff; font-family: "Cascadia Code", Consolas, monospace; background: radial-gradient(circle at top left, #192a44, #0d1321 55%); }
+        [hidden] { display: none !important; }
+        a { color: inherit; }
+        .wrap { max-width: 1100px; margin: 0 auto; padding: clamp(24px, 4vw, 54px); }
+        .head { display: flex; align-items: center; gap: 18px; margin-bottom: 26px; }
+        .back { width: 44px; height: 44px; flex: none; display: grid; place-items: center;
+          color: #ff9a5c; text-decoration: none; border: 1px solid rgba(255,120,47,.35); border-radius: 50%;
+          background: rgba(255,120,47,.08); transition: all .18s; }
+        .back:hover { color: #fff; border-color: #ff782f; background: rgba(255,120,47,.2); }
+        .back svg { width: 20px; height: 20px; display: block; }
+        .head-ic { width: 52px; height: 52px; flex: none; border-radius: 14px; display: grid; place-items: center;
+          background: rgba(255,120,47,.12); border: 1px solid rgba(255,120,47,.32); }
+        .head-ic img { width: 30px; height: 30px; }
+        h1 { margin: 0; font-size: clamp(1.7rem, 3.6vw, 2.4rem); font-weight: 700; letter-spacing: -.02em;
+             color: #eaf6ff; text-shadow: 0 0 22px rgba(255,120,47,.35); }
+        .sub { margin: 3px 0 0; color: #8b93a6; font-size: .84rem; }
+        .sub b { color: #63f5ad; font-weight: 700; }
+        .panel { border: 1px solid rgba(255,120,47,.22); background: rgba(16,24,40,.55); padding: 6px 0 4px; }
+        .panel h2 { margin: 16px 18px 2px; font-size: .74rem; color: #ff9a5c; text-transform: uppercase; letter-spacing: .08em; }
+        @media (max-width: 560px) {
+          .wrap { padding-inline: 16px; }
+        }
+        .device-list { container-type: inline-size; margin: 0; padding: 8px 18px 18px; list-style: none; border-top: 1px solid rgba(255,255,255,.07); }
+        .device { min-height: 48px; display: grid; grid-template-columns: 150px 1fr 70px 36px 116px 82px; align-items: center; gap: 12px; border-bottom: 1px solid rgba(255,255,255,.06); }
+        .device:last-child { border-bottom: 0; }
+        .copy-ip { padding: 7px 8px; color: #69e8ff; text-align: left; border: 0; background: transparent; }
+        .copy-ip:hover, .copy-ip:focus-visible { color: #fff; border: 0; outline: 1px solid rgba(45,226,255,.28); background: rgba(45,226,255,.08); }
+        .device-name { min-width: 0; color: #c4cad5; font-size: .84rem; overflow-wrap: break-word; }
+        .device-status { color: #6b7385; font-size: .76rem; text-align: right; white-space: nowrap; }
+        .device-status::before { content: "● "; }
+        .device-status.online { color: #63f5ad; }
+        .device-status.offline { color: #ff6b81; }
+        .connect-btn { padding: 6px 10px; color: #ff782f; font: 700 .7rem "Cascadia Code", Consolas, monospace; letter-spacing: .04em; text-transform: uppercase; border: 1px solid rgba(255,120,47,.35); background: rgba(255,120,47,.07); cursor: pointer; }
+        .connect-btn:hover, .connect-btn:focus-visible { color: #fff; background: rgba(255,120,47,.22); outline: none; }
+        .connect-btn.btn-offline { color: #4a5060; border-color: rgba(100,100,110,.2); background: rgba(60,65,75,.06); cursor: not-allowed; pointer-events: none; }
+        .connect-btn-empty { display: block; }
+        .wol-btn { padding: 5px 7px; color: #fbbf24; font-size: .9rem; border: 1px solid rgba(251,191,36,.3); background: rgba(251,191,36,.07); cursor: pointer; transition: all .2s; }
+        .wol-btn:hover { background: rgba(251,191,36,.18); border-color: #fbbf24; }
+        .wol-btn.wol-online { color: #ff6b81; border-color: rgba(255,107,129,.3); background: rgba(255,107,129,.07); }
+        .wol-btn.wol-online:hover { background: rgba(255,107,129,.18); border-color: #ff6b81; }
+        .wol-btn.wol-sent { color: #63f5ad; border-color: rgba(99,245,173,.4); background: rgba(99,245,173,.1); }
+        .wol-empty { display: block; }
+        .copy-status { color: #63f5ad; font-size: .7rem; opacity: 0; transition: opacity .18s ease; }
+        .copy-status.visible { opacity: 1; }
+        @media (max-width: 900px) {
+          .workspace { width: 100%; min-width: 0; }
+        }
+        @media (max-width: 560px) {
+          .cabinet { padding-inline: 20px; }
+          .cabinet-header { align-items: flex-start; justify-content: space-between; gap: 12px; }
+        }
+        /* Считаем ширину самого списка, а не окна: в две колонки кабинет
+           бывает узким и при широком экране — тогда имя устройства сжималось
+           в ноль и рассыпалось по одной букве в строку. */
+        @container (max-width: 640px) {
+          .device { grid-template-columns: 1fr auto; gap: 4px 10px; padding: 8px 0; }
+          .device-name { grid-column: 1; grid-row: 2; padding-left: 8px; }
+          .device-status { grid-column: 2; grid-row: 1; }
+          .connect-btn, .connect-btn-empty { grid-column: 1; grid-row: 3; justify-self: start; margin-left: 8px; }
+          .wol-btn, .wol-empty { grid-column: 2; grid-row: 3; justify-self: end; }
+          .copy-status { grid-column: 2; grid-row: 2; text-align: right; }
+        }
+
+        .gate-modal { position: fixed; z-index: 100; inset: 0; display: grid; place-items: center; padding: 20px; }
+        .gate-backdrop { position: absolute; inset: 0; background: rgba(3, 6, 13, .82); backdrop-filter: blur(12px); }
+        .gate-panel { position: relative; width: min(380px, 100%); padding: 30px; color: #e8fbff; border: 1px solid rgba(255,120,47,.3); background: linear-gradient(145deg, rgba(16, 30, 47, .98), rgba(20, 16, 37, .98)); box-shadow: 0 32px 100px rgba(0,0,0,.65); }
+        .gate-panel h2 { margin: 0 0 18px; font-size: 1.3rem; }
+        .gate-panel input { width: 100%; height: 46px; padding: 0 14px; color: #f4fbff; font: 700 1rem "Cascadia Code", Consolas, monospace; border: 1px solid rgba(255,255,255,.12); outline: none; background: rgba(4,10,20,.65); }
+        .gate-panel input:focus { border-color: #ff782f; }
+        .gate-panel input + input { margin-top: 10px; }
+        .gate-select { width: 100%; height: 46px; margin-top: 10px; padding: 0 12px; color: #f4fbff;
+                       font: 600 .8rem "Cascadia Code", Consolas, monospace; border: 1px solid rgba(255,255,255,.12);
+                       outline: none; background: rgba(4,10,20,.65); cursor: pointer; }
+        .gate-select:focus { border-color: #ff782f; }
+        .gate-select option { background: #101a2b; }
+        .gate-submit { width: 100%; height: 46px; margin-top: 12px; color: #1a0d04; font: 800 .8rem "Cascadia Code", Consolas, monospace; letter-spacing: .06em; text-transform: uppercase; border: 0; background: linear-gradient(90deg, #ff782f, #ffb35c); cursor: pointer; }
+        .gate-error { min-height: 18px; margin: 10px 0 0; color: #ff6ba8; font-size: .78rem; }
+        .gate-close { position: absolute; top: 12px; right: 14px; padding: 5px; color: #7d8799; font-size: 1.3rem; border: 0; background: none; cursor: pointer; }
+
+        /* Высота задаётся переменной, а не inset:0. На телефоне экранная
+           клавиатура ужимает видимую область, но макетная остаётся прежней —
+           и шапка с рядом кнопок уезжала под клавиатуру. Теперь окно живёт
+           ровно в видимой части, а сжимается только тело терминала. */
+        .term-overlay { position: fixed; z-index: 100; left: 0; right: 0; top: 0;
+                        height: var(--term-h, 100%); display: flex; flex-direction: column;
+                        background: #05070c; transform: translateY(var(--term-top, 0px)); }
+        .term-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 18px; color: #c4cad5; font-size: .82rem; background: rgba(255,255,255,.04); border-bottom: 1px solid rgba(255,255,255,.08); }
+        .term-close { padding: 7px 12px; color: #dffaff; font: 700 .76rem "Cascadia Code", Consolas, monospace; border: 1px solid rgba(255,255,255,.16); background: transparent; cursor: pointer; }
+        .term-close:hover { background: rgba(255,255,255,.08); }
+        .term-body { flex: 1 1 auto; min-height: 0; padding: 10px; overflow: hidden; }
+        .term-header, .term-tools { flex: none; }
+        .term-tools { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 12px; flex: none;
+                      background: rgba(255,255,255,.03); border-bottom: 1px solid rgba(255,255,255,.07); }
+        .term-key { min-width: 46px; padding: 9px 12px; color: #c4cad5;
+                    font: 600 .74rem "Cascadia Code", Consolas, monospace;
+                    border: 1px solid rgba(255,255,255,.14); border-radius: 5px;
+                    background: linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,.02));
+                    cursor: pointer; touch-action: manipulation; user-select: none; -webkit-user-select: none; }
+        .term-key:active { color: #2de2ff; border-color: rgba(45,226,255,.5); background: rgba(45,226,255,.14); }
+        .term-key-wide { min-width: 96px; color: #1a0d04; border: 0;
+                         background: linear-gradient(90deg, #ff782f, #ffb35c); font-weight: 800; }
+        .term-key-go { color: #04121c; border: 0; background: linear-gradient(90deg, #2de2ff, #7df9ff); font-weight: 800; }
+        .term-toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+                      z-index: 120; padding: 9px 16px; color: #04121c; font: 700 .74rem "Cascadia Code", Consolas, monospace;
+                      background: #2de2ff; }
+        .rdp-overlay { position: fixed; z-index: 100; inset: 0; display: flex; flex-direction: column; background: #000; }
+        .rdp-content { display: flex; flex: 1; min-height: 0; overflow: hidden; }
+        .rdp-display { flex: 1; overflow: hidden; cursor: none; position: relative; min-width: 0; }
+        .rdp-display > div { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); }
+        .rdp-header-actions { display: flex; align-items: center; gap: 8px; }
+        .rdp-toolbar { display: flex; flex-direction: column; flex-wrap: nowrap; gap: 4px; padding: 6px; background: rgba(16,24,38,.96); border-left: 1px solid rgba(255,255,255,.07); flex-shrink: 0; overflow-y: auto; align-items: stretch; }
+        .rdp-lock-hint { position: absolute; inset: 0; display: grid; place-items: center; color: rgba(140,150,168,.6); font: .78rem "Cascadia Code", Consolas, monospace; pointer-events: none; z-index: 1; }
+        .rdp-key { padding: 7px 10px; min-width: 38px; color: #c4cad5; font: 600 .72rem "Cascadia Code", Consolas, monospace; text-align: center; border: 1px solid rgba(255,255,255,.13); background: rgba(255,255,255,.05); cursor: pointer; touch-action: manipulation; user-select: none; -webkit-user-select: none; }
+        .rdp-key:active, .rdp-key.active { color: #ff782f; border-color: rgba(255,120,47,.55); background: rgba(255,120,47,.13); }
+        .rdp-key-combo { padding: 7px 10px; color: #ff6b81; font: 600 .7rem "Cascadia Code", Consolas, monospace; border: 1px solid rgba(255,107,129,.28); background: rgba(255,107,129,.06); cursor: pointer; touch-action: manipulation; user-select: none; -webkit-user-select: none; }
+        .rdp-key-combo:active { background: rgba(255,107,129,.2); }
+        .rdp-kbd-input { position: fixed; left: -9999px; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
+        .conn-quality { display: inline-block; padding: 2px 7px; border-radius: 3px; font: 600 .7rem "Cascadia Code", Consolas, monospace; background: rgba(255,255,255,.07); color: #8f99ab; pointer-events: none; transition: color .3s; vertical-align: middle; margin-left: 8px; }
+        .conn-quality:empty { display: none; }
+        .conn-quality.good { color: #4ade80; }
+        .conn-quality.warn { color: #fbbf24; }
+        .conn-quality.bad  { color: #f87171; }
+        @media (max-width: 900px) {
+          .term-header { padding: 8px 12px; }
+          .rdp-display > div { top: 0; left: 0; transform: none; }
+        }
+
+      </style>
+    </head>
+    <body>
+      <main class="wrap">
+        <header class="head">
+          <a class="back" href="/cabinet" title="В кабинет" aria-label="В кабинет">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M19 12H5m0 0 6-6m-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </a>
+          <span class="head-ic"><img src="/static/netbird-official.png" alt=""></span>
+          <div>
+            <h1>NetBird</h1>
+            <p class="sub">домашняя сеть · <b>{{DEVICE_COUNT}}</b> устройств</p>
+          </div>
+        </header>
+
+        <section class="panel">
+          <h2>Устройства</h2>
+          <ul class="device-list">{{DEVICE_ITEMS}}</ul>
+        </section>
+      </main>
+      <div id="gate-modal" class="gate-modal" hidden>
+        <div class="gate-backdrop" data-gate-close></div>
+        <section class="gate-panel" role="dialog" aria-modal="true" aria-labelledby="gate-title">
+          <button class="gate-close" type="button" data-gate-close aria-label="Закрыть">×</button>
+          <h2 id="gate-title">Пароль консоли</h2>
+          <form id="gate-form">
+            <input id="gate-password" name="password" type="password" autocomplete="off" required>
+            <button class="gate-submit" type="submit">Войти</button>
+            <p id="gate-error" class="gate-error" role="alert"></p>
+          </form>
+        </section>
+      </div>
+
+      <div id="ssh-login-modal" class="gate-modal" hidden>
+        <div class="gate-backdrop" data-ssh-login-close></div>
+        <section class="gate-panel" role="dialog" aria-modal="true" aria-labelledby="ssh-login-title">
+          <button class="gate-close" type="button" data-ssh-login-close aria-label="Закрыть">×</button>
+          <h2 id="ssh-login-title">SSH-логин</h2>
+          <form id="ssh-login-form">
+            <input id="ssh-login-username" name="username" type="text" autocomplete="off" placeholder="Имя пользователя" required>
+            <input id="ssh-login-password" name="password" type="password" autocomplete="off" placeholder="Пароль" required>
+            <button class="gate-submit" type="submit">Подключиться</button>
+            <p id="ssh-login-error" class="gate-error" role="alert"></p>
+          </form>
+        </section>
+      </div>
+
+      <div id="vnc-login-modal" class="gate-modal" hidden>
+        <div class="gate-backdrop" data-vnc-login-close></div>
+        <section class="gate-panel" role="dialog" aria-modal="true" aria-labelledby="vnc-login-title">
+          <button class="gate-close" type="button" data-vnc-login-close aria-label="Закрыть">×</button>
+          <h2 id="vnc-login-title">VNC</h2>
+          <form id="vnc-login-form">
+            <input id="vnc-login-password" name="password" type="password" autocomplete="off" placeholder="Пароль (если задан)" required>
+            <button class="gate-submit" type="submit">Подключиться</button>
+            <p id="vnc-login-error" class="gate-error" role="alert"></p>
+          </form>
+        </section>
+      </div>
+
+      <div id="rdp-login-modal" class="gate-modal" hidden>
+        <div class="gate-backdrop" data-rdp-login-close></div>
+        <section class="gate-panel" role="dialog" aria-modal="true" aria-labelledby="rdp-login-title">
+          <button class="gate-close" type="button" data-rdp-login-close aria-label="Закрыть">×</button>
+          <h2 id="rdp-login-title">Windows RDP</h2>
+          <form id="rdp-login-form">
+            <input id="rdp-login-username" name="username" type="text" autocomplete="off" placeholder="Имя пользователя" required>
+            <input id="rdp-login-password" name="password" type="password" autocomplete="off" placeholder="Пароль" required>
+            <select id="rdp-login-quality" class="gate-select">
+              <option value="high">Качество: высокое — 32 бита, все эффекты</option>
+              <option value="medium" selected>Качество: среднее — 16 бит, без обоев</option>
+              <option value="low">Качество: низкое — 8 бит, для слабой связи</option>
+            </select>
+            <button class="gate-submit" type="submit">Подключиться</button>
+            <p id="rdp-login-error" class="gate-error" role="alert"></p>
+          </form>
+        </section>
+      </div>
+
+      <div id="rdp-overlay" class="rdp-overlay" hidden>
+        <div class="term-header">
+          <span id="rdp-title"></span><span id="rdp-quality" class="conn-quality"></span>
+          <div class="rdp-header-actions">
+            <button id="rdp-toolbar-toggle" class="term-close" type="button" hidden>☰</button>
+            <button id="rdp-touch-toggle" class="term-close" type="button" hidden>Touchpad</button>
+            <button id="rdp-close" class="term-close" type="button">Закрыть</button>
+          </div>
+        </div>
+        <div class="rdp-content">
+          <div id="rdp-display" class="rdp-display"></div>
+          <div id="rdp-toolbar" class="rdp-toolbar" hidden>
+            <button class="rdp-key" data-keysym="65307">Esc</button>
+            <button class="rdp-key" data-keysym="65289">Tab</button>
+            <button class="rdp-key" data-mod="65507">Ctrl</button>
+            <button class="rdp-key" data-mod="65513">Alt</button>
+            <button class="rdp-key" data-mod="65515">Win</button>
+            <button class="rdp-key" data-keysym="65288">⌫</button>
+            <button class="rdp-key" data-keysym="65361">◀</button>
+            <button class="rdp-key" data-keysym="65362">▲</button>
+            <button class="rdp-key" data-keysym="65364">▼</button>
+            <button class="rdp-key" data-keysym="65363">▶</button>
+            <button class="rdp-key-combo" data-combo="65507,65513,65535">C+A+D</button>
+            <button class="rdp-key-combo" data-combo="65507,65505">C+Shift</button>
+            <button class="rdp-key-combo" data-combo="65513,65505">A+Shift</button>
+            <button class="rdp-key-combo" data-combo="65515,65513">Win+A</button>
+            <button id="rdp-kbd-btn" class="rdp-key" type="button" hidden>⌨</button>
+          </div>
+        </div>
+        <input id="rdp-kbd-input" class="rdp-kbd-input" type="text" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" inputmode="text">
+      </div>
+
+      <div id="term-overlay" class="term-overlay" hidden>
+        <div class="term-header">
+          <span id="term-title"></span><span id="ssh-quality" class="conn-quality"></span>
+          <button id="term-close" class="term-close" type="button">Закрыть</button>
+        </div>
+        <!-- Ряд кнопок для телефона: с экранной клавиатуры ни стрелок, ни Tab,
+             ни Ctrl нет, а вставку буфера браузер сам в терминал не отдаёт. -->
+        <div class="term-tools" id="term-tools">
+          <button class="term-key term-key-wide" type="button" data-paste>Вставить</button>
+          <button class="term-key term-key-go" type="button" data-key="enter">Enter ⏎</button>
+          <button class="term-key" type="button" data-key="up">↑</button>
+          <button class="term-key" type="button" data-key="down">↓</button>
+          <button class="term-key" type="button" data-key="tab">Tab</button>
+          <button class="term-key" type="button" data-key="ctrlc">Ctrl+C</button>
+          <button class="term-key" type="button" data-key="esc">Esc</button>
+        </div>
+        <div id="term-body" class="term-body"></div>
+      </div>
+
+      <!-- Библиотеки лежат в static/vendor, а не на CDN: когда jsdelivr
+           недоступен, консоль и RDP переставали открываться вообще без
+           объяснений. Адрес CDN оставлен запасным на случай, если файл
+           почему-то не отдался.
+
+           Грузим их ПО ТРЕБОВАНИЮ, а не при открытии страницы: xterm тянет
+           277 КБ, guacamole ещё 73 КБ, а нужны только когда реально открываешь
+           консоль или удалённый рабочий стол. -->
+      <script>
+        window.vendorReady = (() => {
+          const PARTS = {
+            xterm: {
+              css: "/static/vendor/xterm.css",
+              js: [
+                ["/static/vendor/xterm.js",
+                 "https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"],
+                ["/static/vendor/xterm-addon-fit.js",
+                 "https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"],
+              ],
+            },
+            guac: {
+              js: [
+                ["/static/vendor/guacamole-common.min.js",
+                 "https://cdn.jsdelivr.net/npm/guacamole-common-js@1.5.0/dist/cjs/guacamole-common.min.js"],
+              ],
+            },
+          };
+          // Своя копия, при осечке — CDN. Порядок внутри набора важен:
+          // аддон xterm ждёт, пока определится сам Terminal.
+          const one = (local, cdn) => new Promise((ok, fail) => {
+            const add = (src, last) => {
+              const s = document.createElement("script");
+              s.src = src;
+              s.onload = ok;
+              s.onerror = () => last ? fail(new Error(src)) : add(cdn, true);
+              document.head.appendChild(s);
+            };
+            add(local, false);
+          });
+          const done = {};                 // грузим один раз, дальше — из кэша
+          return (name) => {
+            if (done[name]) return done[name];
+            const part = PARTS[name];
+            if (!part) return Promise.resolve();
+            if (part.css) {
+              const link = document.createElement("link");
+              link.rel = "stylesheet";
+              link.href = part.css;
+              document.head.appendChild(link);
+            }
+            done[name] = part.js.reduce(
+              (chain, [local, cdn]) => chain.then(() => one(local, cdn)),
+              Promise.resolve());
+            return done[name];
+          };
+        })();
+      </script>
+      <script>
+        (() => {
+          const timers = new WeakMap();
+
+          const copyFallback = (text) => {
+            const input = document.createElement("textarea");
+            input.value = text;
+            input.style.position = "fixed";
+            input.style.opacity = "0";
+            document.body.appendChild(input);
+            input.select();
+            document.execCommand("copy");
+            input.remove();
+          };
+
+          document.querySelectorAll(".copy-ip").forEach((button) => {
+            button.addEventListener("click", async () => {
+              try {
+                if (navigator.clipboard && window.isSecureContext) {
+                  await navigator.clipboard.writeText(button.dataset.ip);
+                } else {
+                  copyFallback(button.dataset.ip);
+                }
+                const message = button.parentElement.querySelector(".copy-status");
+                message.classList.add("visible");
+                clearTimeout(timers.get(message));
+                timers.set(message, setTimeout(() => message.classList.remove("visible"), 1800));
+              } catch {
+                const message = button.parentElement.querySelector(".copy-status");
+                message.textContent = "Ошибка";
+                message.classList.add("visible");
+                setTimeout(() => { message.classList.remove("visible"); message.textContent = "Скопировано"; }, 1800);
+              }
+            });
+          });
+        })();
+
+        (() => {
+          const refreshStatus = async () => {
+            let data;
+            try {
+              const response = await fetch("/api/netbird/status", { credentials: "same-origin" });
+              if (!response.ok) return;
+              data = await response.json();
+            } catch {
+              return;
+            }
+            document.querySelectorAll(".device").forEach((item) => {
+              const info = data[item.dataset.ip];
+              const statusEl = item.querySelector(".device-status");
+              if (!info) return;
+              const btn = item.querySelector(".connect-btn");
+              const wolBtn = item.querySelector(".wol-btn");
+              if (info.online) {
+                statusEl.textContent = info.latency_ms != null ? `${Math.round(info.latency_ms)} ms` : "онлайн";
+                statusEl.className = "device-status online";
+                if (btn) btn.classList.remove("btn-offline");
+                if (wolBtn) { wolBtn.classList.add("wol-online"); wolBtn.title = "Выключить ПК"; wolBtn.textContent = "⏻"; }
+              } else {
+                statusEl.textContent = "офлайн";
+                statusEl.className = "device-status offline";
+                if (btn) btn.classList.add("btn-offline");
+                if (wolBtn) { wolBtn.classList.remove("wol-online"); wolBtn.title = "Wake-on-LAN"; wolBtn.textContent = "⚡"; }
+              }
+            });
+          };
+          refreshStatus();
+          setInterval(refreshStatus, 10000);
+        })();
+
+        (() => {
+          document.querySelectorAll(".wol-btn").forEach(btn => {
+            btn.addEventListener("click", async () => {
+              const isOnline = btn.classList.contains("wol-online");
+              btn.disabled = true;
+              const origText = btn.textContent;
+              try {
+                if (isOnline) {
+                  if (!confirm("Выключить ПК?")) { btn.disabled = false; return; }
+                  const r = await fetch("/api/pc/shutdown", { method: "POST", credentials: "same-origin" });
+                  if (!r.ok) throw new Error((await r.json()).error);
+                } else {
+                  const r = await fetch("/api/wol", {
+                    method: "POST", credentials: "same-origin",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ mac: btn.dataset.mac }),
+                  });
+                  if (!r.ok) throw new Error((await r.json()).error);
+                }
+                btn.textContent = "✓";
+                btn.classList.add("wol-sent");
+                setTimeout(() => { btn.textContent = origText; btn.classList.remove("wol-sent"); btn.disabled = false; }, 4000);
+              } catch (e) {
+                btn.textContent = "✗";
+                setTimeout(() => { btn.textContent = origText; btn.disabled = false; }, 2000);
+              }
+            });
+          });
+        })();
+
+        (() => {
+          const gateModal = document.getElementById("gate-modal");
+          const gateForm = document.getElementById("gate-form");
+          const gatePassword = document.getElementById("gate-password");
+          const gateError = document.getElementById("gate-error");
+          const sshLoginModal = document.getElementById("ssh-login-modal");
+          const sshLoginForm = document.getElementById("ssh-login-form");
+          const sshLoginUsername = document.getElementById("ssh-login-username");
+          const sshLoginPassword = document.getElementById("ssh-login-password");
+          const sshLoginError = document.getElementById("ssh-login-error");
+          const termOverlay = document.getElementById("term-overlay");
+          const termTitle = document.getElementById("term-title");
+          const termBody = document.getElementById("term-body");
+
+          /* Подгоняем окно консоли под видимую часть экрана. На телефоне при
+             появлении клавиатуры visualViewport становится ниже, а обычный
+             resize при этом может вообще не сработать — поэтому слушаем
+             именно его. Пересчёт откладываем на кадр: во время анимации
+             выезда клавиатуры размеры меняются десятки раз подряд. */
+          let kbdWatching = false;
+          const watchKeyboard = (onFit) => {
+            const vv = window.visualViewport;
+            const apply = () => {
+              const root = termOverlay.style;
+              if (!vv) { root.removeProperty("--term-h"); root.removeProperty("--term-top"); }
+              else {
+                root.setProperty("--term-h", vv.height + "px");
+                root.setProperty("--term-top", vv.offsetTop + "px");
+              }
+              if (onFit) onFit();
+            };
+            apply();
+            if (!vv || kbdWatching) return;
+            kbdWatching = true;
+            let pending = 0;
+            const later = () => {
+              cancelAnimationFrame(pending);
+              pending = requestAnimationFrame(apply);
+            };
+            vv.addEventListener("resize", later);
+            vv.addEventListener("scroll", later);
+          };
+          const termClose = document.getElementById("term-close");
+
+          let consoleAuthenticated = false;
+          let pendingDevice = null;
+          let term = null;
+          let fitAddon = null;
+          let ws = null;
+
+          const rdpLoginModal = document.getElementById("rdp-login-modal");
+          const rdpLoginForm = document.getElementById("rdp-login-form");
+          const rdpLoginUsername = document.getElementById("rdp-login-username");
+          const rdpLoginPassword = document.getElementById("rdp-login-password");
+          const rdpLoginError = document.getElementById("rdp-login-error");
+          const rdpLoginQuality = document.getElementById("rdp-login-quality");
+          const rdpOverlay = document.getElementById("rdp-overlay");
+          const rdpTitleEl = document.getElementById("rdp-title");
+          const rdpDisplay = document.getElementById("rdp-display");
+          const rdpCloseBtn = document.getElementById("rdp-close");
+          let rdpClient = null;
+          let rdpKeyboard = null;
+          let toolbarAbort = null;
+          let rdpKeepalive = null;
+          let rdpNopSentAt = null;
+
+          const rdpQuality = document.getElementById("rdp-quality");
+          const sshQuality = document.getElementById("ssh-quality");
+          const updateQuality = (el, rtt) => {
+            el.textContent = `● ${rtt} ms`;
+            el.className = "conn-quality " + (rtt < 80 ? "good" : rtt < 250 ? "warn" : "bad");
+          };
+
+          // ── VNC login modal ───────────────────────────────────────────
+          const vncLoginModal    = document.getElementById("vnc-login-modal");
+          const vncLoginForm     = document.getElementById("vnc-login-form");
+          const vncLoginPassword = document.getElementById("vnc-login-password");
+          const vncLoginError    = document.getElementById("vnc-login-error");
+
+          const closeVncLogin = () => {
+            vncLoginModal.hidden = true;
+            vncLoginForm.reset();
+            vncLoginError.textContent = "";
+          };
+          document.querySelectorAll("[data-vnc-login-close]").forEach(el => el.addEventListener("click", () => {
+            closeVncLogin(); pendingDevice = null;
+          }));
+
+          const openVncLogin = () => {
+            document.getElementById("vnc-login-title").textContent = pendingDevice ? `VNC — ${pendingDevice.name}` : "VNC";
+            vncLoginModal.hidden = false;
+            requestAnimationFrame(() => vncLoginPassword.focus());
+          };
+
+          vncLoginForm.addEventListener("submit", (event) => {
+            event.preventDefault();
+            const device = pendingDevice;
+            const password = vncLoginPassword.value;
+            closeVncLogin();
+            if (device) openRdp(device.ip, device.name, "", password, "vnc");
+          });
+
+          // ── RDP helpers ──────────────────────────────────────────────
+          function GuacAuthTunnel(ip, authPayload, protocol) {
+            Guacamole.Tunnel.call(this);
+            const self = this;
+            let ws = null;
+            let guacBuf = "";
+            this.connect = function() {
+              const proto = location.protocol === "https:" ? "wss:" : "ws:";
+              ws = new WebSocket(`${proto}//${location.host}/ws/${protocol ?? "rdp"}/${ip}`);
+              self.state = Guacamole.Tunnel.State.CONNECTING;
+              if (self.onstatechange) self.onstatechange(self.state);
+              ws.onopen = () => {
+                ws.send(JSON.stringify(authPayload));
+                self.state = Guacamole.Tunnel.State.OPEN;
+                if (self.onstatechange) self.onstatechange(self.state);
+              };
+              ws.onmessage = (event) => {
+                guacBuf += event.data;
+                let pos = 0;
+                outer: while (pos < guacBuf.length) {
+                  const instrStart = pos;
+                  const parts = [];
+                  while (true) {
+                    let dot = pos;
+                    while (dot < guacBuf.length && guacBuf[dot] !== ".") dot++;
+                    if (dot >= guacBuf.length) { pos = instrStart; break outer; }
+                    const len = parseInt(guacBuf.slice(pos, dot), 10);
+                    if (isNaN(len)) { pos = dot + 1; break; }
+                    pos = dot + 1;
+                    if (pos + len >= guacBuf.length) { pos = instrStart; break outer; }
+                    parts.push(guacBuf.slice(pos, pos + len));
+                    pos += len;
+                    const sep = guacBuf[pos++];
+                    if (sep === ";") break;
+                  }
+                  if (parts.length) {
+                    if (parts[0] === "nop") {
+                      ws.send("3.nop;");
+                      if (rdpNopSentAt !== null) {
+                        updateQuality(rdpQuality, Math.round(performance.now() - rdpNopSentAt));
+                        rdpNopSentAt = null;
+                      }
+                    } else if (self.oninstruction) {
+                      self.oninstruction(parts[0], parts.slice(1));
+                    }
+                  }
+                }
+                guacBuf = guacBuf.slice(pos);
+              };
+              ws.onclose = () => {
+                self.state = Guacamole.Tunnel.State.CLOSED;
+                if (self.onstatechange) self.onstatechange(self.state);
+              };
+              ws.onerror = () => { if (self.onerror) self.onerror({ code: 0, message: "WebSocket error" }); };
+            };
+            this.sendMessage = function(...args) {
+              if (!ws || ws.readyState !== WebSocket.OPEN) return;
+              ws.send(args.map(v => { const s = String(v); return `${s.length}.${s}`; }).join(",") + ";");
+            };
+            this.disconnect = function() { if (ws) { ws.close(); ws = null; } };
+          }
+          const closeRdpLogin = () => {
+            rdpLoginModal.hidden = true;
+            rdpLoginForm.reset();
+            rdpLoginError.textContent = "";
+          };
+          document.querySelectorAll("[data-rdp-login-close]").forEach(el => el.addEventListener("click", () => {
+            closeRdpLogin();
+            pendingDevice = null;
+          }));
+
+          const openRdpLogin = () => {
+            document.getElementById("rdp-login-title").textContent = pendingDevice ? `RDP — ${pendingDevice.name}` : "Windows RDP";
+            if (rdpLoginQuality) rdpLoginQuality.value = localStorage.getItem("rdpQuality") || "medium";
+            rdpLoginModal.hidden = false;
+            requestAnimationFrame(() => rdpLoginUsername.focus());
+          };
+
+          const closeRdp = () => {
+            rdpOverlay.hidden = true;
+            rdpOverlay.style.height = "";
+            rdpOverlay.style.top = "";
+            rdpNopSentAt = null;
+            rdpQuality.textContent = "";
+            rdpQuality.className = "conn-quality";
+            if (document.pointerLockElement) document.exitPointerLock();
+            if (toolbarAbort) { toolbarAbort.abort(); toolbarAbort = null; }
+            if (rdpKeepalive) { clearInterval(rdpKeepalive); rdpKeepalive = null; }
+            if (rdpClient) { rdpClient.disconnect(); rdpClient = null; }
+            if (rdpKeyboard) { rdpKeyboard.onkeydown = rdpKeyboard.onkeyup = null; rdpKeyboard = null; }
+            document.getElementById("rdp-toolbar").querySelectorAll(".rdp-key.active").forEach(el => el.classList.remove("active"));
+            rdpDisplay.innerHTML = "";
+          };
+          rdpCloseBtn.addEventListener("click", closeRdp);
+
+          const openRdp = async (ip, name, username, password, protocol = "rdp", quality = "medium") => {
+            // guacamole тоже приезжает только сейчас — на кабинет он не влияет.
+            try { await window.vendorReady("guac"); } catch (e) {}
+            if (typeof Guacamole === "undefined") {
+              alert("Не удалось загрузить guacamole-common-js — проверьте сеть/CDN.");
+              return;
+            }
+            GuacAuthTunnel.prototype = Object.create(Guacamole.Tunnel.prototype);
+            GuacAuthTunnel.prototype.constructor = GuacAuthTunnel;
+            const isMobile = window.innerWidth <= 900 || navigator.maxTouchPoints > 0 ||
+                             /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+            rdpTitleEl.textContent = name + " — " + ip;
+            rdpOverlay.hidden = false;
+
+            const toolbar            = document.getElementById("rdp-toolbar");
+            const touchToggleBtn     = document.getElementById("rdp-touch-toggle");
+            const kbdBtn             = document.getElementById("rdp-kbd-btn");
+            const kbdInput           = document.getElementById("rdp-kbd-input");
+            const toolbarToggleBtn   = document.getElementById("rdp-toolbar-toggle");
+            toolbar.hidden           = isMobile;
+            kbdBtn.hidden            = !isMobile;
+            touchToggleBtn.hidden    = !isMobile;
+            toolbarToggleBtn.hidden  = !isMobile;
+            toolbarToggleBtn.onclick = () => { toolbar.hidden = !toolbar.hidden; };
+
+            const displayRect = rdpDisplay.getBoundingClientRect();
+            const width  = Math.round(displayRect.width)  || window.innerWidth;
+            const height = Math.round(displayRect.height) || (window.innerHeight - 45);
+
+            // ── tunnel + client ─────────────────────────────────────────
+            const tunnel = new GuacAuthTunnel(ip, { type: "auth", username, password, width, height, quality }, protocol);
+            rdpClient = new Guacamole.Client(tunnel);
+            const displayEl = rdpClient.getDisplay().getElement();
+            rdpDisplay.innerHTML = "";
+            rdpDisplay.appendChild(displayEl);
+
+            // ── mouse / touch ────────────────────────────────────────────
+            let touchMode = "touchpad";
+            let inputHandler = null;
+            const scaleMouseState = (e) => {
+              const st = e.state ?? e;
+              const sc = rdpClient?.getDisplay()?.getScale() ?? 1;
+              return (sc && sc !== 1)
+                ? { ...st, x: Math.round(st.x / sc), y: Math.round(st.y / sc) }
+                : st;
+            };
+            const attachInput = () => {
+              if (inputHandler) { inputHandler.onmousedown = inputHandler.onmouseup = inputHandler.onmousemove = null; }
+              const Ctor = !isMobile              ? Guacamole.Mouse
+                         : touchMode === "touchpad" ? Guacamole.Mouse.Touchpad
+                         : Guacamole.Mouse.Touchscreen;
+              inputHandler = new Ctor(displayEl);
+              inputHandler.onmousedown = inputHandler.onmouseup = inputHandler.onmousemove =
+                (e) => rdpClient?.sendMouseState(scaleMouseState(e));
+            };
+            attachInput();
+
+            touchToggleBtn.textContent = "Touchpad";
+            touchToggleBtn.onclick = () => {
+              touchMode = touchMode === "touchpad" ? "touchscreen" : "touchpad";
+              touchToggleBtn.textContent = touchMode === "touchpad" ? "Touchpad" : "Touchscreen";
+              attachInput();
+            };
+
+            // ── AbortController (shared by pointer lock + toolbar) ───────
+            if (toolbarAbort) toolbarAbort.abort();
+            toolbarAbort = new AbortController();
+            const sig = toolbarAbort.signal;
+
+            // ── pointer lock (desktop only) ──────────────────────────────
+            if (!isMobile && rdpDisplay.requestPointerLock) {
+              let plLocked = false, plX = width / 2, plY = height / 2;
+              const lockHint = document.createElement("div");
+              lockHint.className = "rdp-lock-hint";
+              lockHint.textContent = "Кликни для захвата мыши · Esc — отпустить";
+              rdpDisplay.appendChild(lockHint);
+              const plSend = (x, y, btns) => rdpClient?.sendMouseState({
+                x, y,
+                left:   (btns & 1) !== 0,
+                middle: (btns & 4) !== 0,
+                right:  (btns & 2) !== 0,
+                up: false, down: false
+              });
+              // До захвата: клик на displayEl запрашивает lock
+              displayEl.addEventListener("mousedown", (e) => {
+                if (!plLocked) {
+                  if (inputHandler) inputHandler.onmousedown = inputHandler.onmouseup = inputHandler.onmousemove = null;
+                  rdpDisplay.requestPointerLock();
+                  e.stopImmediatePropagation();
+                }
+              }, { signal: sig, capture: true });
+              // После захвата: все события идут на rdpDisplay (locked element)
+              rdpDisplay.addEventListener("mousedown", (e) => { if (plLocked) plSend(plX, plY, e.buttons); }, { signal: sig });
+              rdpDisplay.addEventListener("mouseup",   (e) => { if (plLocked) plSend(plX, plY, e.buttons); }, { signal: sig });
+              rdpDisplay.addEventListener("mousemove", (e) => {
+                if (!plLocked) return;
+                const d = rdpClient?.getDisplay();
+                const nW = d?.getWidth()  || width;
+                const nH = d?.getHeight() || height;
+                plX = Math.max(0, Math.min(nW - 1, plX + e.movementX));
+                plY = Math.max(0, Math.min(nH - 1, plY + e.movementY));
+                plSend(plX, plY, e.buttons);
+              }, { signal: sig });
+              rdpDisplay.addEventListener("wheel", (e) => {
+                if (!plLocked) return;
+                e.preventDefault();
+                const up = e.deltaY < 0;
+                rdpClient?.sendMouseState({ x: plX, y: plY, left: false, middle: false, right: false, up, down: !up });
+                rdpClient?.sendMouseState({ x: plX, y: plY, left: false, middle: false, right: false, up: false, down: false });
+              }, { signal: sig, passive: false });
+              document.addEventListener("pointerlockchange", () => {
+                plLocked = document.pointerLockElement === rdpDisplay;
+                lockHint.hidden = plLocked;
+                if (!plLocked) attachInput();
+              }, { signal: sig });
+            }
+
+            // ── hardware keyboard ────────────────────────────────────────
+            rdpKeyboard = new Guacamole.Keyboard(document);
+            rdpKeyboard.onkeydown = (k) => { if (!rdpOverlay.hidden && rdpClient) rdpClient.sendKeyEvent(1, k); };
+            rdpKeyboard.onkeyup   = (k) => { if (!rdpOverlay.hidden && rdpClient) rdpClient.sendKeyEvent(0, k); };
+            // Intercept Win/Meta key — prevents Start menu on host when RDP is open
+            document.addEventListener("keydown", (e) => {
+              if (!rdpOverlay.hidden && (e.key === "Meta" || e.key === "OS" || e.code === "MetaLeft" || e.code === "MetaRight")) {
+                e.preventDefault();
+              }
+            }, { capture: true, signal: sig });
+
+            // ── toolbar ──────────────────────────────────────────────────
+            const activeModifiers = new Set();
+
+            const clearMods = () => {
+              activeModifiers.forEach(k => rdpClient?.sendKeyEvent(0, k));
+              activeModifiers.clear();
+              toolbar.querySelectorAll(".rdp-key.active").forEach(el => el.classList.remove("active"));
+            };
+
+            toolbar.addEventListener("pointerdown", (e) => {
+              const btn = e.target.closest("[data-keysym],[data-mod],[data-combo]");
+              if (!btn) return;
+              e.preventDefault();
+              if (btn.dataset.keysym) {
+                const k = parseInt(btn.dataset.keysym, 10);
+                activeModifiers.forEach(m => rdpClient?.sendKeyEvent(1, m));
+                rdpClient?.sendKeyEvent(1, k);
+                rdpClient?.sendKeyEvent(0, k);
+                clearMods();
+              } else if (btn.dataset.mod) {
+                const k = parseInt(btn.dataset.mod, 10);
+                if (activeModifiers.has(k)) { activeModifiers.delete(k); btn.classList.remove("active"); }
+                else                         { activeModifiers.add(k);    btn.classList.add("active"); }
+              } else if (btn.dataset.combo) {
+                clearMods();
+                const keys = btn.dataset.combo.split(",").map(Number);
+                keys.forEach(k => rdpClient?.sendKeyEvent(1, k));
+                [...keys].reverse().forEach(k => rdpClient?.sendKeyEvent(0, k));
+              }
+            }, { signal: sig });
+
+            // ── virtual (soft) keyboard ──────────────────────────────────
+            kbdBtn.onclick = () => { kbdInput.value = ""; kbdInput.focus(); };
+            kbdInput.addEventListener("input", (e) => {
+              for (const ch of (e.data ?? "")) {
+                const k = ch.codePointAt(0);
+                rdpClient?.sendKeyEvent(1, k);
+                rdpClient?.sendKeyEvent(0, k);
+              }
+              kbdInput.value = "";
+            }, { signal: sig });
+            kbdInput.addEventListener("keydown", (e) => {
+              const map = { Backspace: 65288, Enter: 65293, Tab: 65289, Escape: 65307 };
+              if (e.key in map) { e.preventDefault(); rdpClient?.sendKeyEvent(1, map[e.key]); rdpClient?.sendKeyEvent(0, map[e.key]); }
+            }, { signal: sig });
+
+            // ── mobile: 2-finger scroll + keyboard resize ────────────────
+            if (isMobile) {
+              // Track RDP cursor position from single-touch moves
+              let lastRdpX = Math.round(width / 2), lastRdpY = Math.round(height / 2);
+              displayEl.addEventListener("touchmove", (e) => {
+                if (e.touches.length === 1) {
+                  const rect = displayEl.getBoundingClientRect();
+                  const sc = rdpClient?.getDisplay()?.getScale() ?? 1;
+                  lastRdpX = Math.round((e.touches[0].clientX - rect.left) / sc);
+                  lastRdpY = Math.round((e.touches[0].clientY - rect.top)  / sc);
+                }
+              }, { signal: sig });
+
+              // 2-finger drag = scroll wheel
+              let scrollStart = null;
+              displayEl.addEventListener("touchstart", (e) => {
+                if (e.touches.length === 2) {
+                  scrollStart = { y: (e.touches[0].clientY + e.touches[1].clientY) / 2 };
+                  e.preventDefault();
+                  e.stopImmediatePropagation();
+                }
+              }, { passive: false, capture: true, signal: sig });
+
+              displayEl.addEventListener("touchmove", (e) => {
+                if (e.touches.length !== 2 || !scrollStart || !rdpClient) return;
+                const cy = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+                const dy = cy - scrollStart.y;
+                if (Math.abs(dy) >= 8) {
+                  const up = dy > 0;
+                  const st = { x: lastRdpX, y: lastRdpY, left: false, middle: false, right: false, up, down: !up };
+                  rdpClient.sendMouseState(st);
+                  rdpClient.sendMouseState({ ...st, up: false, down: false });
+                  scrollStart.y = cy;
+                }
+                e.preventDefault();
+                e.stopImmediatePropagation();
+              }, { passive: false, capture: true, signal: sig });
+
+              displayEl.addEventListener("touchend", (e) => {
+                if (e.touches.length < 2) scrollStart = null;
+              }, { capture: true, signal: sig });
+
+              // Shrink overlay when software keyboard opens
+              if (window.visualViewport) {
+                const vvHandler = () => {
+                  rdpOverlay.style.height = window.visualViewport.height + "px";
+                  rdpOverlay.style.top    = window.visualViewport.offsetTop + "px";
+                  fitDisplay();
+                };
+                window.visualViewport.addEventListener("resize", vvHandler, { signal: sig });
+              }
+            }
+
+            const fitDisplay = () => {
+              if (!rdpClient) return;
+              const d = rdpClient.getDisplay();
+              if (!d.getWidth() || !d.getHeight()) return;
+              const s = Math.min(
+                rdpDisplay.clientWidth  / d.getWidth(),
+                rdpDisplay.clientHeight / d.getHeight()
+              );
+              d.scale(s);
+            };
+            rdpClient.getDisplay().onresize = fitDisplay;
+            window.addEventListener("resize", fitDisplay, { signal: sig });
+
+            rdpClient.onerror = (err) => {
+              rdpDisplay.innerHTML = `<p style="color:#ff6b81;padding:20px;font-family:monospace">Ошибка RDP: ${err?.message ?? JSON.stringify(err)}</p>`;
+            };
+            tunnel.onstatechange = (state) => {
+              if (state === Guacamole.Tunnel.State.CLOSED && !rdpOverlay.hidden)
+                rdpDisplay.insertAdjacentHTML("beforeend", '<p style="color:#8f99ab;padding:10px 20px;font-family:monospace;position:absolute;bottom:0">Соединение закрыто.</p>');
+            };
+            rdpClient.connect();
+            rdpQuality.textContent = "● …";
+            rdpQuality.className = "conn-quality";
+            rdpKeepalive = setInterval(() => {
+              if (tunnel.state === Guacamole.Tunnel.State.OPEN) {
+                rdpNopSentAt = performance.now();
+                tunnel.sendMessage("nop");
+              }
+            }, 10000);
+          };
+
+          rdpLoginForm.addEventListener("submit", (event) => {
+            event.preventDefault();
+            const device = pendingDevice;
+            const username = rdpLoginUsername.value;
+            const password = rdpLoginPassword.value;
+            const quality = rdpLoginQuality ? rdpLoginQuality.value : "medium";
+            if (rdpLoginQuality) localStorage.setItem("rdpQuality", quality);
+            closeRdpLogin();
+            if (device) openRdp(device.ip, device.name, username, password, "rdp", quality);
+          });
+          // ─────────────────────────────────────────────────────────────
+
+          const closeGate = () => {
+            gateModal.hidden = true;
+            gateForm.reset();
+            gateError.textContent = "";
+          };
+
+          document.querySelectorAll("[data-gate-close]").forEach((el) => el.addEventListener("click", () => {
+            closeGate();
+            pendingDevice = null;
+          }));
+
+          gateForm.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            gateError.textContent = "";
+            try {
+              const response = await fetch("/api/console/login", {
+                method: "POST",
+                credentials: "same-origin",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ password: gatePassword.value }),
+              });
+              if (!response.headers.get("content-type")?.includes("application/json")) {
+                gateError.textContent = "Сессия истекла, обновите страницу и войдите заново.";
+                return;
+              }
+              const result = await response.json();
+              if (!response.ok) {
+                gateError.textContent = result.error || "Не удалось войти.";
+                return;
+              }
+              consoleAuthenticated = true;
+              closeGate();
+              if (pendingDevice?.type === "rdp") openRdpLogin();
+              else if (pendingDevice?.type === "vnc") openVncLogin();
+              else openSshLogin();
+            } catch {
+              gateError.textContent = "Сервер недоступен.";
+            }
+          });
+
+          const closeSshLogin = () => {
+            sshLoginModal.hidden = true;
+            sshLoginForm.reset();
+            sshLoginError.textContent = "";
+            pendingDevice = null;
+          };
+
+          document.querySelectorAll("[data-ssh-login-close]").forEach((el) => el.addEventListener("click", closeSshLogin));
+
+          const openSshLogin = () => {
+            document.getElementById("ssh-login-title").textContent = pendingDevice ? `SSH — ${pendingDevice.name}` : "SSH-логин";
+            sshLoginModal.hidden = false;
+            requestAnimationFrame(() => sshLoginUsername.focus());
+          };
+
+          sshLoginForm.addEventListener("submit", (event) => {
+            event.preventDefault();
+            const device = pendingDevice;
+            const username = sshLoginUsername.value;
+            const password = sshLoginPassword.value;
+            sshLoginModal.hidden = true;
+            sshLoginForm.reset();
+            sshLoginError.textContent = "";
+            pendingDevice = null;
+            if (device) openTerminal(device.ip, device.name, username, password);
+          });
+
+          const closeTerminal = () => {
+            termOverlay.hidden = true;
+            if (ws) { ws.close(); ws = null; }
+            if (term) { term.dispose(); term = null; }
+            termBody.innerHTML = "";
+          };
+          termClose.addEventListener("click", closeTerminal);
+
+          // ── Кнопки консоли ───────────────────────────────────────────
+          // Всё уходит в тот же канал, что и набор с клавиатуры, поэтому
+          // сервер про эти кнопки ничего не знает и знать не должен.
+          const termSend = (data) => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({ type: "data", data }));
+            }
+            if (term) term.focus();
+          };
+
+          const termToast = (text) => {
+            const el = document.createElement("div");
+            el.className = "term-toast";
+            el.textContent = text;
+            document.body.appendChild(el);
+            setTimeout(() => el.remove(), 1800);
+          };
+
+          // Коды держим здесь, а не в атрибутах разметки: в атрибуте «\r» так и
+          // остался бы двумя символами, и терминал получал бы текст вместо Enter.
+          const TERM_KEYS = {
+            enter: "\r", up: "\x1b[A", down: "\x1b[B",
+            tab: "\t", ctrlc: "\x03", esc: "\x1b",
+          };
+          document.querySelectorAll("#term-tools [data-key]").forEach(btn => {
+            btn.addEventListener("click", () => termSend(TERM_KEYS[btn.dataset.key] || ""));
+          });
+
+          document.querySelector("#term-tools [data-paste]").addEventListener("click", async () => {
+            let text = null;
+            try {
+              // Работает только по HTTPS и только по жесту пользователя —
+              // нажатие кнопки как раз им и является.
+              text = await navigator.clipboard.readText();
+            } catch (e) {
+              // Firefox и старые браузеры чтение буфера не дают: спрашиваем руками.
+              text = window.prompt("Вставьте команды сюда (браузер не даёт прочитать буфер сам):", "");
+            }
+            if (!text) { termToast("Буфер пуст"); return; }
+            termSend(text);
+            const lines = text.split("\n").filter(l => l.trim()).length;
+            termToast(lines > 1 ? `Вставлено строк: ${lines}` : "Вставлено");
+          });
+
+          const openTerminal = async (ip, name, username, password) => {
+            termTitle.textContent = name + " — " + ip;
+            termOverlay.hidden = false;
+            // xterm приезжает только сейчас, при первом открытии консоли.
+            termBody.textContent = "Загружаю терминал…";
+            try { await window.vendorReady("xterm"); } catch (e) {}
+            termBody.textContent = "";
+            if (typeof Terminal === "undefined" || typeof FitAddon === "undefined") {
+              termBody.textContent = "Не удалось загрузить библиотеку терминала (xterm.js) — проверьте сеть/CDN.";
+              return;
+            }
+            term = new Terminal({ convertEol: true, fontFamily: "Cascadia Code, Consolas, monospace", fontSize: 14, theme: { background: "#05070c" } });
+            fitAddon = new FitAddon.FitAddon();
+            term.loadAddon(fitAddon);
+            term.open(termBody);
+            fitAddon.fit();
+
+            const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+            let gotData = false;
+            ws = new WebSocket(`${protocol}//${location.host}/ws/console/${ip}`);
+
+            ws.addEventListener("open", () => {
+              ws.send(JSON.stringify({ type: "auth", username, password }));
+              fitAddon.fit();
+              ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
+            });
+
+            let sshPingTime = null;
+            sshQuality.textContent = "● …";
+            sshQuality.className = "conn-quality";
+            const pingInterval = setInterval(() => {
+              if (ws && ws.readyState === WebSocket.OPEN) {
+                sshPingTime = performance.now();
+                ws.send(JSON.stringify({ type: "ping" }));
+              }
+            }, 10000);
+
+            ws.addEventListener("message", (event) => {
+              gotData = true;
+              try {
+                const payload = JSON.parse(event.data);
+                if (payload.type === "data") term.write(payload.data);
+                else if (payload.type === "pong" && sshPingTime !== null) {
+                  updateQuality(sshQuality, Math.round(performance.now() - sshPingTime));
+                  sshPingTime = null;
+                }
+              } catch {}
+            });
+
+            ws.addEventListener("close", () => {
+              clearInterval(pingInterval);
+              sshQuality.textContent = "";
+              sshQuality.className = "conn-quality";
+              term.write("\r\nСоединение закрыто.\r\n");
+            });
+
+            term.onData((data) => {
+              if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "data", data }));
+            });
+
+            const sendResize = () => {
+              fitAddon.fit();
+              if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
+              }
+            };
+            term.onResize(() => sendResize());
+            window.addEventListener("resize", () => fitAddon.fit());
+            watchKeyboard(sendResize);
+          };
+
+          document.querySelectorAll(".connect-btn").forEach((button) => {
+            button.addEventListener("click", () => {
+              pendingDevice = { ip: button.dataset.ip, name: button.dataset.name, type: button.dataset.type || "ssh" };
+              if (consoleAuthenticated) {
+                if (pendingDevice.type === "rdp") openRdpLogin();
+                else if (pendingDevice.type === "vnc") openVncLogin();
+                else openSshLogin();
+              } else {
+                gateModal.hidden = false;
+                requestAnimationFrame(() => gatePassword.focus());
+              }
+            });
+          });
+        })();
+      </script>
+    </body>
+    </html>

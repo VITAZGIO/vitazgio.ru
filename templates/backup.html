@@ -1,0 +1,134 @@
+
+    <!DOCTYPE html>
+    <html lang="ru">
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <meta name="robots" content="noindex, nofollow">
+      <title>Резервная копия · vitazgio.ru</title>
+      __ICONLINKS__
+      <style>
+        * { box-sizing: border-box; }
+        body { margin: 0; min-height: 100svh; color: #e9fbff; font-family: "Cascadia Code", Consolas, monospace; background: radial-gradient(circle at top left, #192a44, #0d1321 55%); }
+        [hidden] { display: none !important; }
+        a { color: inherit; }
+        .wrap { max-width: 760px; margin: 0 auto; padding: clamp(24px, 4vw, 54px); }
+        .head { display: flex; align-items: center; gap: 18px; margin-bottom: 26px; }
+        .back { width: 44px; height: 44px; flex: none; display: grid; place-items: center;
+          color: #4ade80; text-decoration: none; border: 1px solid rgba(74,222,128,.35); border-radius: 50%;
+          background: rgba(74,222,128,.08); transition: all .18s; }
+        .back:hover { color: #fff; border-color: #4ade80; background: rgba(74,222,128,.2); }
+        .back svg { width: 20px; height: 20px; display: block; }
+        .head-ic { width: 52px; height: 52px; flex: none; display: grid; place-items: center; }
+        .head-ic svg { width: 100%; height: 100%; }
+        h1 { margin: 0; font-size: clamp(1.7rem, 3.6vw, 2.4rem); font-weight: 700; letter-spacing: -.02em;
+             color: #eaf6ff; text-shadow: 0 0 22px rgba(74,222,128,.35); }
+        .sub { margin: 3px 0 0; color: #8b93a6; font-size: .84rem; }
+        .panel { border: 1px solid rgba(74,222,128,.22); background: rgba(16,24,40,.55); }
+        .panel-body { padding: 20px 22px; }
+
+        .bk-note { margin: 0 0 14px; color: #8f99ab; font-size: .82rem; line-height: 1.6; }
+        .bk-note.dim { color: #5d6a7d; font-size: .74rem; }
+        .bk-note b { color: #cfe2ee; }
+        .bk-keys { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
+        .btn-line { display: inline-flex; align-items: center; justify-content: center;
+          height: 40px; padding: 0 16px; color: #c4cad5; font: 700 .78rem "Cascadia Code", Consolas, monospace;
+          text-decoration: none; border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.03); cursor: pointer; }
+        .btn-line:hover { color: #fff; border-color: #4ade80; background: rgba(74,222,128,.16); }
+        .btn-line.warn { color: #ffd0a0; border-color: rgba(255,140,60,.35); background: rgba(255,140,60,.06); }
+        .btn-line.warn:hover { color: #fff; border-color: #ff8c3c; background: rgba(255,140,60,.18); }
+        @media (max-width: 560px) {
+          .wrap { padding-inline: 16px; }
+        }
+      </style>
+    </head>
+    <body>
+      <main class="wrap">
+        <header class="head">
+          <a class="back" href="/cabinet" title="В кабинет" aria-label="В кабинет">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M19 12H5m0 0 6-6m-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </a>
+          <span class="head-ic">
+            <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
+              <path d="M8 14c0-3.3 7.2-6 16-6s16 2.7 16 6-7.2 6-16 6-16-2.7-16-6Z" stroke="#63f5ad" stroke-width="2.4"/>
+              <path d="M8 14v10c0 3.3 7.2 6 16 6s16-2.7 16-6V14" stroke="#63f5ad" stroke-width="2.4"/>
+              <path d="M8 24v10c0 3.3 7.2 6 16 6s16-2.7 16-6V24" stroke="#2de2ff" stroke-width="2.4"/>
+            </svg>
+          </span>
+          <div>
+            <h1>Резервная копия</h1>
+            <p class="sub">скачать всё архивом и вернуть обратно</p>
+          </div>
+        </header>
+
+        <section class="panel">
+          <div class="panel-body">
+            <p class="bk-note" id="bk-size">считаю, сколько всего накопилось…</p>
+            <div class="bk-keys">
+              <a class="btn-line" id="bk-light" href="/api/backup/export?kind=light">
+                Скачать записи</a>
+              <a class="btn-line" id="bk-full" href="/api/backup/export?kind=full">
+                Скачать всё целиком</a>
+              <button class="btn-line warn" id="bk-restore" type="button">Загрузить копию</button>
+              <input type="file" id="bk-file" accept=".zip,application/zip" hidden>
+            </div>
+            <p class="bk-note" id="bk-msg"></p>
+            <p class="bk-note dim" id="bk-robot"></p>
+          </div>
+        </section>
+      </main>
+      <script>
+      {
+        const size = (n) => {
+          n = n || 0;
+          if (n < 1024) return n + " Б";
+          if (n < 1048576) return (n / 1024).toFixed(0) + " КБ";
+          if (n < 1073741824) return (n / 1048576).toFixed(1) + " МБ";
+          return (n / 1073741824).toFixed(2) + " ГБ";
+        };
+
+        (async () => {
+          try {
+            const r = await fetch("/api/backup/state", { credentials: "same-origin" });
+            const d = await r.json();
+            document.getElementById("bk-size").innerHTML =
+              "Записи, статьи и настройки: <b>" + size(d.light.size) + "</b> (" +
+              d.light.files + " файлов).<br>Всё вместе с дропом и музыкой: <b>" +
+              size(d.full.size) + "</b> (" + d.full.files + " файлов).";
+            document.getElementById("bk-robot").textContent = d.robot
+              ? "Ключ для программы задан: копию можно забирать снаружи по нему, без входа в кабинет."
+              : "Чтобы копии забирала программа с домашнего сервера, задайте на сервере ключ BACKUP_TOKEN.";
+          } catch (e) {
+            document.getElementById("bk-size").textContent = "Не удалось посчитать размер.";
+          }
+        })();
+
+        const file = document.getElementById("bk-file");
+        const msg = document.getElementById("bk-msg");
+        document.getElementById("bk-restore").addEventListener("click", () => {
+          if (!confirm("Развернуть копию поверх нынешних данных?\n\n" +
+                       "Файлы из архива заменят одноимённые. Лишнего не удаляем.")) return;
+          file.click();
+        });
+        file.addEventListener("change", async () => {
+          const f = file.files[0];
+          file.value = "";
+          if (!f) return;
+          msg.textContent = "Разворачиваю копию…";
+          const form = new FormData();
+          form.append("file", f);
+          try {
+            const r = await fetch("/api/backup/import",
+              { method: "POST", credentials: "same-origin", body: form });
+            const d = await r.json().catch(() => ({}));
+            msg.textContent = r.ok
+              ? "Готово: вернулось " + d.files + " файлов. Обновите страницу."
+              : (d.error || "Не вышло развернуть копию.");
+          } catch (e) { msg.textContent = "Сервер не ответил."; }
+        });
+      }
+      </script>
+    </body>
+    </html>

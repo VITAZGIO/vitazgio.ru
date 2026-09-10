@@ -600,10 +600,8 @@ def create_remote_blueprint(
             pass
         return jsonify(ok=True)
 
-    @remote_bp.get("/cabinet")
-    @login_required
-    def cabinet():
-        device_items = "".join(
+    def _netbird_device_items():
+        return "".join(
             f'<li class="device" data-ip="{device["ip"]}">'
             f'<button class="copy-ip" type="button" data-ip="{device["ip"]}">{device["ip"]}</button>'
             f'<span class="device-name">{device["name"]}</span>'
@@ -625,8 +623,18 @@ def create_remote_blueprint(
             + "</li>"
             for device in netbird_devices
         )
-        html = template("cabinet.html")
-        return html.replace("{{DEVICE_ITEMS}}", device_items) \
-                   .replace("__ICONLINKS__", icon_links)
+
+    @remote_bp.get("/cabinet")
+    @login_required
+    def cabinet():
+        return template("cabinet.html").replace("__ICONLINKS__", icon_links)
+
+    @remote_bp.get("/netbird")
+    @login_required
+    def netbird_page():
+        html = template("netbird.html")
+        return (html.replace("{{DEVICE_ITEMS}}", _netbird_device_items())
+                    .replace("{{DEVICE_COUNT}}", str(len(netbird_devices)))
+                    .replace("__ICONLINKS__", icon_links))
 
     return remote_bp

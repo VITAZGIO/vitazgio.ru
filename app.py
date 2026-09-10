@@ -31,9 +31,11 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from blueprints.ai import create_ai_blueprint
 from blueprints.backup_sebastian import create_backup_sebastian_blueprint
 from blueprints.debts import create_debts_blueprint
+from blueprints.devices import create_devices_blueprint
 from blueprints.diy import create_diy_blueprint
 from blueprints.drop import create_drop_blueprint
 from blueprints.home import create_home_blueprint
+from blueprints.login_log import create_login_log_blueprint
 from blueprints.music import create_music_blueprint
 from blueprints.notebook import create_notebook_blueprint
 from blueprints.pwa import ICON_LINKS, create_pwa_blueprint
@@ -1891,14 +1893,6 @@ def uptime_api():
         return jsonify(seconds=None)
 
 
-@app.get("/api/login-log")
-@login_required
-def login_log_api():
-    with login_log_lock:
-        _login_log_trim()
-        return jsonify(list(reversed(login_log)))
-
-
 def music_editor_required(view):
     """Фонотека целиком под паролем кабинета — и слушать, и менять.
 
@@ -1926,78 +1920,6 @@ def _music_unlink(path):
         os.remove(path)
     except OSError:
         pass
-
-
-@app.post("/api/devices/trust")
-@login_required
-def device_trust():
-    if not SSH_GATE_PASSWORD_PREFIX:
-        return jsonify(error="Суточный пароль не настроен на сервере."), 503
-
-    client = _client_ip()
-    if _rate_blocked(console_login_attempts, console_login_attempts_lock, client,
-                     CONSOLE_LOGIN_WINDOW_SECONDS, CONSOLE_LOGIN_MAX_ATTEMPTS):
-        return jsonify(error="Слишком много попыток. Попробуйте через 5 минут."), 429
-
-    password = (request.get_json(silent=True) or {}).get("password", "")
-    if not isinstance(password, str) or not hmac.compare_digest(
-        password.encode(), console_password_today().encode()
-    ):
-        _rate_hit(console_login_attempts, console_login_attempts_lock, client)
-        _log_login("неверный суточный пароль (доверие устройству)", kind="fail")
-        return jsonify(error="Неверный суточный пароль."), 401
-
-    _rate_clear(console_login_attempts, console_login_attempts_lock, client)
-
-    ua = request.headers.get("User-Agent", "")
-    raw = request.cookies.get(DEVICE_COOKIE) or ""
-    selector = raw.split(".", 1)[0] if "." in raw else None
-    with devices_lock:
-        _devices_prune_expired()
-        if selector not in trusted_devices:
-            selector = None
-        label = trusted_devices[selector]["label"] if selector else _unique_label(_device_label(ua))
-        g.new_device_cookie = _device_issue(label, ua, _client_ip(), selector)
-    return jsonify(ok=True, label=label)
-
-
-@app.get("/api/devices")
-@login_required
-def devices_list_api():
-    current = (request.cookies.get(DEVICE_COOKIE) or "").split(".", 1)[0]
-    with devices_lock:
-        if _devices_prune_expired():
-            _devices_write()
-        items = [
-            {"id": selector, "label": d["label"], "last_used": d["last_used"],
-             "last_ip": d.get("last_ip", ""), "created": d["created"],
-             "current": selector == current}
-            for selector, d in sorted(trusted_devices.items(), key=lambda x: -x[1]["last_used"])
-        ]
-    return jsonify(items)
-
-
-@app.patch("/api/devices/<selector>")
-@login_required
-def device_rename_api(selector):
-    label = ((request.get_json(silent=True) or {}).get("label") or "").strip()[:40]
-    if not label:
-        return jsonify(error="Пустое имя."), 400
-    with devices_lock:
-        if selector not in trusted_devices:
-            return jsonify(error="Устройство не найдено."), 404
-        trusted_devices[selector]["label"] = label
-        _devices_write()
-    return jsonify(ok=True, label=label)
-
-
-@app.delete("/api/devices/<selector>")
-@login_required
-def device_forget_api(selector):
-    removed = _device_forget(selector)
-    if removed and (request.cookies.get(DEVICE_COOKIE) or "").split(".", 1)[0] == selector:
-        g.clear_device_cookie = True
-    return jsonify(ok=True)
 
 
 def _drop_thumb_path(item_id):
@@ -4286,6 +4208,41 @@ app.register_blueprint(create_debts_blueprint(
     debts_password=DEBTS_PASSWORD,
     debt_user_colors=DEBT_USER_COLORS,
     log_login=_log_login,
+))
+
+app.register_blueprint(create_devices_blueprint(
+    template=_template,
+    icon_links=ICON_LINKS,
+    login_required=login_required,
+    device_cookie=DEVICE_COOKIE,
+    devices_lock=devices_lock,
+    trusted_devices=trusted_devices,
+    devices_prune_expired=_devices_prune_expired,
+    devices_write=_devices_write,
+    unique_label=_unique_label,
+    device_label=_device_label,
+    device_issue=_device_issue,
+    device_forget=_device_forget,
+    ssh_gate_password_prefix=SSH_GATE_PASSWORD_PREFIX,
+    console_password_today=console_password_today,
+    client_ip=_client_ip,
+    rate_blocked=_rate_blocked,
+    rate_hit=_rate_hit,
+    rate_clear=_rate_clear,
+    console_login_attempts=console_login_attempts,
+    console_login_attempts_lock=console_login_attempts_lock,
+    console_login_window_seconds=CONSOLE_LOGIN_WINDOW_SECONDS,
+    console_login_max_attempts=CONSOLE_LOGIN_MAX_ATTEMPTS,
+    log_login=_log_login,
+))
+
+app.register_blueprint(create_login_log_blueprint(
+    template=_template,
+    icon_links=ICON_LINKS,
+    login_required=login_required,
+    login_log=login_log,
+    login_log_lock=login_log_lock,
+    login_log_trim=_login_log_trim,
 ))
 
 app.register_blueprint(create_notebook_blueprint(

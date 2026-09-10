@@ -68,6 +68,11 @@ def create_backup_sebastian_blueprint(
     def current_drop_dir():
         return drop_dir() if callable(drop_dir) else drop_dir
 
+    @bp.get("/backup")
+    @login_required
+    def backup_page():
+        return template("backup.html").replace("__ICONLINKS__", icon_links)
+
     @bp.get("/api/backup/state")
     @login_required
     def backup_state_api():

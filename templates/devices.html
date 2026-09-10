@@ -1,0 +1,227 @@
+
+    <!DOCTYPE html>
+    <html lang="ru">
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <meta name="robots" content="noindex, nofollow">
+      <title>Устройства · vitazgio.ru</title>
+      __ICONLINKS__
+      <style>
+        * { box-sizing: border-box; }
+        body { margin: 0; min-height: 100svh; color: #e9fbff; font-family: "Cascadia Code", Consolas, monospace; background: radial-gradient(circle at top left, #192a44, #0d1321 55%); }
+        [hidden] { display: none !important; }
+        a { color: inherit; }
+        .wrap { max-width: 760px; margin: 0 auto; padding: clamp(24px, 4vw, 54px); }
+        .head { display: flex; align-items: center; gap: 18px; margin-bottom: 26px; }
+        .back { width: 44px; height: 44px; flex: none; display: grid; place-items: center;
+          color: #63f5ad; text-decoration: none; border: 1px solid rgba(99,245,173,.35); border-radius: 50%;
+          background: rgba(99,245,173,.08); transition: all .18s; }
+        .back:hover { color: #fff; border-color: #63f5ad; background: rgba(99,245,173,.2); }
+        .back svg { width: 20px; height: 20px; display: block; }
+        .head-ic { width: 52px; height: 52px; flex: none; display: grid; place-items: center; }
+        .head-ic svg { width: 100%; height: 100%; }
+        h1 { margin: 0; font-size: clamp(1.7rem, 3.6vw, 2.4rem); font-weight: 700; letter-spacing: -.02em;
+             color: #eaf6ff; text-shadow: 0 0 22px rgba(99,245,173,.35); }
+        .sub { margin: 3px 0 0; color: #8b93a6; font-size: .84rem; }
+        .panel { border: 1px solid rgba(99,245,173,.22); background: rgba(16,24,40,.55); }
+        .panel-body { padding: 20px 22px; }
+        .widget-empty { color: #4a5060; font-size: .8rem; margin: 0; padding: 4px 0; }
+
+        .dev-remember { display: flex; align-items: center; gap: 9px; padding: 4px 0 2px; color: #c4cad5; font-size: .86rem; cursor: pointer; }
+        .dev-remember input { width: 16px; height: 16px; accent-color: #63f5ad; cursor: pointer; }
+        .dev-hint { margin: 0 0 14px; color: #6b7385; font-size: .74rem; }
+        .dev-confirm { display: flex; gap: 8px; margin-bottom: 14px; }
+        .dev-confirm input { flex: 1; min-width: 0; height: 38px; padding: 0 12px; color: #f4fbff; font: 600 .84rem "Cascadia Code", Consolas, monospace; border: 1px solid rgba(99,245,173,.35); outline: none; background: rgba(4,10,20,.65); }
+        .dev-confirm input:focus { border-color: #63f5ad; }
+        .dev-confirm-btn { padding: 0 16px; color: #04120a; font: 800 .74rem "Cascadia Code", Consolas, monospace; text-transform: uppercase; border: 0; background: linear-gradient(90deg, #63f5ad, #a8ffd6); cursor: pointer; }
+        .dev-error { min-height: 18px; margin: 0 0 10px; color: #ff6ba8; font-size: .76rem; }
+        .dev-row { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 4px 8px; padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,.06); }
+        .dev-row:last-child { border-bottom: 0; }
+        .dev-name { min-width: 0; color: #c4cad5; font-size: .84rem; overflow-wrap: break-word; }
+        .dev-name.is-current::after { content: " · это устройство"; color: #63f5ad; font-size: .7rem; }
+        .dev-meta { grid-column: 1 / -1; color: #6b7385; font-size: .7rem; }
+        .dev-act { padding: 5px 8px; color: #6b7385; font-size: .9rem; line-height: 1; border: 1px solid rgba(255,255,255,.1); background: transparent; cursor: pointer; transition: all .18s; }
+        .dev-act:hover { color: #fff; border-color: rgba(99,245,173,.4); background: rgba(99,245,173,.08); }
+        .dev-act.dev-del:hover { color: #ff6b81; border-color: rgba(255,107,129,.45); background: rgba(255,107,129,.1); }
+        .dev-rename { min-width: 0; height: 30px; padding: 0 8px; color: #f4fbff; font: 600 .8rem "Cascadia Code", Consolas, monospace; border: 1px solid rgba(99,245,173,.4); outline: none; background: rgba(4,10,20,.65); }
+        @media (max-width: 560px) {
+          .wrap { padding-inline: 16px; }
+        }
+      </style>
+    </head>
+    <body>
+      <main class="wrap">
+        <header class="head">
+          <a class="back" href="/cabinet" title="В кабинет" aria-label="В кабинет">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M19 12H5m0 0 6-6m-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </a>
+          <span class="head-ic">
+            <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
+              <rect x="4" y="10" width="28" height="19" rx="2.5" stroke="#63f5ad" stroke-width="2.6"/>
+              <path d="M2 33h32" stroke="#63f5ad" stroke-width="2.6" stroke-linecap="round"/>
+              <rect x="30" y="20" width="14" height="22" rx="2.5" fill="#0d1321" stroke="#a8ffd6" stroke-width="2.6"/>
+              <path d="M35 38h4" stroke="#a8ffd6" stroke-width="2.2" stroke-linecap="round"/>
+            </svg>
+          </span>
+          <div>
+            <h1>Запомнить устройства</h1>
+            <p class="sub">вход без пароля на 90 дней на своих</p>
+          </div>
+        </header>
+
+        <section class="panel">
+          <div class="panel-body">
+            <label class="dev-remember">
+              <input type="checkbox" id="dev-remember-cb">
+              <span>Запомнить это устройство</span>
+            </label>
+            <p class="dev-hint" id="dev-hint">Вход в кабинет без пароля на 90 дней. Снять галку — устройство забудется.</p>
+            <div class="dev-confirm" id="dev-confirm" hidden>
+              <input type="password" id="dev-daily" placeholder="Суточный пароль" autocomplete="off">
+              <button class="dev-confirm-btn" id="dev-confirm-btn" type="button">Подтвердить</button>
+            </div>
+            <p class="dev-error" id="dev-error"></p>
+            <div id="devices-list"><p class="widget-empty">Загрузка…</p></div>
+          </div>
+        </section>
+      </main>
+      <script>
+      {
+        const esc = s => String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+
+        const listEl = document.getElementById("devices-list");
+        const checkbox = document.getElementById("dev-remember-cb");
+        const confirmBox = document.getElementById("dev-confirm");
+        const dailyInput = document.getElementById("dev-daily");
+        const confirmBtn = document.getElementById("dev-confirm-btn");
+        const errorEl = document.getElementById("dev-error");
+        let devices = [];
+
+        const ago = ts => {
+          const mins = Math.floor((Date.now() / 1000 - ts) / 60);
+          if (mins < 1) return "только что";
+          if (mins < 60) return mins + " мин назад";
+          const hours = Math.floor(mins / 60);
+          if (hours < 24) return hours + " ч назад";
+          const days = Math.floor(hours / 24);
+          if (days < 30) return days + " дн назад";
+          return new Date(ts * 1000).toLocaleDateString("ru-RU");
+        };
+
+        const render = () => {
+          const current = devices.find(d => d.current);
+          if (checkbox) checkbox.checked = Boolean(current);
+          if (!devices.length) {
+            listEl.innerHTML = '<p class="widget-empty">Пока ни одного устройства не запомнено</p>';
+            return;
+          }
+          listEl.innerHTML = devices.map(d => `
+            <div class="dev-row" data-id="${esc(d.id)}">
+              <span class="dev-name${d.current ? " is-current" : ""}">${esc(d.label)}</span>
+              <button class="dev-act dev-edit" type="button" title="Переименовать">✎</button>
+              <button class="dev-act dev-del" type="button" title="Забыть устройство">🗑</button>
+              <span class="dev-meta">Последний вход: ${esc(ago(d.last_used))}${d.last_ip ? " · " + esc(d.last_ip) : ""}</span>
+            </div>`).join("");
+        };
+
+        const load = async () => {
+          try {
+            const r = await fetch("/api/devices", { credentials: "same-origin" });
+            devices = await r.json();
+            render();
+          } catch {}
+        };
+
+        const showError = text => { if (errorEl) errorEl.textContent = text || ""; };
+
+        const trust = async () => {
+          showError("");
+          try {
+            const r = await fetch("/api/devices/trust", {
+              method: "POST", credentials: "same-origin",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ password: dailyInput.value }),
+            });
+            const data = await r.json();
+            if (!r.ok) { showError(data.error || "Не получилось."); return; }
+            dailyInput.value = "";
+            confirmBox.hidden = true;
+            load();
+          } catch { showError("Сеть недоступна."); }
+        };
+
+        const forget = async id => {
+          try {
+            await fetch("/api/devices/" + encodeURIComponent(id), { method: "DELETE", credentials: "same-origin" });
+            load();
+          } catch {}
+        };
+
+        if (checkbox) checkbox.addEventListener("change", () => {
+          showError("");
+          if (checkbox.checked) {
+            confirmBox.hidden = false;
+            dailyInput.focus();
+          } else {
+            confirmBox.hidden = true;
+            const current = devices.find(d => d.current);
+            if (current) forget(current.id);
+          }
+        });
+
+        if (confirmBtn) confirmBtn.addEventListener("click", trust);
+        if (dailyInput) dailyInput.addEventListener("keydown", e => { if (e.key === "Enter") trust(); });
+
+        if (listEl) listEl.addEventListener("click", async e => {
+          const row = e.target.closest(".dev-row");
+          if (!row) return;
+          const id = row.dataset.id;
+
+          if (e.target.classList.contains("dev-del")) {
+            const item = devices.find(d => d.id === id);
+            const warn = item && item.current
+              ? "Забыть это устройство? Придётся вводить пароль заново."
+              : "Забыть устройство «" + (item ? item.label : "") + "»?";
+            if (confirm(warn)) forget(id);
+            return;
+          }
+
+          if (e.target.classList.contains("dev-edit")) {
+            const nameEl = row.querySelector(".dev-name");
+            const item = devices.find(d => d.id === id);
+            const input = document.createElement("input");
+            input.className = "dev-rename";
+            input.value = item ? item.label : "";
+            input.maxLength = 40;
+            nameEl.replaceWith(input);
+            input.focus();
+            input.select();
+            const save = async () => {
+              const label = input.value.trim();
+              if (label) {
+                try {
+                  await fetch("/api/devices/" + encodeURIComponent(id), {
+                    method: "PATCH", credentials: "same-origin",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ label }),
+                  });
+                } catch {}
+              }
+              load();
+            };
+            input.addEventListener("blur", save, { once: true });
+            input.addEventListener("keydown", ev => {
+              if (ev.key === "Enter") input.blur();
+              if (ev.key === "Escape") { input.removeEventListener("blur", save); load(); }
+            });
+          }
+        });
+
+        load();
+      }
+      </script>
+    </body>
+    </html>
