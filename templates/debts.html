@@ -26,9 +26,31 @@
     .btn{border:1px solid rgba(53,224,240,.7);background:rgba(53,224,240,.16);color:var(--text);padding:11px 14px;font-weight:900;cursor:pointer} .btn:hover{background:rgba(53,224,240,.24)} .btn.danger{border-color:rgba(255,79,179,.55);background:rgba(255,79,179,.12)} .btn.small{padding:7px 9px;font-size:12px}
     .people{display:grid;gap:8px;margin:16px 0} .person{border:1px solid #223956;background:#081427;color:var(--text);padding:12px;text-align:left;cursor:pointer;display:grid;gap:4px} .person.active{border-color:var(--cyan);box-shadow:inset 3px 0 0 var(--cyan)} .person b{font-size:16px} .person i{font-style:normal;color:var(--muted);font-size:12px}
     .pass-box{border-top:1px solid #1a2d49;margin-top:14px;padding-top:14px;display:grid;gap:10px}
-    .entry-form{grid-template-columns:1.1fr .8fr .8fr 1.4fr auto;align-items:end;margin-bottom:18px} .history{width:100%;border-collapse:collapse} .history th,.history td{border-bottom:1px solid #1a2d49;padding:11px 8px;text-align:left;vertical-align:top} .history th{color:#86a1cc;font-size:12px;text-transform:uppercase;letter-spacing:.08em} .sum{font-weight:900;color:var(--cyan);white-space:nowrap} .sum.minus{color:var(--green)} .empty{padding:28px;border:1px dashed #294260;color:var(--muted);text-align:center}
+    .entry-form{grid-template-columns:1.1fr .8fr .8fr 1.4fr auto;align-items:end;margin-bottom:18px} .history{width:100%;border-collapse:collapse} .history th,.history td{border-bottom:1px solid #1a2d49;padding:11px 8px;text-align:left;vertical-align:top} .history th{color:#86a1cc;font-size:12px;text-transform:uppercase;letter-spacing:.08em} .sum{font-weight:900;color:var(--cyan);white-space:nowrap} .sum.minus{color:var(--green)} .kind{font-style:normal;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.04em} .empty{padding:28px;border:1px dashed #294260;color:var(--muted);text-align:center}
     .err{min-height:20px;color:#ff7aa9;font-weight:800} .ok{color:var(--green)} .debtor-card{max-width:960px;margin:auto} .debtor-card .history{margin-top:16px}
-    @media (max-width:980px){.wrap{width:min(100vw - 24px,760px);padding-top:20px}.grid{grid-template-columns:1fr}.total{grid-template-columns:1fr}.entry-form{grid-template-columns:1fr}.tag{display:none}}
+    @media (max-width:980px){
+      .wrap{width:min(100vw - 24px,760px);padding-top:20px}.grid{grid-template-columns:1fr}.total{grid-template-columns:1fr}.entry-form{grid-template-columns:1fr}.tag{display:none}
+      /* Таблица истории на телефоне не влезает в ширину (даты, суммы,
+         комментарий, кнопка — реально требуют больше 400px) и раньше
+         просто уезжала вбок вместе со всей страницей. Вместо строки —
+         карточка: дата сверху слева, удалить — сверху справа (сбоку),
+         имя+сумма — по центру строкой, комментарий — снизу отдельно. */
+      .history thead{display:none}
+      .history,.history tbody{display:block}
+      .history tr{
+        display:grid;grid-template-columns:1fr auto;
+        grid-template-areas:"date act" "who sum" "comment comment";
+        gap:6px 12px;border:1px solid var(--line);background:rgba(7,14,27,.7);
+        padding:14px;border-radius:10px;margin-bottom:10px;
+      }
+      .history td{border:none;padding:0;vertical-align:middle}
+      .history td:nth-child(1){grid-area:date;color:var(--muted);font-size:12px;align-self:start}
+      .history td:nth-child(2){grid-area:who;font-weight:800;align-self:center}
+      .history td:nth-child(2) .kind{display:block;margin-top:2px}
+      .history td:nth-child(3){grid-area:sum;text-align:right;align-self:center;font-size:19px}
+      .history td:nth-child(4){grid-area:comment;color:var(--muted);font-size:13px;padding-top:8px;border-top:1px solid #1a2d49;margin-top:2px}
+      .history td:nth-child(5){grid-area:act;justify-self:end;align-self:start}
+    }
   </style>
 </head>
 <body data-mode="**MODE**">
@@ -126,12 +148,14 @@
     function rowHtml(entry, canDelete) {
       const cls = entry.kind === "return" ? "sum minus" : "sum";
       const label = entry.kind === "return" ? "вернул" : "долг";
-      return `<tr><td>${esc(entry.date)}</td><td>${esc(entry.user_name)}</td><td>${label}</td><td class="${cls}">${money(entry.kind === "return" ? -entry.amount_cents : entry.amount_cents)}</td><td>${esc(entry.comment || "—")}</td><td>${canDelete ? `<button class="btn danger small" data-del="${esc(entry.id)}">удалить</button>` : ""}</td></tr>`;
+      // Тип живёт внутри ячейки "Кто" (не отдельной колонкой) — на телефоне
+      // строка превращается в карточку, и лишняя колонка там некуда деть.
+      return `<tr><td>${esc(entry.date)}</td><td>${esc(entry.user_name)} <i class="kind">${label}</i></td><td class="${cls}">${money(entry.kind === "return" ? -entry.amount_cents : entry.amount_cents)}</td><td>${esc(entry.comment || "—")}</td><td>${canDelete ? `<button class="btn danger small" data-del="${esc(entry.id)}">удалить</button>` : ""}</td></tr>`;
     }
 
     function tableHtml(entries, canDelete) {
       if (!entries.length) return `<div class="empty">Пока нет записей.</div>`;
-      return `<table class="history"><thead><tr><th>Дата</th><th>Кто</th><th>Тип</th><th>Сумма</th><th>Комментарий</th><th></th></tr></thead><tbody>${entries.map(e => rowHtml(e, canDelete)).join("")}</tbody></table>`;
+      return `<table class="history"><thead><tr><th>Дата</th><th>Кто</th><th>Сумма</th><th>Комментарий</th><th></th></tr></thead><tbody>${entries.map(e => rowHtml(e, canDelete)).join("")}</tbody></table>`;
     }
 
     function renderOwner() {
