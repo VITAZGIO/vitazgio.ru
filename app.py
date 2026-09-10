@@ -612,13 +612,18 @@ _drop_load_index()
 
 # ---- Доверенные устройства («запомнить это устройство») ---------------------
 # Кука содержит "селектор.валидатор". На сервере лежит только SHA-256 валидатора,
-# поэтому утечка файла войти не позволяет. При каждом входе валидатор
-# перевыпускается: если украденной кукой воспользуются, у настоящего устройства
-# токен перестанет подходить — по этому признаку запись сносится целиком.
+# поэтому утечка файла войти не позволяет. Валидатор периодически перевыпускается
+# (не на каждый запрос — см. DEVICE_ROTATE_AFTER): если украденной кукой
+# воспользуются, у настоящего устройства токен перестанет подходить — по этому
+# признаку запись сносится целиком (с коротким окном прощения на случай, если
+# это не кража, а просто несколько параллельных запросов браузера успели
+# разъехаться по старой и новой куке — см. DEVICE_GRACE_SECONDS).
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 DEVICES_PATH = os.path.join(DATA_DIR, "devices.json")
 DEVICE_COOKIE = "vitazgio_device"
 DEVICE_TTL_DAYS = 90
+DEVICE_ROTATE_AFTER = 6 * 3600
+DEVICE_GRACE_SECONDS = 60
 
 trusted_devices: dict = {}
 devices_lock = threading.Lock()
@@ -932,12 +937,12 @@ def _unique_label(base):
 
 
 def _device_issue(label, ua, ip, selector=None):
-    """Выдаёт или продлевает токен. Вызывать под devices_lock."""
+    """Выдаёт или продлевает токен (с ротацией валидатора). Вызывать под devices_lock."""
     selector = selector or secrets.token_urlsafe(12)
     validator = secrets.token_urlsafe(32)
     now = time.time()
     previous = trusted_devices.get(selector, {})
-    trusted_devices[selector] = {
+    entry = {
         "hash": hashlib.sha256(validator.encode()).hexdigest(),
         "label": previous.get("label") or label,
         "ua": (ua or "")[:160],
@@ -945,7 +950,15 @@ def _device_issue(label, ua, ip, selector=None):
         "last_used": now,
         "last_ip": ip,
         "expires": now + DEVICE_TTL_DAYS * 86400,
+        "rotated": now,
     }
+    if previous.get("hash"):
+        # Старая кука ещё может лететь к другим параллельным запросам того
+        # же браузера (открытие кабинета дёргает сразу несколько ручек) —
+        # даём ей недолго прожить, иначе такой запрос выглядел бы как кража.
+        entry["prev_hash"] = previous["hash"]
+        entry["prev_hash_until"] = now + DEVICE_GRACE_SECONDS
+    trusted_devices[selector] = entry
     _devices_write()
     return f"{selector}.{validator}"
 
@@ -955,18 +968,34 @@ def _device_check(raw):
     if not raw or "." not in raw:
         return None
     selector, validator = raw.split(".", 1)
+    now = time.time()
     with devices_lock:
         record = trusted_devices.get(selector)
-        if not record or record.get("expires", 0) < time.time():
+        if not record or record.get("expires", 0) < now:
             return None
         expected = hashlib.sha256(validator.encode()).hexdigest()
-        if not hmac.compare_digest(record["hash"], expected):
-            # Селектор есть, а валидатор чужой — похоже на кражу токена.
-            # Сносим запись: оба устройства пойдут вводить пароль заново.
-            trusted_devices.pop(selector, None)
-            _devices_write()
-            return None
-        return _device_issue(record["label"], record.get("ua", ""), _client_ip(), selector)
+        if hmac.compare_digest(record["hash"], expected):
+            if now - record.get("rotated", record.get("created", now)) < DEVICE_ROTATE_AFTER:
+                # Кука свежая — не ротируем валидатор на каждый запрос.
+                # Страница кабинета дёргает сразу несколько ручек одной и той
+                # же (ещё не обновлённой браузером) кукой; ротация на каждую
+                # роняла бы устройство «по кражи» на втором же запросе.
+                record["last_used"] = now
+                record["last_ip"] = _client_ip()
+                record["expires"] = now + DEVICE_TTL_DAYS * 86400
+                _devices_write()
+                return raw
+            return _device_issue(record["label"], record.get("ua", ""), _client_ip(), selector)
+        prev_hash = record.get("prev_hash")
+        if prev_hash and now < record.get("prev_hash_until", 0) and hmac.compare_digest(prev_hash, expected):
+            # Параллельный запрос со старой кукой в окне прощения после
+            # ротации — не кража, просто ещё не долетевший Set-Cookie.
+            return raw
+        # Селектор есть, а валидатор чужой — похоже на кражу токена.
+        # Сносим запись: оба устройства пойдут вводить пароль заново.
+        trusted_devices.pop(selector, None)
+        _devices_write()
+        return None
 
 
 def _device_forget(selector):
