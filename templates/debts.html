@@ -6,7 +6,7 @@
   <meta name="robots" content="noindex">
   <title>**TITLE** · vitazgio.ru</title>
   <style>
-    :root{--bg:#08111f;--panel:#0c1628;--line:#1d3151;--text:#f4fbff;--muted:#8aa2c7;--cyan:#35e0f0;--green:#63f5ad;--pink:#ff4fb3;--yellow:#f6c04a;}
+    :root{--bg:#08111f;--panel:#0c1628;--line:#1d3151;--text:#f4fbff;--muted:#8aa2c7;--cyan:#35e0f0;--green:#63f5ad;--pink:#ff4fb3;--yellow:#f6c04a;--u-cyan:var(--cyan);--u-green:var(--green);--u-pink:var(--pink);--u-yellow:var(--yellow);--u-violet:#9d7bff;--u-orange:#ff9a4d;}
     *{box-sizing:border-box} body{margin:0;min-height:100vh;background:radial-gradient(circle at 20% 0,#142947 0,#08111f 46%,#060b14 100%);color:var(--text);font:15px/1.45 "Segoe UI",Arial,sans-serif;}
     body::before{content:"";position:fixed;inset:0;pointer-events:none;background:linear-gradient(transparent 96%,rgba(53,224,240,.08) 97%);background-size:100% 4px;opacity:.45}
     a{color:inherit} button,input,select{font:inherit} .wrap{width:min(1480px,calc(100vw - 56px));margin:0 auto;padding:36px 0 54px;position:relative;z-index:1}
@@ -20,33 +20,57 @@
       .keypad button:active{background:rgba(53,224,240,.18);border-color:var(--cyan)}
       .keypad button[data-bksp]{font-size:18px;color:var(--muted)}
     }
-    .grid{display:grid;grid-template-columns:330px 1fr;gap:18px} .panel{border:1px solid var(--line);background:rgba(12,22,40,.78);padding:20px;min-width:0} .panel.accent{box-shadow:inset 3px 0 0 var(--cyan)}
+    .panel{border:1px solid var(--line);background:rgba(12,22,40,.78);padding:20px;min-width:0} .panel.accent{box-shadow:inset 3px 0 0 var(--cyan)}
     .total{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-bottom:18px} .stat{border:1px solid var(--line);background:rgba(7,14,27,.82);padding:16px} .stat b{display:block;font-size:28px;color:var(--cyan)} .stat i{font-style:normal;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.08em}
     form{display:grid;gap:10px} label{display:grid;gap:6px;color:#b8c8e8;font-weight:800;font-size:12px;text-transform:uppercase;letter-spacing:.06em} input,select{width:100%;border:1px solid #28405f;background:#071021;color:var(--text);padding:11px 12px;outline:none} input:focus,select:focus{border-color:var(--cyan);box-shadow:0 0 0 2px rgba(53,224,240,.14)} .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
     .btn{border:1px solid rgba(53,224,240,.7);background:rgba(53,224,240,.16);color:var(--text);padding:11px 14px;font-weight:900;cursor:pointer} .btn:hover{background:rgba(53,224,240,.24)} .btn.danger{border-color:rgba(255,79,179,.55);background:rgba(255,79,179,.12)} .btn.small{padding:7px 9px;font-size:12px}
-    .people{display:grid;gap:8px;margin:16px 0} .person{border:1px solid #223956;background:#081427;color:var(--text);padding:12px;text-align:left;cursor:pointer;display:grid;gap:4px} .person.active{border-color:var(--cyan);box-shadow:inset 3px 0 0 var(--cyan)} .person b{font-size:16px} .person i{font-style:normal;color:var(--muted);font-size:12px}
-    .pass-box{border-top:1px solid #1a2d49;margin-top:14px;padding-top:14px;display:grid;gap:10px}
+    /* Выбор человека — узкая полоска кружков-аватарок (первая буква имени),
+       не список карточек на всю ширину: на телефоне для формы и истории
+       остаётся куда больше места. Тап — выбрать, зажать — редактировать
+       (цвет обводки/пароль/удаление) во всплывающей карточке. */
+    .owner-shell{display:flex;gap:14px;align-items:flex-start}
+    .rail{flex:0 0 72px;display:flex;flex-direction:column;align-items:center;gap:10px;border:1px solid var(--line);background:rgba(12,22,40,.78);padding:14px 8px;box-shadow:inset 3px 0 0 var(--cyan)}
+    .avatar{width:48px;height:48px;flex:0 0 auto;border-radius:50%;border:3px solid var(--ac-user,var(--cyan));background:#081427;color:var(--text);font-size:18px;font-weight:900;display:grid;place-items:center;cursor:pointer;touch-action:manipulation;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+    .avatar.active{box-shadow:0 0 0 3px rgba(255,255,255,.1),0 0 14px var(--ac-user,var(--cyan))}
+    .avatar-add{border-style:dashed;color:var(--muted);font-size:24px;font-weight:400}
+    .owner-main{flex:1;min-width:0;display:grid;gap:16px}
+    .user-head{border:1px solid var(--line);background:rgba(12,22,40,.78);padding:16px 20px;box-shadow:inset 3px 0 0 var(--ac-user,var(--cyan))}
+    .user-head .uh-name{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;font-weight:800}
+    .user-head .uh-total{font-size:32px;font-weight:900;color:var(--ac-user,var(--cyan));line-height:1.3}
+    .user-head .uh-sub{font-size:12px}
+    .no-user{border:1px dashed #294260;color:var(--muted);padding:36px;text-align:center}
+    .modal-back{position:fixed;inset:0;background:rgba(4,8,16,.72);display:grid;place-items:center;padding:20px;z-index:50}
+    .modal{width:min(380px,100%);border:1px solid var(--line);background:#0c1628;padding:22px;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+    .modal h3{margin:0 0 4px;font-size:18px} .modal .muted{margin:0 0 4px}
+    .swatches{display:flex;gap:10px;margin:6px 0 4px}
+    .swatch{width:30px;height:30px;border-radius:50%;border:3px solid transparent;cursor:pointer;padding:0}
+    .swatch.active{border-color:#fff}
+    .swatch.cyan{background:var(--u-cyan)} .swatch.green{background:var(--u-green)} .swatch.pink{background:var(--u-pink)} .swatch.yellow{background:var(--u-yellow)} .swatch.violet{background:var(--u-violet)} .swatch.orange{background:var(--u-orange)}
+    .modal-actions{display:flex;gap:10px;margin-top:8px} .modal-actions .btn{flex:1}
     .entry-form{grid-template-columns:1.1fr .8fr .8fr 1.4fr auto;align-items:end;margin-bottom:18px} .history{width:100%;border-collapse:collapse} .history th,.history td{border-bottom:1px solid #1a2d49;padding:11px 8px;text-align:left;vertical-align:top} .history th{color:#86a1cc;font-size:12px;text-transform:uppercase;letter-spacing:.08em} .sum{font-weight:900;color:var(--cyan);white-space:nowrap} .sum.minus{color:var(--green)} .kind{font-style:normal;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.04em} .empty{padding:28px;border:1px dashed #294260;color:var(--muted);text-align:center}
+    .del-x{border:1px solid rgba(255,79,179,.55);background:rgba(255,79,179,.12);color:var(--text);width:26px;height:26px;border-radius:50%;font-size:17px;line-height:1;cursor:pointer;display:grid;place-items:center;padding:0}
     .err{min-height:20px;color:#ff7aa9;font-weight:800} .ok{color:var(--green)} .debtor-card{max-width:960px;margin:auto} .debtor-card .history{margin-top:16px}
     @media (max-width:980px){
-      .wrap{width:min(100vw - 24px,760px);padding-top:20px}.grid{grid-template-columns:1fr}.total{grid-template-columns:1fr}.entry-form{grid-template-columns:1fr}.tag{display:none}
-      /* Таблица истории на телефоне не влезает в ширину (даты, суммы,
-         комментарий, кнопка — реально требуют больше 400px) и раньше
-         просто уезжала вбок вместе со всей страницей. Вместо строки —
-         карточка: дата сверху слева, удалить — сверху справа (сбоку),
-         имя+сумма — по центру строкой, комментарий — снизу отдельно. */
+      .wrap{width:min(100vw - 24px,760px);padding-top:20px}.total{grid-template-columns:1fr}.entry-form{grid-template-columns:1fr}.tag{display:none}
+      .rail{flex:0 0 60px;padding:10px 6px;gap:8px} .avatar{width:42px;height:42px;font-size:16px}
+      /* Таблица истории на телефоне не влезает в ширину (дата, тип, сумма,
+         комментарий, крестик — реально требуют больше 400px, да ещё и рядом
+         теперь полоска аватарок) и раньше просто уезжала вбок вместе со
+         всей страницей. Вместо строки — карточка: дата сверху слева,
+         крестик — сверху справа (сбоку), тип+сумма — по центру строкой,
+         комментарий — снизу отдельно. */
       .history thead{display:none}
       .history,.history tbody{display:block}
       .history tr{
         display:grid;grid-template-columns:1fr auto;
-        grid-template-areas:"date act" "who sum" "comment comment";
+        grid-template-areas:"date act" "kind sum" "comment comment";
         gap:6px 12px;border:1px solid var(--line);background:rgba(7,14,27,.7);
         padding:14px;border-radius:10px;margin-bottom:10px;
       }
       .history td{border:none;padding:0;vertical-align:middle}
       .history td:nth-child(1){grid-area:date;color:var(--muted);font-size:12px;align-self:start}
-      .history td:nth-child(2){grid-area:who;font-weight:800;align-self:center}
-      .history td:nth-child(2) .kind{display:block;margin-top:2px}
+      .history td:nth-child(2){grid-area:kind;align-self:center}
+      .history td:nth-child(2) .kind{font-size:14px}
       .history td:nth-child(3){grid-area:sum;text-align:right;align-self:center;font-size:19px}
       .history td:nth-child(4){grid-area:comment;color:var(--muted);font-size:13px;padding-top:8px;border-top:1px solid #1a2d49;margin-top:2px}
       .history td:nth-child(5){grid-area:act;justify-self:end;align-self:start}
@@ -72,30 +96,15 @@
       </form>
     </section>
 
-    <section id="owner-app" class="grid **OWNER_APP_HIDDEN**">
-      <aside class="panel accent">
-        <h2>Люди</h2>
-        <form id="user-form">
-          <label>Имя<input id="user-name" maxlength="60" autocomplete="off"></label>
-          <label>Пароль для входа<input id="user-pass" type="password" autocomplete="new-password"></label>
-          <button class="btn" type="submit">Создать</button>
-          <div class="err" id="user-err"></div>
-        </form>
-        <div class="people" id="people"></div>
-        <form class="pass-box" id="pass-form" hidden>
-          <label>Пароль выбранного<input id="edit-pass" autocomplete="off" placeholder="старый скрыт — задай новый"></label>
-          <button class="btn small" type="submit">Сохранить пароль</button>
-          <div class="err" id="pass-err"></div>
-        </form>
-        <button class="btn danger small" id="delete-user" type="button">Удалить выбранного</button>
+    <section id="owner-app" class="owner-shell **OWNER_APP_HIDDEN**">
+      <aside class="rail">
+        <div class="avatars" id="avatars"></div>
+        <button class="avatar avatar-add" id="add-user-btn" type="button" title="Новый человек" aria-label="Новый человек">+</button>
       </aside>
-      <section>
-        <div class="total">
-          <div class="stat"><i>общий долг</i><b id="total-all">0</b></div>
-          <div class="stat"><i>выбранный</i><b id="total-user">0</b></div>
-          <div class="stat"><i>записей</i><b id="entry-count">0</b></div>
-        </div>
-        <div class="panel">
+      <section class="owner-main">
+        <div class="user-head" id="user-head" hidden></div>
+        <div class="no-user" id="no-user-msg" hidden>Нажми «+» слева, чтобы добавить человека.</div>
+        <div class="panel" id="entry-panel" hidden>
           <h2>Добавить строку</h2>
           <form class="entry-form" id="entry-form">
             <label>Дата<input id="entry-date" type="date"></label>
@@ -133,6 +142,7 @@
     };
     let data = {users:[],entries:[],total_cents:0,today:""};
     let selected = null;
+    const PALETTE = ["cyan","green","pink","yellow","violet","orange"];
 
     async function api(path, opts={}) {
       const response = await fetch(path, {
@@ -148,29 +158,195 @@
     function rowHtml(entry, canDelete) {
       const cls = entry.kind === "return" ? "sum minus" : "sum";
       const label = entry.kind === "return" ? "вернул" : "долг";
-      // Тип живёт внутри ячейки "Кто" (не отдельной колонкой) — на телефоне
-      // строка превращается в карточку, и лишняя колонка там некуда деть.
-      return `<tr><td>${esc(entry.date)}</td><td>${esc(entry.user_name)} <i class="kind">${label}</i></td><td class="${cls}">${money(entry.kind === "return" ? -entry.amount_cents : entry.amount_cents)}</td><td>${esc(entry.comment || "—")}</td><td>${canDelete ? `<button class="btn danger small" data-del="${esc(entry.id)}">удалить</button>` : ""}</td></tr>`;
+      // "Кто" тут не нужен отдельной колонкой — историю смотрят уже
+      // выбрав человека кружком-аватаркой, его имя и так на виду сверху.
+      return `<tr><td>${esc(entry.date)}</td><td><i class="kind">${label}</i></td><td class="${cls}">${money(entry.kind === "return" ? -entry.amount_cents : entry.amount_cents)}</td><td>${esc(entry.comment || "—")}</td><td>${canDelete ? `<button class="del-x" data-del="${esc(entry.id)}" aria-label="Удалить" title="Удалить">×</button>` : ""}</td></tr>`;
     }
 
     function tableHtml(entries, canDelete) {
       if (!entries.length) return `<div class="empty">Пока нет записей.</div>`;
-      return `<table class="history"><thead><tr><th>Дата</th><th>Кто</th><th>Сумма</th><th>Комментарий</th><th></th></tr></thead><tbody>${entries.map(e => rowHtml(e, canDelete)).join("")}</tbody></table>`;
+      return `<table class="history"><thead><tr><th>Дата</th><th>Тип</th><th>Сумма</th><th>Комментарий</th><th></th></tr></thead><tbody>${entries.map(e => rowHtml(e, canDelete)).join("")}</tbody></table>`;
+    }
+
+    // ---- Свои карточки поверх страницы (вместо confirm()/prompt()) --------
+    function closeModal() { $("modal-back")?.remove(); }
+
+    function openModal(html) {
+      closeModal();
+      const back = document.createElement("div");
+      back.className = "modal-back";
+      back.id = "modal-back";
+      back.innerHTML = `<div class="modal">${html}</div>`;
+      back.addEventListener("click", e => { if (e.target === back) closeModal(); });
+      document.body.appendChild(back);
+      return back;
+    }
+
+    function swatchesHtml(idPrefix, activeColor) {
+      return `<div class="swatches" id="${idPrefix}-swatches">${PALETTE.map(c =>
+        `<button type="button" class="swatch ${c} ${c === activeColor ? "active" : ""}" data-color="${c}" aria-label="${c}"></button>`
+      ).join("")}</div>`;
+    }
+
+    function bindSwatches(idPrefix, onPick) {
+      $(`${idPrefix}-swatches`).addEventListener("click", e => {
+        const sw = e.target.closest("[data-color]");
+        if (!sw) return;
+        onPick(sw.dataset.color);
+        $(`${idPrefix}-swatches`).querySelectorAll(".swatch").forEach(s => s.classList.toggle("active", s === sw));
+      });
+    }
+
+    // Подтверждение удаления — обязательно паролем долгов, чтобы случайный
+    // тычок не в тот пункт списка не сносил запись без второго шага.
+    function confirmDelete(title, run) {
+      openModal(`
+        <h3>${esc(title)}</h3>
+        <p class="muted">Подтверди паролем долгов.</p>
+        <input id="confirm-pass" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="off" placeholder="Пароль">
+        <div class="err" id="confirm-err"></div>
+        <div class="modal-actions">
+          <button class="btn danger" type="button" id="confirm-ok">Удалить</button>
+          <button class="btn" type="button" id="confirm-cancel">Отмена</button>
+        </div>
+      `);
+      const input = $("confirm-pass");
+      input.addEventListener("input", () => { input.value = input.value.replace(/\D/g, ""); });
+      input.focus();
+      $("confirm-cancel").addEventListener("click", closeModal);
+      const submit = async () => {
+        $("confirm-err").textContent = "";
+        try {
+          await run(input.value);
+          closeModal();
+        } catch (err) { $("confirm-err").textContent = err.message; }
+      };
+      $("confirm-ok").addEventListener("click", submit);
+      input.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); submit(); } });
+    }
+
+    function openCreateUser() {
+      openModal(`
+        <h3>Новый человек</h3>
+        <label>Имя<input id="new-name" maxlength="60" autocomplete="off"></label>
+        <label>Пароль для входа<input id="new-pass" autocomplete="new-password"></label>
+        ${swatchesHtml("new", PALETTE[0])}
+        <div class="err" id="new-err"></div>
+        <div class="modal-actions">
+          <button class="btn" type="button" id="new-create">Создать</button>
+          <button class="btn" type="button" id="new-cancel">Отмена</button>
+        </div>
+      `);
+      let color = PALETTE[0];
+      bindSwatches("new", c => { color = c; });
+      $("new-cancel").addEventListener("click", closeModal);
+      $("new-create").addEventListener("click", async () => {
+        $("new-err").textContent = "";
+        try {
+          data = await api("/api/debts/users", {method:"POST", body:JSON.stringify({name:$("new-name").value, password:$("new-pass").value, color})});
+          selected = data.selected_id || selected;
+          closeModal();
+          renderOwner();
+        } catch (err) { $("new-err").textContent = err.message; }
+      });
+    }
+
+    function openEditUser(user) {
+      openModal(`
+        <h3>${esc(user.name)}</h3>
+        <label>Пароль для входа<input id="edit-pass" autocomplete="off" value="${esc(user.password || "")}" placeholder="старый скрыт — задай новый"></label>
+        ${swatchesHtml("edit", user.color || "cyan")}
+        <div class="err" id="edit-err"></div>
+        <div class="modal-actions">
+          <button class="btn" type="button" id="edit-save">Сохранить</button>
+          <button class="btn" type="button" id="edit-cancel">Отмена</button>
+        </div>
+        <div class="modal-actions">
+          <button class="btn danger" type="button" id="edit-delete">Удалить человека</button>
+        </div>
+      `);
+      let color = user.color || "cyan";
+      bindSwatches("edit", c => { color = c; });
+      $("edit-cancel").addEventListener("click", closeModal);
+      $("edit-save").addEventListener("click", async () => {
+        $("edit-err").textContent = "";
+        try {
+          const passVal = $("edit-pass").value.trim();
+          if (passVal && passVal !== user.password) {
+            data = await api("/api/debts/users/" + encodeURIComponent(user.id) + "/password", {method:"POST", body:JSON.stringify({password:passVal})});
+          }
+          if (color !== (user.color || "cyan")) {
+            data = await api("/api/debts/users/" + encodeURIComponent(user.id) + "/color", {method:"POST", body:JSON.stringify({color})});
+          }
+          closeModal();
+          renderOwner();
+        } catch (err) { $("edit-err").textContent = err.message; }
+      });
+      $("edit-delete").addEventListener("click", () => {
+        confirmDelete(`Удалить «${user.name}» и всю его историю?`, async password => {
+          data = await api("/api/debts/users/" + encodeURIComponent(user.id), {method:"DELETE", body:JSON.stringify({password})});
+          if (selected === user.id) selected = null;
+          renderOwner();
+        });
+      });
+    }
+
+    // Тап по кружку — выбрать человека. Зажать (~550мс) — открыть
+    // редактирование (цвет, пароль, удаление). Pointer Events — единый
+    // путь для мыши и тача, чтобы не дублировать обработчики.
+    function bindAvatarPress(btn, userId) {
+      let timer = null, longFired = false;
+      const start = () => {
+        longFired = false;
+        timer = setTimeout(() => {
+          longFired = true;
+          const user = data.users.find(u => u.id === userId);
+          if (user) openEditUser(user);
+        }, 550);
+      };
+      const cancel = () => clearTimeout(timer);
+      const end = () => {
+        clearTimeout(timer);
+        if (!longFired) { selected = userId; renderOwner(); }
+      };
+      btn.addEventListener("pointerdown", start);
+      btn.addEventListener("pointerup", end);
+      btn.addEventListener("pointerleave", cancel);
+      btn.addEventListener("pointercancel", cancel);
+      btn.addEventListener("contextmenu", e => e.preventDefault());
+    }
+
+    function renderRail() {
+      $("avatars").innerHTML = data.users.map(u => {
+        const initial = (u.name || "?").trim().slice(0, 1).toUpperCase() || "?";
+        return `<button type="button" class="avatar ${u.id === selected ? "active" : ""}" data-user="${esc(u.id)}"
+          style="--ac-user:var(--u-${esc(u.color || "cyan")})" title="${esc(u.name)}" aria-label="${esc(u.name)}">${esc(initial)}</button>`;
+      }).join("");
+      $("avatars").querySelectorAll("[data-user]").forEach(btn => bindAvatarPress(btn, btn.dataset.user));
     }
 
     function renderOwner() {
       if (!selected && data.users.length) selected = data.users[0].id;
       if (selected && !data.users.some(u => u.id === selected)) selected = data.users[0]?.id || null;
-      $("total-all").textContent = money(data.total_cents);
-      $("entry-count").textContent = String(data.entries.length);
+      renderRail();
       const active = data.users.find(u => u.id === selected);
-      $("total-user").textContent = active ? money(active.total_cents) : "0 ₽";
-      $("people").innerHTML = data.users.length ? data.users.map(u => `<button class="person ${u.id === selected ? "active" : ""}" data-user="${esc(u.id)}" type="button"><b>${esc(u.name)}</b><i>${money(u.total_cents)} · пароль: ${esc(u.password || "скрыт")} · записей: ${u.entry_count}</i></button>`).join("") : `<div class="empty">Создай первого человека.</div>`;
-      $("pass-form").hidden = !active;
-      if (active) $("edit-pass").value = active.password || "";
-      const shown = selected ? data.entries.filter(e => e.user_id === selected) : data.entries;
-      $("history").innerHTML = tableHtml(shown, true);
-      $("entry-date").value = data.today || new Date().toISOString().slice(0,10);
+      const head = $("user-head");
+      const entryPanel = $("entry-panel");
+      const noUser = $("no-user-msg");
+      if (active) {
+        head.hidden = false;
+        head.style.setProperty("--ac-user", `var(--u-${active.color || "cyan"})`);
+        head.innerHTML = `<div class="uh-name">${esc(active.name)}</div><div class="uh-total">${money(active.total_cents)}</div><div class="uh-sub muted">${active.entry_count} записей</div>`;
+        entryPanel.hidden = false;
+        noUser.hidden = true;
+        $("entry-date").value = data.today || new Date().toISOString().slice(0,10);
+        const shown = data.entries.filter(e => e.user_id === selected);
+        $("history").innerHTML = tableHtml(shown, true);
+      } else {
+        head.hidden = true;
+        entryPanel.hidden = true;
+        noUser.hidden = false;
+      }
     }
 
     async function loadOwner() {
@@ -221,16 +397,7 @@
           $("unlock-err").textContent = err.message;
         }
       });
-      $("user-form").addEventListener("submit", async e => {
-        e.preventDefault();
-        $("user-err").textContent = "";
-        try {
-          data = await api("/api/debts/users", {method:"POST", body:JSON.stringify({name:$("user-name").value, password:$("user-pass").value})});
-          $("user-name").value = ""; $("user-pass").value = "";
-          selected = data.selected_id || selected;
-          renderOwner();
-        } catch (err) { $("user-err").textContent = err.message; }
-      });
+      $("add-user-btn").addEventListener("click", openCreateUser);
       $("entry-form").addEventListener("submit", async e => {
         e.preventDefault();
         $("entry-err").textContent = "";
@@ -240,32 +407,14 @@
           renderOwner();
         } catch (err) { $("entry-err").textContent = err.message; }
       });
-      $("people").addEventListener("click", e => {
-        const btn = e.target.closest("[data-user]");
-        if (!btn) return;
-        selected = btn.dataset.user;
-        renderOwner();
-      });
-      $("pass-form").addEventListener("submit", async e => {
-        e.preventDefault();
-        if (!selected) return;
-        $("pass-err").textContent = "";
-        try {
-          data = await api("/api/debts/users/" + encodeURIComponent(selected) + "/password", {method:"POST", body:JSON.stringify({password:$("edit-pass").value})});
-          renderOwner();
-        } catch (err) { $("pass-err").textContent = err.message; }
-      });
-      $("history").addEventListener("click", async e => {
+      $("history").addEventListener("click", e => {
         const btn = e.target.closest("[data-del]");
         if (!btn) return;
-        data = await api("/api/debts/entries/" + encodeURIComponent(btn.dataset.del), {method:"DELETE"});
-        renderOwner();
-      });
-      $("delete-user").addEventListener("click", async () => {
-        if (!selected || !confirm("Удалить человека и всю его историю?")) return;
-        data = await api("/api/debts/users/" + encodeURIComponent(selected), {method:"DELETE"});
-        selected = null;
-        renderOwner();
+        const id = btn.dataset.del;
+        confirmDelete("Удалить запись?", async password => {
+          data = await api("/api/debts/entries/" + encodeURIComponent(id), {method:"DELETE", body:JSON.stringify({password})});
+          renderOwner();
+        });
       });
       if (!$("owner-app").classList.contains("hidden")) loadOwner().catch(err => $("entry-err").textContent = err.message);
     } else {

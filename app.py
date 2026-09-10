@@ -1021,6 +1021,10 @@ def console_password_today():
 DEBTS_PATH = os.path.join(DATA_DIR, "debts.json")
 debts_lock = threading.Lock()
 debts_data = {"users": [], "entries": []}
+# Палитра для кружка-аватарки должника на /debts — фиксированный набор,
+# не произвольный CSS/hex с фронта (тот же принцип, что и цвета сайта
+# через переменные, а не хардкод: тут просто ключи вместо hex).
+DEBT_USER_COLORS = ("cyan", "green", "pink", "yellow", "violet", "orange")
 
 
 def _today_iso():
@@ -1126,6 +1130,7 @@ def _debt_entry_public_locked(entry):
 def _debt_user_public_locked(user):
     user_id = user.get("id")
     entries = [e for e in debts_data["entries"] if e.get("user_id") == user_id]
+    color = user.get("color")
     return {
         "id": user_id,
         "name": user.get("name", "Должник"),
@@ -1133,6 +1138,7 @@ def _debt_user_public_locked(user):
         "total_cents": _debt_user_total_locked(user_id),
         "entry_count": len(entries),
         "created": user.get("created") or "",
+        "color": color if color in DEBT_USER_COLORS else DEBT_USER_COLORS[0],
     }
 
 
@@ -4278,6 +4284,7 @@ app.register_blueprint(create_debts_blueprint(
     console_login_window_seconds=CONSOLE_LOGIN_WINDOW_SECONDS,
     console_login_max_attempts=CONSOLE_LOGIN_MAX_ATTEMPTS,
     debts_password=DEBTS_PASSWORD,
+    debt_user_colors=DEBT_USER_COLORS,
     log_login=_log_login,
 ))
 

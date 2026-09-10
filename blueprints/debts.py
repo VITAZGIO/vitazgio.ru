@@ -34,6 +34,7 @@ def create_debts_blueprint(
     console_login_window_seconds,
     console_login_max_attempts,
     debts_password,
+    debt_user_colors,
     log_login,
 ):
     debts_bp = Blueprint("debts", __name__)
@@ -41,11 +42,27 @@ def create_debts_blueprint(
     def data():
         return debts_data() if callable(debts_data) else debts_data
 
-    @debts_bp.post("/api/debts/unlock")
-    def debts_unlock_api():
+    def _verify_debts_password(payload):
+        """Пароль долгов + троттлинг попыток. Используется и для входа в
+        раздел, и для подтверждения удаления — случайный тычок не тот
+        пункт списка не должен сносить запись без повторного ввода пароля."""
         if not debts_password:
             return jsonify(error="Пароль долгов не настроен на сервере."), 503
+        client = client_ip()
+        if rate_blocked(console_login_attempts, console_login_attempts_lock, client,
+                        console_login_window_seconds, console_login_max_attempts):
+            return jsonify(error="Слишком много попыток. Попробуйте через 5 минут."), 429
+        password = payload.get("password", "")
+        if not isinstance(password, str) or not hmac.compare_digest(
+            password.encode(), debts_password.encode()
+        ):
+            rate_hit(console_login_attempts, console_login_attempts_lock, client)
+            return jsonify(error="Неверный пароль."), 401
+        rate_clear(console_login_attempts, console_login_attempts_lock, client)
+        return None
 
+    @debts_bp.post("/api/debts/unlock")
+    def debts_unlock_api():
         if not session.get("authenticated"):
             fresh = device_check(request.cookies.get(device_cookie))
             if not fresh:
@@ -54,20 +71,10 @@ def create_debts_blueprint(
             g.new_device_cookie = fresh
             log_login("доверенное устройство")
 
-        client = client_ip()
-        if rate_blocked(console_login_attempts, console_login_attempts_lock, client,
-                        console_login_window_seconds, console_login_max_attempts):
-            return jsonify(error="Слишком много попыток. Попробуйте через 5 минут."), 429
+        err = _verify_debts_password(request.get_json(silent=True) or {})
+        if err:
+            return err
 
-        payload = request.get_json(silent=True) or {}
-        password = payload.get("password", "")
-        if not isinstance(password, str) or not hmac.compare_digest(
-            password.encode(), debts_password.encode()
-        ):
-            rate_hit(console_login_attempts, console_login_attempts_lock, client)
-            return jsonify(error="Неверный пароль."), 401
-
-        rate_clear(console_login_attempts, console_login_attempts_lock, client)
         session["debts_owner_authenticated"] = True
         session["debts_owner_unlocked_at"] = time.time()
         return jsonify(ok=True)
@@ -84,6 +91,9 @@ def create_debts_blueprint(
         payload = request.get_json(silent=True) or {}
         name = str(payload.get("name") or "").strip()
         password = payload.get("password", "")
+        color = str(payload.get("color") or "")
+        if color not in debt_user_colors:
+            color = debt_user_colors[0]
         if not name:
             return jsonify(error="Введите имя."), 400
         if len(name) > 60:
@@ -110,6 +120,7 @@ def create_debts_blueprint(
                 "salt": salt,
                 "password_hash": password_hash,
                 "created": now,
+                "color": color,
             })
             debts_write_locked()
             snapshot = debts_snapshot_locked()
@@ -151,6 +162,9 @@ def create_debts_blueprint(
     @debts_bp.delete("/api/debts/entries/<entry_id>")
     @debts_owner_required
     def debts_entry_delete_api(entry_id):
+        err = _verify_debts_password(request.get_json(silent=True) or {})
+        if err:
+            return err
         with debts_lock:
             store = data()
             before = len(store["entries"])
@@ -178,6 +192,9 @@ def create_debts_blueprint(
     @debts_bp.delete("/api/debts/users/<user_id>")
     @debts_owner_required
     def debts_user_delete_api(user_id):
+        err = _verify_debts_password(request.get_json(silent=True) or {})
+        if err:
+            return err
         with debts_lock:
             store = data()
             before = len(store["users"])
@@ -209,6 +226,22 @@ def create_debts_blueprint(
             user["password_plain"] = password
             user["salt"] = salt
             user["password_hash"] = password_hash
+            debts_write_locked()
+            return jsonify(debts_snapshot_locked())
+
+    @debts_bp.post("/api/debts/users/<user_id>/color")
+    @debts_owner_required
+    def debts_user_color_api(user_id):
+        payload = request.get_json(silent=True) or {}
+        color = str(payload.get("color") or "")
+        if color not in debt_user_colors:
+            return jsonify(error="Неверный цвет."), 400
+        with debts_lock:
+            store = data()
+            user = next((u for u in store["users"] if u.get("id") == user_id), None)
+            if not user:
+                return jsonify(error="Пользователь не найден."), 404
+            user["color"] = color
             debts_write_locked()
             return jsonify(debts_snapshot_locked())
 

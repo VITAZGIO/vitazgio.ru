@@ -3,7 +3,7 @@
 Baseline before blueprint split:
 
 - Source: `app.py`
-- Route decorators: `127`
+- Route decorators: `128`
 - Code changes in this inventory: none
 - Исправление 2026-09-04: в первой версии описи (задача 17) забыли 4
   вебсокет-роута (`@sock.route`, не `@app.*`) — реальных роутов в коде
@@ -133,6 +133,7 @@ Guards column includes route decorators such as `login_required`, `debtor_requir
 | `/api/debts/me` | `@app.get("/api/debts/me")` | `debts_me_api` | - |
 | `/api/debts/users/<user_id>` | `@app.delete("/api/debts/users/<user_id>")` | `debts_user_delete_api` | `debts_owner_required` |
 | `/api/debts/users/<user_id>/password` | `@app.post("/api/debts/users/<user_id>/password")` | `debts_user_password_api` | `debts_owner_required` |
+| `/api/debts/users/<user_id>/color` | `@app.post("/api/debts/users/<user_id>/color")` | `debts_user_color_api` | `debts_owner_required` |
 
 ## ai/neuro/claude
 
