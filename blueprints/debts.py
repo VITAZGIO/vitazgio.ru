@@ -1,4 +1,5 @@
 import hmac
+import time
 import uuid
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -14,7 +15,6 @@ def create_debts_blueprint(
     debtor_required,
     debts_lock,
     debts_data,
-    debts_owner_unlocked,
     debts_snapshot_locked,
     debts_write_locked,
     debt_hash_password,
@@ -22,7 +22,6 @@ def create_debts_blueprint(
     debt_user_public_locked,
     debt_amount_cents,
     debt_clean_date,
-    today_iso,
     password_matches,
     device_check,
     device_cookie,
@@ -70,7 +69,7 @@ def create_debts_blueprint(
 
         rate_clear(console_login_attempts, console_login_attempts_lock, client)
         session["debts_owner_authenticated"] = True
-        session["debts_owner_day"] = today_iso()
+        session["debts_owner_unlocked_at"] = time.time()
         return jsonify(ok=True)
 
     @debts_bp.get("/api/debts")
@@ -227,15 +226,18 @@ def create_debts_blueprint(
         mode = "owner" if owner else "debtor"
         title = "Долги" if owner else "Мои долги"
         back_href = "/cabinet" if owner else "/"
-        owner_unlocked = owner and debts_owner_unlocked()
+        # Сейф, а не сессия: каждое открытие страницы владельцем — заново
+        # спрашиваем пароль, даже если недавно уже вводили его в другой
+        # вкладке (owner_unlocked() тут нарочно не смотрим — он только
+        # для API-запросов уже открытой страницы, см. debts_owner_required).
         html = template("debts.html")
         return (html.replace("**MODE**", mode)
                     .replace("**TITLE**", title)
                     .replace("**TITLE_FIRST**", title.split()[0])
                     .replace("**TITLE_REST**", " ".join(title.split()[1:]))
                     .replace("**BACK_HREF**", back_href)
-                    .replace("**UNLOCK_HIDDEN**", "hidden" if not owner or owner_unlocked else "")
-                    .replace("**OWNER_APP_HIDDEN**", "hidden" if not owner or not owner_unlocked else "")
+                    .replace("**UNLOCK_HIDDEN**", "hidden" if not owner else "")
+                    .replace("**OWNER_APP_HIDDEN**", "hidden")
                     .replace("**DEBTOR_APP_HIDDEN**", "hidden" if owner else ""))
 
     return debts_bp

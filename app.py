@@ -1145,8 +1145,22 @@ def _debts_snapshot_locked(user_id=None):
     return {"users": users, "entries": entries, "total_cents": total, "today": _today_iso()}
 
 
+# «Долги» — как сейф: страница СВЕЖИМ открытием (GET /debts) спрашивает
+# пароль всегда, не важно, разблокировали её недавно или нет (см.
+# debts_page_html в blueprints/debts.py — там owner_unlocked() не
+# вызывается вообще). А чтобы во время самой работы со страницей не
+# спрашивать пароль на каждый клик, разблокировка живёт ещё
+# DEBTS_OWNER_IDLE_SECONDS от последнего запроса (скользящее окно) — если
+# всё это время просто не трогать страницу (отошли, забыли), она сама
+# «запрётся» и следующий клик потребует пароль снова.
+DEBTS_OWNER_IDLE_SECONDS = 600
+
+
 def _debts_owner_unlocked():
-    return bool(session.get("debts_owner_authenticated") and session.get("debts_owner_day") == _today_iso())
+    return bool(
+        session.get("debts_owner_authenticated")
+        and time.time() - session.get("debts_owner_unlocked_at", 0) < DEBTS_OWNER_IDLE_SECONDS
+    )
 
 
 def debts_owner_required(view):
@@ -1160,7 +1174,8 @@ def debts_owner_required(view):
             g.new_device_cookie = fresh
             _log_login("доверенное устройство")
         if not _debts_owner_unlocked():
-            return jsonify(error="Нужен ежедневный пароль."), 403
+            return jsonify(error="Нужен пароль."), 403
+        session["debts_owner_unlocked_at"] = time.time()
         return view(*args, **kwargs)
     return wrapped
 
@@ -4244,7 +4259,6 @@ app.register_blueprint(create_debts_blueprint(
     debtor_required=debtor_required,
     debts_lock=debts_lock,
     debts_data=lambda: debts_data,
-    debts_owner_unlocked=_debts_owner_unlocked,
     debts_snapshot_locked=_debts_snapshot_locked,
     debts_write_locked=_debts_write_locked,
     debt_hash_password=_debt_hash_password,
@@ -4252,7 +4266,6 @@ app.register_blueprint(create_debts_blueprint(
     debt_user_public_locked=_debt_user_public_locked,
     debt_amount_cents=_debt_amount_cents,
     debt_clean_date=_debt_clean_date,
-    today_iso=_today_iso,
     password_matches=password_matches,
     device_check=_device_check,
     device_cookie=DEVICE_COOKIE,
