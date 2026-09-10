@@ -98,7 +98,7 @@ login_attempts_lock = threading.Lock()
 
 NETBIRD_DEVICES = [
     {"ip": "100.104.18.182", "name": "VitazNout", "rdp_enabled": True},
-    {"ip": "100.104.140.4", "name": "VitazComp", "rdp_enabled": True, "wol_mac": "d8:bb:c1:a6:d4:81"},
+    {"ip": "100.104.122.94", "name": "VitazComp", "rdp_enabled": True, "wol_mac": "d8:bb:c1:a6:d4:81"},
     {"ip": "100.104.1.172", "name": "windows10proxmox", "rdp_enabled": True},
     {"ip": "100.104.67.89", "name": "orangepizero3", "ssh_enabled": True},
     {"ip": "100.104.221.91", "name": "ubuntu-server", "ssh_enabled": True},
