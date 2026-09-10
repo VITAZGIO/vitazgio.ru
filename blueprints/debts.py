@@ -34,7 +34,7 @@ def create_debts_blueprint(
     console_login_attempts_lock,
     console_login_window_seconds,
     console_login_max_attempts,
-    console_password_today,
+    debts_password,
     log_login,
 ):
     debts_bp = Blueprint("debts", __name__)
@@ -44,6 +44,9 @@ def create_debts_blueprint(
 
     @debts_bp.post("/api/debts/unlock")
     def debts_unlock_api():
+        if not debts_password:
+            return jsonify(error="Пароль долгов не настроен на сервере."), 503
+
         if not session.get("authenticated"):
             fresh = device_check(request.cookies.get(device_cookie))
             if not fresh:
@@ -60,10 +63,10 @@ def create_debts_blueprint(
         payload = request.get_json(silent=True) or {}
         password = payload.get("password", "")
         if not isinstance(password, str) or not hmac.compare_digest(
-            password.encode(), console_password_today().encode()
+            password.encode(), debts_password.encode()
         ):
             rate_hit(console_login_attempts, console_login_attempts_lock, client)
-            return jsonify(error="Неверный ежедневный пароль."), 401
+            return jsonify(error="Неверный пароль."), 401
 
         rate_clear(console_login_attempts, console_login_attempts_lock, client)
         session["debts_owner_authenticated"] = True

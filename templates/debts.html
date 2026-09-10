@@ -13,6 +13,13 @@
     .head{display:flex;align-items:center;gap:18px;margin-bottom:28px} .back{width:44px;height:44px;border-radius:50%;border:1px solid rgba(53,224,240,.55);display:grid;place-items:center;text-decoration:none;color:var(--cyan);background:rgba(53,224,240,.08);font-size:25px}
     h1{margin:0;font-size:clamp(34px,4vw,58px);line-height:1;font-weight:900;letter-spacing:0} h1 span{color:var(--cyan);text-shadow:0 0 22px rgba(53,224,240,.35)} .tag{margin-left:auto;color:var(--green);font-weight:800;text-transform:uppercase;letter-spacing:.08em;font-size:12px}
     .unlock{max-width:520px;border:1px solid var(--line);background:rgba(12,22,40,.82);padding:26px;margin-top:58px;box-shadow:inset 3px 0 0 var(--cyan)} .unlock h2,.panel h2{margin:0 0 10px;font-size:22px} .muted{color:var(--muted)} .hidden{display:none!important}
+    .keypad{display:none}
+    @media (max-width:640px){
+      .keypad{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:4px 0}
+      .keypad button{border:1px solid #28405f;background:#071021;color:var(--text);padding:16px 0;font-size:22px;font-weight:800;cursor:pointer;border-radius:8px}
+      .keypad button:active{background:rgba(53,224,240,.18);border-color:var(--cyan)}
+      .keypad button[data-bksp]{font-size:18px;color:var(--muted)}
+    }
     .grid{display:grid;grid-template-columns:330px 1fr;gap:18px} .panel{border:1px solid var(--line);background:rgba(12,22,40,.78);padding:20px;min-width:0} .panel.accent{box-shadow:inset 3px 0 0 var(--cyan)}
     .total{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-bottom:18px} .stat{border:1px solid var(--line);background:rgba(7,14,27,.82);padding:16px} .stat b{display:block;font-size:28px;color:var(--cyan)} .stat i{font-style:normal;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.08em}
     form{display:grid;gap:10px} label{display:grid;gap:6px;color:#b8c8e8;font-weight:800;font-size:12px;text-transform:uppercase;letter-spacing:.06em} input,select{width:100%;border:1px solid #28405f;background:#071021;color:var(--text);padding:11px 12px;outline:none} input:focus,select:focus{border-color:var(--cyan);box-shadow:0 0 0 2px rgba(53,224,240,.14)} .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
@@ -29,9 +36,18 @@
     <header class="head"><a class="back" href="**BACK_HREF**" aria-label="Назад">‹</a><h1>**TITLE_FIRST** <span>**TITLE_REST**</span></h1><div class="tag">vitazgio.ru</div></header>
 
     <section class="unlock" id="unlock" **UNLOCK_HIDDEN**>
-      <h2>Ежедневный пароль</h2>
-      <p class="muted">Вход в управление долгами закрыт тем же дневным паролем, что и запоминание устройств.</p>
-      <form id="unlock-form"><input id="unlock-pass" type="password" autocomplete="off" placeholder="Пароль на сегодня"><button class="btn" type="submit">Открыть</button><div class="err" id="unlock-err"></div></form>
+      <h2>Пароль</h2>
+      <p class="muted">Вход в управление долгами закрыт отдельным паролем (цифры).</p>
+      <form id="unlock-form">
+        <input id="unlock-pass" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="off" maxlength="12" placeholder="Пароль">
+        <div class="keypad" id="keypad" aria-hidden="true">
+          <button type="button" data-d="1">1</button><button type="button" data-d="2">2</button><button type="button" data-d="3">3</button>
+          <button type="button" data-d="4">4</button><button type="button" data-d="5">5</button><button type="button" data-d="6">6</button>
+          <button type="button" data-d="7">7</button><button type="button" data-d="8">8</button><button type="button" data-d="9">9</button>
+          <span></span><button type="button" data-d="0">0</button><button type="button" data-bksp aria-label="Стереть">⌫</button>
+        </div>
+        <button class="btn" type="submit">Открыть</button><div class="err" id="unlock-err"></div>
+      </form>
     </section>
 
     <section id="owner-app" class="grid **OWNER_APP_HIDDEN**">
@@ -147,6 +163,28 @@
     }
 
     if (mode === "owner") {
+      const passInput = $("unlock-pass");
+      const isPhone = () => window.matchMedia("(max-width:640px)").matches;
+      // На телефоне пароль вводится только своей клавиатурой из цифр —
+      // родная клавиатура не нужна, readonly её не даёт вызвать.
+      const syncReadonly = () => { if (passInput) passInput.readOnly = isPhone(); };
+      syncReadonly();
+      window.addEventListener("resize", syncReadonly);
+      passInput?.addEventListener("input", () => {
+        passInput.value = passInput.value.replace(/\D/g, "");
+      });
+      $("keypad")?.addEventListener("click", e => {
+        const digit = e.target.closest("button[data-d]");
+        if (digit) {
+          if (passInput.value.length < 12) passInput.value += digit.dataset.d;
+        } else if (e.target.closest("button[data-bksp]")) {
+          passInput.value = passInput.value.slice(0, -1);
+        } else {
+          return;
+        }
+        passInput.focus();
+      });
+
       $("unlock-form")?.addEventListener("submit", async e => {
         e.preventDefault();
         $("unlock-err").textContent = "";

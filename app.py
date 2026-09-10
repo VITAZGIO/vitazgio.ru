@@ -116,6 +116,9 @@ netbird_status_lock = threading.Lock()
 ssh_enabled_ips = {device["ip"] for device in NETBIRD_DEVICES if device.get("ssh_enabled")}
 
 SSH_GATE_PASSWORD_PREFIX = os.environ.get("SSH_GATE_PASSWORD_PREFIX")
+# Свой пароль вкладки «Долги», не связан с ежедневным паролем консоли —
+# задаётся один раз в .env и не меняется день ото дня.
+DEBTS_PASSWORD = os.environ.get("DEBTS_PASSWORD")
 
 # Дома guacd рядом (127.0.0.1). Если сайт крутится на VPS — сюда
 # подставляется Netbird-адрес домашнего сервера.
@@ -4261,7 +4264,7 @@ app.register_blueprint(create_debts_blueprint(
     console_login_attempts_lock=console_login_attempts_lock,
     console_login_window_seconds=CONSOLE_LOGIN_WINDOW_SECONDS,
     console_login_max_attempts=CONSOLE_LOGIN_MAX_ATTEMPTS,
-    console_password_today=console_password_today,
+    debts_password=DEBTS_PASSWORD,
     log_login=_log_login,
 ))
 
