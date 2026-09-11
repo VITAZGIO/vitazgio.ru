@@ -678,13 +678,17 @@ def create_remote_blueprint(
             f'<li class="device" data-ip="{device["ip"]}">'
             f'<button class="copy-ip" type="button" data-ip="{device["ip"]}">{device["ip"]}</button>'
             f'<span class="device-name">{_NETBIRD_ICONS.get(_device_kind(device), "")}'
-            f'<span class="device-name-text">{device["name"]}</span></span>'
+            f'<span class="device-name-text" title="{device["name"]}">{device["name"]}</span></span>'
             f'<span class="device-lastseen" data-lastseen>—</span>'
+            # Молния (WOL) — не своя колонка, а довесок к пингу: у большинства
+            # устройств её нет, и отдельный столбец стоял бы пустым зазором.
+            f'<span class="device-ping">'
             f'<span class="device-status" data-status>проверка…</span>'
             + (
                 f'<button class="wol-btn" type="button" data-mac="{device["wol_mac"]}" title="Wake-on-LAN">⚡</button>'
-                if device.get("wol_mac") else '<span class="wol-empty"></span>'
+                if device.get("wol_mac") else ''
             )
+            + '</span>'
             + (
                 f'<button class="connect-btn" type="button" data-ip="{device["ip"]}" data-name="{device["name"]}" data-type="ssh">SSH</button>'
                 if device.get("ssh_enabled")
@@ -694,7 +698,6 @@ def create_remote_blueprint(
                 if device.get("vnc_enabled")
                 else '<span class="connect-btn-empty"></span>'
             )
-            + '<span class="copy-status">Скопировано</span>'
             # SMB пока никуда не подключён — кнопка стоит местом на будущее,
             # заведомо выключена, без data-type и обработчика клика.
             + '<button class="smb-btn" type="button" disabled title="SMB — пока недоступно">SMB</button>'
