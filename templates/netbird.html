@@ -12,7 +12,7 @@
         body { margin: 0; min-height: 100svh; color: #e9fbff; font-family: "Cascadia Code", Consolas, monospace; background: radial-gradient(circle at top left, #192a44, #0d1321 55%); }
         [hidden] { display: none !important; }
         a { color: inherit; }
-        .wrap { max-width: 1100px; margin: 0 auto; padding: clamp(24px, 4vw, 54px); }
+        .wrap { max-width: 1320px; margin: 0 auto; padding: clamp(24px, 4vw, 54px); }
         .head { display: flex; align-items: center; gap: 18px; margin-bottom: 26px; }
         .back { width: 44px; height: 44px; flex: none; display: grid; place-items: center;
           color: #ff9a5c; text-decoration: none; border: 1px solid rgba(255,120,47,.35); border-radius: 50%;
@@ -32,14 +32,14 @@
           .wrap { padding-inline: 16px; }
         }
         .device-list { container-type: inline-size; margin: 0; padding: 8px 18px 18px; list-style: none; border-top: 1px solid rgba(255,255,255,.07); }
-        .device { min-height: 48px; display: grid; grid-template-columns: 150px 1fr 110px 70px 36px 116px 82px; align-items: center; gap: 12px; border-bottom: 1px solid rgba(255,255,255,.06); }
+        .device { min-height: 48px; display: grid; grid-template-columns: 150px 1fr 140px 70px 36px 116px 82px 116px; align-items: center; gap: 12px; border-bottom: 1px solid rgba(255,255,255,.06); }
         .device:last-child { border-bottom: 0; }
         .copy-ip { padding: 7px 8px; color: #69e8ff; text-align: left; border: 0; background: transparent; }
         .copy-ip:hover, .copy-ip:focus-visible { color: #fff; border: 0; outline: 1px solid rgba(45,226,255,.28); background: rgba(45,226,255,.08); }
         .device-name { min-width: 0; display: flex; align-items: center; gap: 8px; color: #c4cad5; font-size: .84rem; }
         .device-name-text { overflow-wrap: break-word; }
         .dev-ic { width: 15px; height: 15px; flex: none; opacity: .82; }
-        .device-lastseen { color: #6b7385; font-size: .76rem; white-space: nowrap; }
+        .device-lastseen { color: #6b7385; font-size: .76rem; text-align: center; white-space: nowrap; }
         .device-status { color: #6b7385; font-size: .76rem; text-align: right; white-space: nowrap; }
         .device-status::before { content: "● "; }
         .device-status.online { color: #63f5ad; }
@@ -48,6 +48,9 @@
         .connect-btn:hover, .connect-btn:focus-visible { color: #fff; background: rgba(255,120,47,.22); outline: none; }
         .connect-btn.btn-offline { color: #4a5060; border-color: rgba(100,100,110,.2); background: rgba(60,65,75,.06); cursor: not-allowed; pointer-events: none; }
         .connect-btn-empty { display: block; }
+        /* SMB пока не подключён никуда — кнопка стоит местом на будущее,
+           поэтому всегда в приглушённом виде «offline», без обработчика. */
+        .smb-btn { padding: 6px 10px; color: #4a5060; font: 700 .7rem "Cascadia Code", Consolas, monospace; letter-spacing: .04em; text-transform: uppercase; border: 1px solid rgba(100,100,110,.2); background: rgba(60,65,75,.06); cursor: not-allowed; }
         .wol-btn { padding: 5px 7px; color: #fbbf24; font-size: .9rem; border: 1px solid rgba(251,191,36,.3); background: rgba(251,191,36,.07); cursor: pointer; transition: all .2s; }
         .wol-btn:hover { background: rgba(251,191,36,.18); border-color: #fbbf24; }
         .wol-btn.wol-online { color: #ff6b81; border-color: rgba(255,107,129,.3); background: rgba(255,107,129,.07); }
@@ -70,9 +73,10 @@
           .device { grid-template-columns: 1fr auto; gap: 4px 10px; padding: 8px 0; }
           .device-name { grid-column: 1; grid-row: 2; padding-left: 8px; }
           .device-status { grid-column: 2; grid-row: 1; }
-          .device-lastseen { grid-column: 1; grid-row: 3; padding-left: 8px; }
+          .device-lastseen { grid-column: 1; grid-row: 3; padding-left: 8px; text-align: left; }
           .connect-btn, .connect-btn-empty { grid-column: 1; grid-row: 4; justify-self: start; margin-left: 8px; }
           .wol-btn, .wol-empty { grid-column: 2; grid-row: 4; justify-self: end; }
+          .smb-btn { grid-column: 1; grid-row: 5; justify-self: start; margin-left: 8px; }
           .copy-status { grid-column: 2; grid-row: 2; text-align: right; }
         }
 

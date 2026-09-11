@@ -695,6 +695,9 @@ def create_remote_blueprint(
                 else '<span class="connect-btn-empty"></span>'
             )
             + '<span class="copy-status">Скопировано</span>'
+            # SMB пока никуда не подключён — кнопка стоит местом на будущее,
+            # заведомо выключена, без data-type и обработчика клика.
+            + '<button class="smb-btn" type="button" disabled title="SMB — пока недоступно">SMB</button>'
             + "</li>"
             for device in netbird_devices
         )
