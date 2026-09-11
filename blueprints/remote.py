@@ -74,6 +74,11 @@ def create_remote_blueprint(
     template,
     icon_links,
     login_required,
+    notifications_lock,
+    notifications_snapshot_locked,
+    notification_mark_read,
+    notifications_mark_all_read,
+    notifications_clear,
     netbird_devices,
     netbird_status,
     netbird_status_lock,
@@ -714,6 +719,35 @@ def create_remote_blueprint(
     @login_required
     def cabinet():
         return template("cabinet.html").replace("__ICONLINKS__", icon_links)
+
+    @remote_bp.get("/notifications")
+    @login_required
+    def notifications_page():
+        return template("notifications.html").replace("__ICONLINKS__", icon_links)
+
+    @remote_bp.get("/api/notifications")
+    @login_required
+    def notifications_api():
+        with notifications_lock:
+            return jsonify(notifications_snapshot_locked())
+
+    @remote_bp.post("/api/notifications/<notification_id>/read")
+    @login_required
+    def notification_read_api(notification_id):
+        snapshot = notification_mark_read(notification_id)
+        if snapshot is None:
+            return jsonify(error="Уведомление не найдено."), 404
+        return jsonify(snapshot)
+
+    @remote_bp.post("/api/notifications/read-all")
+    @login_required
+    def notifications_read_all_api():
+        return jsonify(notifications_mark_all_read())
+
+    @remote_bp.delete("/api/notifications")
+    @login_required
+    def notifications_clear_api():
+        return jsonify(notifications_clear())
 
     @remote_bp.get("/netbird")
     @login_required

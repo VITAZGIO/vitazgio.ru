@@ -1289,6 +1289,94 @@ def debtor_required(view):
 _debts_load()
 
 
+# ---- Уведомления -----------------------------------------------------------
+# Это общий журнал для кабинета: сейчас в него пишут заявки на взносы, позже
+# тем же помощником сможет пользоваться Telegram-бот.
+NOTIFICATIONS_PATH = os.path.join(DATA_DIR, "notifications.json")
+NOTIFICATIONS_LIMIT = 500
+notifications_lock = threading.Lock()
+notifications_data = []
+
+
+def _notifications_load():
+    try:
+        with open(NOTIFICATIONS_PATH, encoding="utf-8") as fh:
+            saved = json.load(fh)
+    except (OSError, ValueError):
+        return
+    if not isinstance(saved, list):
+        return
+    notifications_data.extend(row for row in saved if isinstance(row, dict))
+
+
+def _notifications_write_locked():
+    os.makedirs(DATA_DIR, exist_ok=True)
+    tmp = NOTIFICATIONS_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(notifications_data, fh, ensure_ascii=False, indent=2)
+    os.replace(tmp, NOTIFICATIONS_PATH)
+
+
+def _notifications_snapshot_locked():
+    rows = [dict(row) for row in notifications_data]
+    rows.sort(key=lambda row: str(row.get("created") or ""), reverse=True)
+    return {
+        "items": rows,
+        "unread_count": sum(1 for row in rows if not row.get("read")),
+    }
+
+
+def _notification_add(title, text, href="/cabinet", kind="info"):
+    now = datetime.now(ZoneInfo("Europe/Moscow")).isoformat(timespec="seconds")
+    with notifications_lock:
+        notifications_data.append({
+            "id": uuid.uuid4().hex,
+            "title": str(title).strip()[:120],
+            "text": str(text).strip()[:500],
+            "href": str(href).strip()[:300] or "/cabinet",
+            "kind": str(kind).strip()[:40] or "info",
+            "read": False,
+            "created": now,
+        })
+        if len(notifications_data) > NOTIFICATIONS_LIMIT:
+            del notifications_data[:-NOTIFICATIONS_LIMIT]
+        _notifications_write_locked()
+
+
+def _notification_mark_read(notification_id):
+    with notifications_lock:
+        notification = next((row for row in notifications_data if row.get("id") == notification_id), None)
+        if not notification:
+            return None
+        if not notification.get("read"):
+            notification["read"] = True
+            _notifications_write_locked()
+        return _notifications_snapshot_locked()
+
+
+def _notifications_mark_all_read():
+    with notifications_lock:
+        changed = False
+        for row in notifications_data:
+            if not row.get("read"):
+                row["read"] = True
+                changed = True
+        if changed:
+            _notifications_write_locked()
+        return _notifications_snapshot_locked()
+
+
+def _notifications_clear():
+    with notifications_lock:
+        if notifications_data:
+            notifications_data.clear()
+            _notifications_write_locked()
+        return _notifications_snapshot_locked()
+
+
+_notifications_load()
+
+
 def ping_once(ip):
     if platform.system().lower() == "windows":
         command = ["ping", "-n", "1", "-w", str(PING_TIMEOUT_SECONDS * 1000), ip]
@@ -4304,6 +4392,7 @@ app.register_blueprint(create_debts_blueprint(
     debts_password=DEBTS_PASSWORD,
     debt_user_colors=DEBT_USER_COLORS,
     log_login=_log_login,
+    notification_add=_notification_add,
 ))
 
 app.register_blueprint(create_devices_blueprint(
@@ -4573,6 +4662,11 @@ app.register_blueprint(create_remote_blueprint(
     template=_template,
     icon_links=ICON_LINKS,
     login_required=login_required,
+    notifications_lock=notifications_lock,
+    notifications_snapshot_locked=_notifications_snapshot_locked,
+    notification_mark_read=_notification_mark_read,
+    notifications_mark_all_read=_notifications_mark_all_read,
+    notifications_clear=_notifications_clear,
     netbird_devices=NETBIRD_DEVICES,
     sftp_enabled_ips=sftp_enabled_ips,
     netbird_status=netbird_status,

@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Уведомления · vitazgio.ru</title>
+  __ICONLINKS__
+  <style>
+    :root{--bg:#0d1321;--panel:#101b2d;--line:#243a5c;--text:#e9fbff;--muted:#8190a8;--cyan:#2de2ff;--yellow:#f5c344;--pink:#ff3fa4}
+    *{box-sizing:border-box}body{margin:0;min-height:100svh;background:radial-gradient(circle at top left,#192a44,#0d1321 56%);color:var(--text);font:15px/1.45 "Cascadia Code",Consolas,monospace}.wrap{width:min(100% - 40px,960px);margin:0 auto;padding:clamp(24px,5vw,56px) 0 64px}.head{display:flex;align-items:center;gap:18px;margin-bottom:30px}.back{width:44px;height:44px;display:grid;place-items:center;flex:none;color:var(--cyan);border:1px solid rgba(45,226,255,.3);background:rgba(45,226,255,.07);text-decoration:none;border-radius:50%;transition:.18s}.back:hover{color:#fff;border-color:var(--cyan);background:rgba(45,226,255,.18)}.back svg{width:20px;height:20px}h1{margin:0;font-size:clamp(1.7rem,4vw,2.6rem);line-height:1;font-weight:800;letter-spacing:0}h1 span{color:var(--cyan);text-shadow:0 0 22px rgba(45,226,255,.45)}.intro{display:flex;align-items:flex-start;gap:14px;border:1px solid var(--line);background:rgba(16,27,45,.84);padding:20px 22px;margin-bottom:14px;box-shadow:inset 3px 0 0 var(--cyan)}.bell{width:34px;height:34px;flex:none;color:var(--cyan)}.bell path{fill:none;stroke:currentColor;stroke-width:58;stroke-linecap:round;stroke-linejoin:round}.intro b{display:block;font-size:1rem}.intro p{margin:3px 0 0;color:var(--muted);font-size:.84rem}.toolbar{display:flex;justify-content:space-between;gap:12px;margin:0 0 14px}.count{padding:10px 0;color:var(--muted);font-size:.8rem}.actions{display:flex;gap:8px}.btn{border:1px solid rgba(45,226,255,.45);background:rgba(45,226,255,.08);color:var(--text);padding:9px 12px;font:700 .76rem "Cascadia Code",Consolas,monospace;cursor:pointer}.btn:hover{border-color:var(--cyan);background:rgba(45,226,255,.16)}.btn.danger{border-color:rgba(255,63,164,.48);background:rgba(255,63,164,.08)}.btn.danger:hover{border-color:var(--pink);background:rgba(255,63,164,.15)}.btn:disabled{opacity:.4;cursor:default}.notices{display:grid;gap:9px}.notice{width:100%;display:grid;grid-template-columns:auto minmax(0,1fr);gap:13px;text-align:left;border:1px solid var(--line);background:rgba(8,15,28,.72);color:var(--text);padding:15px 17px;cursor:pointer;transition:border-color .16s,background .16s}.notice:hover{border-color:rgba(45,226,255,.58);background:rgba(14,31,52,.86)}.notice.unread{border-left:3px solid var(--cyan);background:rgba(16,37,60,.88)}.notice.read{opacity:.62}.notice-mark{width:9px;height:9px;margin-top:5px;border-radius:50%;background:transparent;border:1px solid #526b8f}.notice.unread .notice-mark{background:var(--yellow);border-color:var(--yellow);box-shadow:0 0 10px rgba(245,195,68,.55)}.notice-title,.notice-text,.notice-time{display:block}.notice-title{font-weight:800}.notice-text{margin-top:4px;color:#bdcee5;font-size:.88rem}.notice-time{margin-top:8px;color:var(--muted);font-size:.7rem}.empty{padding:50px 20px;text-align:center;border:1px dashed #365176;color:var(--muted)}.error{min-height:20px;margin-top:10px;color:#ff8dbf;font-weight:700;font-size:.82rem}@media(max-width:620px){.wrap{width:min(100% - 24px,960px);padding-top:18px}.head{gap:12px;margin-bottom:20px}.head h1{font-size:1.7rem}.intro{padding:16px}.toolbar{align-items:flex-start;flex-direction:column}.actions{width:100%}.actions .btn{flex:1}.notice{padding:14px}.notice-text{font-size:.82rem}}
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <header class="head">
+      <a class="back" href="/cabinet" title="В кабинет" aria-label="В кабинет"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M19 12H5m0 0 6-6m-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
+      <h1>Уведом<span>ления</span></h1>
+    </header>
+
+    <section class="intro">
+      <svg class="bell" viewBox="0 0 1800 1800" aria-hidden="true">
+        <path d="M942.432,362.391c28.336,0,78.253,16.538,120.884,52.848c33.173,28.25,72.71,77.44,72.71,151.333c0,17.307,14.031,31.336,31.336,31.336c17.312,0,31.336-14.029,31.336-31.336c0-175.203-166.831-266.854-256.266-266.854c-17.304,0-31.336,14.028-31.336,31.336C911.096,348.362,925.128,362.391,942.432,362.391z"/>
+        <path d="M1555.292,1240.33c-11.603-18.885-24.035-39.138-36.538-60.862c-1.408-5.24-4.108-9.945-7.79-13.722c-49.513-88.479-97.741-200.637-97.741-344.862c0-339.747-187.438-622.592-438.45-681.168c7.458-12.796,11.813-27.633,11.813-43.511c0-47.816-38.768-86.576-86.583-86.576c-47.813,0-86.581,38.759-86.581,86.576c0,15.878,4.35,30.715,11.813,43.511c-251.011,58.576-438.455,341.421-438.455,681.168c0,188.204-82.117,321.858-142.074,419.446c-47.275,76.945-81.431,132.54-53.413,182.688c34.706,62.133,150.24,84.154,527.356,89.08c-11.577,25.247-18.085,53.287-18.085,82.834c0,109.974,89.466,199.439,199.438,199.439c109.971,0,199.432-89.466,199.432-199.439c0-29.547-6.505-57.587-18.09-82.834c377.126-4.926,492.65-26.947,527.361-89.08C1636.728,1372.87,1602.566,1317.275,1555.292,1240.33z M900.002,1731.698c-75.415,0-136.767-61.352-136.767-136.767c0-30.793,10.234-59.236,27.477-82.121c34.47,0.25,70.82,0.385,109.26,0.424c0.021,0,0.039,0,0.061,0c38.438-0.039,74.783-0.174,109.26-0.424c17.231,22.885,27.471,51.328,27.471,82.121C1036.763,1670.347,975.412,1731.698,900.002,1731.698z M1553.997,1392.455c-5.909,10.575-33.067,30.156-148.601,42.466c-80.962,8.635-194.844,13.343-368.712,14.981c-41.952,0.395-87.355,0.612-136.683,0.66c-49.33-0.048-94.734-0.266-136.688-0.66c-173.864-1.639-287.75-6.347-368.713-14.981c-115.524-12.31-142.686-31.891-148.596-42.466c-10.098-18.081,20.114-67.255,52.102-119.314c10.208-16.613,21.303-34.704,32.686-54.227h131.308c17.307,0,31.335-14.029,31.335-31.336c0-17.309-14.029-31.337-31.335-31.337H365.03c44.478-87.962,84.421-199.001,84.421-335.357c0-165.03,47.721-321.097,134.371-439.463c84.238-115.071,196.471-182.333,316.179-189.546c119.712,7.213,231.939,74.476,316.182,189.546c86.646,118.366,134.367,274.434,134.367,439.463c0,136.356,39.939,247.396,84.424,335.357H598.516c-17.308,0-31.336,14.028-31.336,31.337c0,17.307,14.028,31.336,31.336,31.336h870.699c11.375,19.522,22.479,37.609,32.683,54.221C1533.88,1325.2,1564.098,1374.374,1553.997,1392.455z"/>
+      </svg>
+      <div><b>События кабинета</b><p>Заявки на пополнение и будущие сообщения от подключённых сервисов.</p></div>
+    </section>
+
+    <div class="toolbar">
+      <div class="count" id="count">Загрузка…</div>
+      <div class="actions"><button class="btn" id="read-all" type="button">Прочитать всё</button><button class="btn danger" id="clear" type="button">Очистить</button></div>
+    </div>
+    <section class="notices" id="notices" aria-live="polite"></section>
+    <div class="error" id="error" role="alert"></div>
+  </main>
+  <script>
+  (() => {
+    "use strict";
+    const $ = id => document.getElementById(id);
+    const esc = value => String(value ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+    const when = value => {
+      const date = new Date(value);
+      return Number.isNaN(date.valueOf()) ? "" : date.toLocaleString("ru-RU", {timeZone:"Europe/Moscow", dateStyle:"medium", timeStyle:"short"});
+    };
+
+    async function api(path, options={}) {
+      const response = await fetch(path, {credentials:"same-origin", headers:{"Content-Type":"application/json"}, ...options});
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || "Ошибка сервера.");
+      return result;
+    }
+
+    function render(data) {
+      const items = data.items || [];
+      const unread = data.unread_count || 0;
+      $("count").textContent = unread ? `Непрочитанных: ${unread}` : items.length ? "Все уведомления прочитаны" : "Уведомлений пока нет";
+      $("read-all").disabled = unread === 0;
+      $("clear").disabled = items.length === 0;
+      $("notices").innerHTML = items.length ? items.map(item => `<button class="notice ${item.read ? "read" : "unread"}" type="button" data-notification="${esc(item.id)}"><span class="notice-mark" aria-hidden="true"></span><span><span class="notice-title">${esc(item.title)}</span><span class="notice-text">${esc(item.text)}</span><span class="notice-time">${esc(when(item.created))}</span></span></button>`).join("") : `<div class="empty">Новых событий нет.</div>`;
+    }
+
+    async function refresh() {
+      $("error").textContent = "";
+      render(await api("/api/notifications"));
+    }
+
+    $("notices").addEventListener("click", async event => {
+      const notice = event.target.closest("[data-notification]");
+      if (!notice || notice.classList.contains("read")) return;
+      try { render(await api(`/api/notifications/${encodeURIComponent(notice.dataset.notification)}/read`, {method:"POST"})); }
+      catch (error) { $("error").textContent = error.message; }
+    });
+    $("read-all").addEventListener("click", async () => {
+      try { render(await api("/api/notifications/read-all", {method:"POST"})); }
+      catch (error) { $("error").textContent = error.message; }
+    });
+    $("clear").addEventListener("click", async () => {
+      try { render(await api("/api/notifications", {method:"DELETE"})); }
+      catch (error) { $("error").textContent = error.message; }
+    });
+    refresh().catch(error => { $("count").textContent = "Не удалось загрузить"; $("error").textContent = error.message; });
+  })();
+  </script>
+</body>
+</html>

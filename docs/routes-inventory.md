@@ -64,6 +64,11 @@ Guards column includes route decorators such as `login_required`, `debtor_requir
 | URL | Decorator | Function | Guards |
 | --- | --- | --- | --- |
 | `/cabinet` | `@app.get("/cabinet")` | `cabinet` | `login_required` |
+| `/notifications` | `@app.get("/notifications")` | `notifications_page` | `login_required` |
+| `/api/notifications` | `@app.get("/api/notifications")` | `notifications_api` | `login_required` |
+| `/api/notifications/<notification_id>/read` | `@app.post("/api/notifications/<notification_id>/read")` | `notification_read_api` | `login_required` |
+| `/api/notifications/read-all` | `@app.post("/api/notifications/read-all")` | `notifications_read_all_api` | `login_required` |
+| `/api/notifications` | `@app.delete("/api/notifications")` | `notifications_clear_api` | `login_required` |
 | `/netbird` | `@app.get("/netbird")` | `netbird_page` | `login_required` |
 | `/api/metrics` | `@app.get("/api/metrics")` | `metrics_api` | `login_required` |
 | `/api/uptime` | `@app.get("/api/uptime")` | `uptime_api` | `login_required` |

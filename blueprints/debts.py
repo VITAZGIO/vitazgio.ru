@@ -36,6 +36,7 @@ def create_debts_blueprint(
     debts_password,
     debt_user_colors,
     log_login,
+    notification_add,
 ):
     debts_bp = Blueprint("debts", __name__)
     payment_banks = ("ОЗОН", "Т-Банк")
@@ -179,7 +180,8 @@ def create_debts_blueprint(
         with debts_lock:
             store = data()
             store.setdefault("payment_requests", [])
-            if not any(u.get("id") == user_id for u in store["users"]):
+            user = next((u for u in store["users"] if u.get("id") == user_id), None)
+            if not user:
                 session.pop("debtor_id", None)
                 return jsonify(error="Пользователь не найден."), 404
             store["payment_requests"].append({
@@ -191,9 +193,15 @@ def create_debts_blueprint(
                 "status": "pending",
                 "created": now,
             })
+            amount = f"{amount_cents / 100:.2f}".rstrip("0").rstrip(".").replace(".", ",")
+            notification_add(
+                "Заявка на пополнение",
+                f"{user.get('name') or 'Должник'}: {amount} ₽ · {bank}",
+                href="/debts",
+                kind="payment-request",
+            )
             debts_write_locked()
             snapshot = debts_snapshot_locked(user_id)
-            user = next(u for u in store["users"] if u.get("id") == user_id)
             snapshot["me"] = debt_user_public_locked(user)
             return jsonify(snapshot)
 

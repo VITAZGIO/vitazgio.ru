@@ -10,6 +10,8 @@ DEBTOR_PASSWORD = "debtor-pass-123"
 @pytest.fixture(autouse=True)
 def reset_debts(app_module):
     salt, password_hash = app_module._debt_hash_password(DEBTOR_PASSWORD)
+    with app_module.notifications_lock:
+        app_module.notifications_data.clear()
     with app_module.debts_lock:
         app_module.debts_data.clear()
         app_module.debts_data.update({
@@ -66,6 +68,11 @@ def test_debtor_payment_request_keeps_actual_debt_pending(app_module):
     assert body["payment_requests"][0]["bank"] == "ОЗОН"
     assert body["payment_requests"][0]["status"] == "pending"
     assert body["entries"][0]["kind"] == "debt"
+    with app_module.notifications_lock:
+        notifications = app_module._notifications_snapshot_locked()
+    assert notifications["unread_count"] == 1
+    assert notifications["items"][0]["title"] == "Заявка на пополнение"
+    assert "Иван" in notifications["items"][0]["text"]
 
 
 def test_owner_approves_payment_request_into_return(app_module, auth_client):
