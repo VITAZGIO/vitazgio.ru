@@ -10,6 +10,8 @@ mesh-сети, ни второго набора секретов — тольк�
 дольше SFTP_IDLE_SECONDS закрывается сам.
 """
 
+import mimetypes
+import os
 import posixpath
 import re
 import secrets
@@ -17,6 +19,7 @@ import stat as statmod
 import threading
 import time
 import urllib.parse
+import uuid
 import zipfile
 from datetime import datetime
 
@@ -49,6 +52,13 @@ def create_files_blueprint(
     login_required,
     netbird_devices,
     sftp_enabled_ips,
+    drop_lock,
+    drop_items,
+    drop_path,
+    drop_write_index,
+    drop_used,
+    drop_quota,
+    drop_download_id,
 ):
     files_bp = Blueprint("files", __name__)
 
@@ -229,6 +239,109 @@ def create_files_blueprint(
             self._parts.clear()
             self._held = 0
             return out
+
+    # ---- Кнопка VG: перенос файла/папки на сайт, в личный дроп ---------------
+    # Идёт напрямую с машины в дроп, минуя браузер — тем же соединением SFTP,
+    # что и весь остальной /files. По умолчанию всё падает в особую папку
+    # Download (см. DROP_DOWNLOAD_ID в app.py) — ровно так же, как «Поделиться»
+    # с телефона: выбирать папку тут не из чего, спрашивать некого.
+
+    def _to_drop_file(sftp, remote_path, parent_id):
+        name = (posixpath.basename(remote_path) or "файл")[:120]
+        try:
+            expected_size = sftp.stat(remote_path).st_size or 0
+        except Exception:
+            expected_size = 0
+        with drop_lock:
+            if drop_used() + expected_size > drop_quota:
+                raise OSError("Нет места: квота дропа исчерпана.")
+
+        item_id = str(uuid.uuid4())
+        content_type = mimetypes.guess_type(name)[0] or "application/octet-stream"
+        written = 0
+        try:
+            with sftp.open(remote_path, "rb") as src:
+                src.prefetch()
+                with open(drop_path(item_id), "wb") as dst:
+                    while True:
+                        chunk = src.read(SFTP_CHUNK)
+                        if not chunk:
+                            break
+                        dst.write(chunk)
+                        written += len(chunk)
+        except Exception:
+            try:
+                os.remove(drop_path(item_id))
+            except OSError:
+                pass
+            raise
+
+        with drop_lock:
+            # Заявленный размер мог соврать (или файл на той стороне изменился
+            # за время передачи) — перепроверяем по факту записанного, прежде
+            # чем регистрировать в дропе.
+            if drop_used() + written > drop_quota:
+                try:
+                    os.remove(drop_path(item_id))
+                except OSError:
+                    pass
+                raise OSError("Нет места: квота дропа исчерпана.")
+            drop_items[item_id] = {
+                "kind": "file", "name": name, "parent": parent_id,
+                "content_type": content_type, "size": written,
+                "created": time.time(), "share": None,
+            }
+            drop_write_index()
+        return item_id
+
+    def _to_drop_folder(sftp, remote_path, parent_id, budget):
+        name = (posixpath.basename(remote_path.rstrip("/")) or "папка")[:60]
+        folder_id = str(uuid.uuid4())
+        with drop_lock:
+            drop_items[folder_id] = {
+                "kind": "folder", "name": name, "parent": parent_id, "icon": "folder",
+                "size": 0, "created": time.time(), "share": None,
+            }
+            drop_write_index()
+        for attr in sftp.listdir_attr(remote_path):
+            if budget[0] <= 0:
+                raise OSError("Слишком много файлов — переносите по частям.")
+            budget[0] -= 1
+            child = posixpath.join(remote_path, attr.filename)
+            mode = attr.st_mode or 0
+            is_dir = statmod.S_ISDIR(mode)
+            if statmod.S_ISLNK(mode):
+                try:
+                    is_dir = statmod.S_ISDIR(sftp.stat(child).st_mode or 0)
+                except Exception:
+                    is_dir = False
+            if is_dir:
+                _to_drop_folder(sftp, child, folder_id, budget)
+            else:
+                _to_drop_file(sftp, child, folder_id)
+        return folder_id
+
+    @files_bp.post("/api/files/to-drop")
+    @login_required
+    def files_to_drop():
+        entry = _session()
+        if not entry:
+            return jsonify(error="Нет соединения.", reconnect=True), 409
+        payload = request.get_json(silent=True) or {}
+        path = _clean(payload.get("path", ""))
+        if not path:
+            return jsonify(error="Плохой путь."), 400
+
+        sftp = entry["sftp"]
+        try:
+            is_dir = statmod.S_ISDIR(sftp.stat(path).st_mode or 0)
+            if is_dir:
+                new_id = _to_drop_folder(sftp, path, drop_download_id, [SFTP_RECURSIVE_MAX])
+            else:
+                new_id = _to_drop_file(sftp, path, drop_download_id)
+        except Exception as e:
+            return jsonify(error=_error_text(e)), 400
+        return jsonify(ok=True, id=new_id, kind="folder" if is_dir else "file")
 
     def _rm_tree(sftp, path, budget):
         """Рекурсивное удаление с потолком: без него кривой путь мог бы

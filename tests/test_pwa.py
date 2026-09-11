@@ -37,3 +37,19 @@ def test_manifest_and_sw_are_public(client):
     """Оба должны отдаваться гостю: браузер просит их без куки сессии."""
     assert client.get("/manifest.webmanifest").status_code == 200
     assert client.get("/sw.js").status_code == 200
+
+
+def test_share_target_fallback_lands_in_download_folder(auth_client):
+    """Резервный (без сервис-воркера) путь приёма «Поделиться» — тоже в
+    Download по умолчанию, тем же местом, что и обычный JS-путь."""
+    from io import BytesIO
+
+    resp = auth_client.post("/share-target", data={
+        "files": (BytesIO(b"hello from android"), "снимок.jpg"),
+    }, content_type="multipart/form-data")
+    assert resp.status_code == 302
+    assert "saved=1" in resp.headers["Location"]
+
+    rows = {row["name"]: row for row in auth_client.get("/api/drop/list?parent=download").get_json()["items"]}
+    assert "снимок.jpg" in rows
+    assert rows["снимок.jpg"]["size"] == len(b"hello from android")

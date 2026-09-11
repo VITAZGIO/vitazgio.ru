@@ -244,7 +244,7 @@
           title: (opts && opts.title) || "Подтверди",
           text,
           okLabel: (opts && opts.okLabel) || "Удалить",
-          okKind: "danger",
+          okKind: (opts && opts.okKind) || "danger",
         });
         const uiPrompt = (title, value) => uiModal({
           title, fields: [{ value: value || "" }], okLabel: "ОК",
@@ -336,6 +336,9 @@
         const ICON_ZIP = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8"/><path d="M1 3h22v5H1z"/><path d="M10 12h4"/></svg>';
         const ICON_EDIT = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>';
         const ICON_DEL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg>';
+        // Тот же знак, что стоит логотипом сайта (см. FOLDER_ICONS.vitaz в
+        // drop.html) — «отправить на сайт» переносит файл/папку прямо в дроп.
+        const ICON_VG = '<svg viewBox="0 0 32 32" fill="currentColor"><path d="M1.60 4.04 7.90 24.70 9.88 18.21 5.56 4.04Z M8.92 27.96 11.77 27.96 12.92 24.14 17.89 7.86 19.04 4.04 15.08 4.04 10.34 19.59 8.32 26.08Z M23.13 27.96 25.71 19.54 21.70 19.54 20.28 24.14 13.75 24.14 12.60 27.96Z M27.09 14.90 19.73 14.90 18.53 18.71 21.93 18.71 25.94 18.71Z M18.76 7.86 29.25 7.86 30.40 4.04 19.91 4.04Z"/></svg>';
 
         const human = (bytes) => {
           if (bytes < 1024) return bytes + " Б";
@@ -423,6 +426,7 @@
             };
             if (!item.dir) tool(ICON_DOWN, "Скачать", "", () => download(path));
             else tool(ICON_ZIP, "Скачать папку архивом", "", () => downloadZip(path));
+            tool(ICON_VG, "Отправить на сайт (в дроп → Download)", "", () => sendToDrop(path, item.name, item.dir));
             tool(ICON_EDIT, "Переименовать", "", () => rename(path, item.name));
             tool(ICON_DEL, "Удалить", "danger", () => remove(path, item.name, item.dir));
             listEl.appendChild(li);
@@ -476,6 +480,21 @@
           document.body.appendChild(a);
           a.click();
           a.remove();
+        };
+
+        const sendToDrop = async (path, name, isDir) => {
+          const sure = await uiConfirm(
+            `Отправить ${isDir ? "папку" : "файл"} «${name}» на сайт?\nЛяжет в личный дроп, в папку Download.`,
+            { okLabel: "Отправить", okKind: "primary" });
+          if (!sure) return;
+          uiToast("Переносим на сайт — идёт по этому же соединению, без браузера…");
+          try {
+            await api("/api/files/to-drop", {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ path }),
+            });
+            uiToast("Готово — лежит в дропе, папка Download", "ok");
+          } catch (e) { uiToast(e.message, "err"); }
         };
 
         const rename = async (path, name) => {

@@ -83,6 +83,51 @@ def test_download_unknown_id(auth_client):
     assert resp.status_code == 404
 
 
+def test_download_folder_exists_at_root(auth_client):
+    """Особая папка Download заводится сама, ещё до первого захода."""
+    resp = auth_client.get("/api/drop/list")
+    assert resp.status_code == 200
+    rows = {row["id"]: row for row in resp.get_json()["items"]}
+    assert "download" in rows
+    assert rows["download"]["kind"] == "folder"
+    assert rows["download"]["special"] is True
+    assert rows["download"]["icon"] == "download"
+
+
+def test_download_folder_cannot_be_renamed(auth_client):
+    resp = auth_client.patch("/api/drop/download", json={"name": "Загрузки"})
+    assert resp.status_code == 400
+    rows = {row["id"]: row for row in auth_client.get("/api/drop/list").get_json()["items"]}
+    assert rows["download"]["name"] == "Download"
+
+
+def test_download_folder_survives_delete(auth_client):
+    """Удаление не должно снести особую папку — как и у MUSIK. Удалённое в
+    список не попадает вовсе, поэтому проверка — что Download там и остался."""
+    resp = auth_client.delete("/api/drop/download")
+    assert resp.status_code == 200
+    rows = {row["id"]: row for row in auth_client.get("/api/drop/list").get_json()["items"]}
+    assert "download" in rows
+
+
+def test_download_folder_weight_reflects_its_own_files_not_music(auth_client):
+    """Раньше подмена веса для MUSIK задевала любую особую папку — из-за
+    этого Download показывал бы объём фонотеки вместо своих файлов."""
+    init = auth_client.post("/api/drop/upload/init", json={
+        "name": "клип.mp4", "size": 4, "parent": "download",
+    })
+    assert init.status_code == 200
+    upload_id = init.get_json()["upload_id"]
+    chunk = auth_client.post(f"/api/drop/upload/chunk/{upload_id}?offset=0", data=b"abcd")
+    assert chunk.status_code == 200
+    finish = auth_client.post(f"/api/drop/upload/finish/{upload_id}")
+    assert finish.status_code == 200
+
+    rows = {row["id"]: row for row in auth_client.get("/api/drop/list").get_json()["items"]}
+    assert rows["download"]["size"] == 4
+    assert rows["download"]["count"] == 1
+
+
 def test_storage_is_isolated_from_the_repo(app_module):
     """Страховка самой обвязки: тесты обязаны писать во временную папку, а
     не в настоящий дроп и фонотеку. Если изоляция когда-нибудь сломается,

@@ -321,6 +321,12 @@ DROP_TEXT_PREVIEW = 400
 # постоянным id, чтобы переживать перезапуски.
 DROP_MUSIK_ID = "musik"
 DROP_AUDIO_EXTS = {".mp3", ".ogg", ".wav", ".m4a", ".opus", ".flac", ".aac"}
+# Особая папка «Download»: тоже нельзя переименовать/удалить, тоже всегда на
+# месте. В отличие от MUSIK ничего не подменяет — обычная папка дропа, просто
+# защищённая и с фиксированным назначением: сюда по умолчанию (без явного
+# выбора папки) падает то, что прислали «Поделиться» с телефона и кнопка VG
+# со страницы файлов SFTP.
+DROP_DOWNLOAD_ID = "download"
 
 drop_items: dict = {}
 drop_uploads: dict = {}
@@ -360,6 +366,12 @@ DROP_FOLDER_ICONS = (
     "folder", "warn", "clock", "tree", "monitor", "phone",
     "claude", "vitaz", "star", "lock", "music", "photo",
     "video", "work", "trash", "game",
+    # Вторая строка добавлена 2026-09-11 для папки Download (первая из
+    # четырёх). Значки #2 и #3, присланные для неё же (шестерёнка и
+    # человечек), не добавлены: в присланном SVG у обоих оказался тот же
+    # путь, что у стрелки загрузки — не тот рисунок, что заявлен в имени.
+    # Прежде чем закрывать строку до четырёх, нужны настоящие контуры.
+    "download", "share",
 )
 
 
@@ -575,8 +587,29 @@ def _drop_load_index():
         if item["parent"] and item["parent"] not in drop_items:
             item["parent"] = None
     _drop_ensure_musik()         # особая папка MUSIK всегда на месте
+    _drop_ensure_download()      # особая папка Download тоже
     _drop_sweep_trash()          # что пролежало в корзине дольше месяца — вон
     _drop_write_index()
+
+
+def _drop_ensure_download():
+    """Заводит (или чинит) особую папку Download в корне. Под drop_lock либо
+    на старте до потоков. Сюда по умолчанию падает то, что «Поделиться» с
+    телефона и кнопка VG со страницы файлов (SFTP) кладут без явного выбора
+    папки — сам дроп при обычной загрузке от этого не меняется, там папку
+    выбирают, зайдя в неё заранее."""
+    d = drop_items.get(DROP_DOWNLOAD_ID)
+    if not d or d.get("kind") != "folder":
+        drop_items[DROP_DOWNLOAD_ID] = {
+            "kind": "folder", "name": "Download", "parent": None, "share": None,
+            "size": 0, "deleted": None, "icon": "download", "special": True,
+            "created": time.time(),
+        }
+    else:
+        d["parent"] = None            # всегда в корне
+        d["deleted"] = None           # в корзину не уходит
+        d["special"] = True
+        d.setdefault("icon", "download")
 
 
 def _drop_ensure_musik():
@@ -4478,6 +4511,13 @@ app.register_blueprint(create_files_blueprint(
     login_required=login_required,
     netbird_devices=NETBIRD_DEVICES,
     sftp_enabled_ips=sftp_enabled_ips,
+    drop_lock=drop_lock,
+    drop_items=drop_items,
+    drop_path=_drop_path,
+    drop_write_index=_drop_write_index,
+    drop_used=_drop_used,
+    drop_quota=DROP_QUOTA,
+    drop_download_id=DROP_DOWNLOAD_ID,
 ))
 
 app.register_blueprint(create_remote_blueprint(
@@ -4533,6 +4573,7 @@ app.register_blueprint(create_pwa_blueprint(
     drop_path=_drop_path,
     drop_used=_drop_used,
     drop_write_index=_drop_write_index,
+    drop_download_id=DROP_DOWNLOAD_ID,
 ))
 
 

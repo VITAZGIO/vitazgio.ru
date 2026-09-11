@@ -57,6 +57,7 @@ def create_pwa_blueprint(
     drop_path,
     drop_used,
     drop_write_index,
+    drop_download_id,
 ):
     pwa = Blueprint("pwa", __name__)
 
@@ -147,7 +148,11 @@ def create_pwa_blueprint(
     @pwa.post("/share-target")
     @login_required
     def share_target_fallback():
-        """Сюда попадаем, только если обработчик в браузере ещё не встал."""
+        """Сюда попадаем, только если обработчик в браузере ещё не встал.
+
+        Папку не выбирают — «Поделиться» происходит не со страницы дропа, там
+        спросить некого, — поэтому по умолчанию всё падает в особую папку
+        Download, как и обычный (JS-путь через service worker) приём шаринга."""
         saved = 0
         for storage in request.files.getlist("files"):
             if not storage or not storage.filename:
@@ -167,7 +172,7 @@ def create_pwa_blueprint(
                         pass
                     continue
                 drop_items[item_id] = {
-                    "kind": "file", "name": storage.filename[:120], "parent": None,
+                    "kind": "file", "name": storage.filename[:120], "parent": drop_download_id,
                     "content_type": storage.content_type or "application/octet-stream",
                     "size": size, "created": time.time(), "share": None,
                 }

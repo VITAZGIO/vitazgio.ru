@@ -369,15 +369,20 @@ def create_drop_blueprint(
                     row["icon"] = v.get("icon") or "folder"
                     if v.get("special"):
                         row["special"] = True
-                        # MUSIK показывает фонотеку, значит и веса берём её. Если
-                        # фонотека почему-то не читается — это не повод ронять
-                        # весь список файлов: просто оставим прежние цифры.
-                        try:
-                            with music_lock:
-                                row["size"] = music_used_raw()
-                                row["count"] = len(music_items)
-                        except Exception:                       # noqa: BLE001
-                            logger.exception("MUSIK: не посчитал фонотеку")
+                        # Подмена веса — только для MUSIK: она показывает фонотеку,
+                        # а не свои файлы (внутри неё вообще нет настоящих drop_items,
+                        # _drop_folder_stats насчитал бы 0). Другие особые папки
+                        # (Download) — обычные папки дропа, их вес уже посчитан
+                        # выше как у всех, трогать не нужно. Если фонотека вдруг
+                        # не читается — не повод ронять весь список файлов, просто
+                        # оставляем прежние цифры.
+                        if k == drop_musik_id:
+                            try:
+                                with music_lock:
+                                    row["size"] = music_used_raw()
+                                    row["count"] = len(music_items)
+                            except Exception:                       # noqa: BLE001
+                                logger.exception("MUSIK: не посчитал фонотеку")
                 items.append(row)
             # Сначала новые, но особая папка (MUSIK) всегда падает в самый низ.
             # Сортировка устойчивая: сперва по свежести, затем особые — вниз.
@@ -516,6 +521,8 @@ def create_drop_blueprint(
             if not item:
                 return jsonify(error="Не найдено."), 404
             if name:
+                if item.get("special") and name != item["name"]:
+                    return jsonify(error="Особую папку нельзя переименовать."), 400
                 item["name"] = name
             if icon and item["kind"] == "folder" and not item.get("special"):
                 item["icon"] = icon

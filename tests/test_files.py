@@ -211,6 +211,70 @@ def test_zip_rejects_a_plain_file(sftp_client):
     assert resp.status_code == 400
 
 
+# ---- Кнопка VG: перенос файла/папки с машины прямо в личный дроп ----------
+
+def test_vg_button_sends_file_into_download_folder(sftp_client):
+    resp = sftp_client.post("/api/files/to-drop", json={"path": "/заметки.txt"})
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["kind"] == "file"
+
+    rows = {row["name"]: row for row in sftp_client.get("/api/drop/list?parent=download").get_json()["items"]}
+    assert "заметки.txt" in rows
+    assert rows["заметки.txt"]["size"] == len("привет".encode("utf-8"))
+
+
+def test_vg_button_sends_folder_recursively(sftp_client, remote_root):
+    (remote_root / "проекты" / "вложенная").mkdir()
+    (remote_root / "проекты" / "код.py").write_text("print(1)", encoding="utf-8")
+
+    resp = sftp_client.post("/api/files/to-drop", json={"path": "/проекты"})
+    assert resp.status_code == 200
+    assert resp.get_json()["kind"] == "folder"
+    folder_id = resp.get_json()["id"]
+
+    top = {row["name"]: row for row in sftp_client.get("/api/drop/list?parent=download").get_json()["items"]}
+    assert top["проекты"]["kind"] == "folder"
+    assert top["проекты"]["id"] == folder_id
+
+    inside = {row["name"]: row for row in sftp_client.get(f"/api/drop/list?parent={folder_id}").get_json()["items"]}
+    assert inside["код.py"]["kind"] == "file"
+    assert inside["вложенная"]["kind"] == "folder"
+
+
+def test_vg_button_respects_drop_quota(sftp_client, app_module):
+    """Квота дропа общая — перенос с машины не должен обходить лимит,
+    который соблюдает обычная загрузка через браузер. Забиваем квоту одной
+    синтетической записью прямо в drop_items — тот же словарь, на который
+    смотрит _drop_used(), так что менять реальные 30 ГБ не нужно.
+
+    app_module общий на весь прогон тестов (сессионная фикстура) — запись
+    убираем сами, иначе квота останется «забитой» для тестов после этого."""
+    before = {row["id"] for row in sftp_client.get("/api/drop/list?parent=download").get_json()["items"]}
+    with app_module.drop_lock:
+        app_module.drop_items["huge-for-test"] = {
+            "kind": "file", "name": "huge.bin", "parent": None,
+            "content_type": "application/octet-stream",
+            "size": app_module.DROP_QUOTA, "created": 0, "share": None,
+        }
+    try:
+        resp = sftp_client.post("/api/files/to-drop", json={"path": "/заметки.txt"})
+        assert resp.status_code == 400
+        assert "квота" in resp.get_json()["error"].lower()
+
+        after = {row["id"] for row in sftp_client.get("/api/drop/list?parent=download").get_json()["items"]}
+        assert after == before   # ничего нового не появилось — отказ не наполовину
+    finally:
+        with app_module.drop_lock:
+            app_module.drop_items.pop("huge-for-test", None)
+
+
+def test_vg_button_requires_connection(auth_client):
+    resp = auth_client.post("/api/files/to-drop", json={"path": "/заметки.txt"})
+    assert resp.status_code == 409
+    assert resp.get_json().get("reconnect") is True
+
+
 def test_rename_and_delete(sftp_client, remote_root):
     resp = sftp_client.post("/api/files/op", json={
         "op": "rename", "path": "/заметки.txt", "name": "другое.txt",
