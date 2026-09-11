@@ -304,6 +304,7 @@
         const ICON_DIR = '<svg class="row-ic" viewBox="0 0 24 24" fill="currentColor"><path d="M10 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2Z"/></svg>';
         const ICON_FILE = '<svg class="row-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5Z"/><path d="M14 3v5h5"/></svg>';
         const ICON_DOWN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 21h16"/></svg>';
+        const ICON_ZIP = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8"/><path d="M1 3h22v5H1z"/><path d="M10 12h4"/></svg>';
         const ICON_EDIT = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>';
         const ICON_DEL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg>';
 
@@ -392,6 +393,7 @@
               return b;
             };
             if (!item.dir) tool(ICON_DOWN, "Скачать", "", () => download(path));
+            else tool(ICON_ZIP, "Скачать папку архивом", "", () => downloadZip(path));
             tool(ICON_EDIT, "Переименовать", "", () => rename(path, item.name));
             tool(ICON_DEL, "Удалить", "danger", () => remove(path, item.name, item.dir));
             listEl.appendChild(li);
@@ -431,6 +433,16 @@
           // Скачивание отдаёт браузер: обычная ссылка с той же кукой сессии.
           const a = document.createElement("a");
           a.href = "/api/files/download?path=" + encodeURIComponent(path);
+          a.rel = "noopener";
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+        };
+
+        const downloadZip = (path) => {
+          uiToast("Собираю архив — скачивание начнётся, когда будет готов", "ok");
+          const a = document.createElement("a");
+          a.href = "/api/files/zip?path=" + encodeURIComponent(path);
           a.rel = "noopener";
           document.body.appendChild(a);
           a.click();

@@ -11,17 +11,21 @@ mesh-сети, ни второго набора секретов — тольк�
 """
 
 import posixpath
+import re
 import secrets
 import stat as statmod
 import threading
 import time
+import urllib.parse
+import zipfile
+from datetime import datetime
 
 import paramiko
 from flask import Blueprint, Response, jsonify, request, session
 
 SFTP_IDLE_SECONDS = 15 * 60      # столько живёт соединение без единого запроса
 SFTP_CHUNK = 256 * 1024          # кусок чтения/записи: компромисс память/скорость
-SFTP_RECURSIVE_MAX = 5000        # потолок на рекурсивное удаление, чтобы не уйти в никуда
+SFTP_RECURSIVE_MAX = 5000        # потолок на рекурсивное удаление/архивацию, чтобы не уйти в никуда
 
 
 def _error_text(exc):
@@ -124,6 +128,107 @@ def create_files_blueprint(
             })
         rows.sort(key=lambda r: (not r["dir"], r["name"].lower()))
         return rows
+
+    # ---- Скачивание папки zip-архивом (тот же приём, что у дропа) -----------
+
+    def _zip_name(name, taken):
+        """Имя внутри архива: без разделителей пути и без повторов на одном
+        уровне. «../» в имени распаковалось бы мимо выбранной папки."""
+        clean = re.sub(r'[\x00-\x1f<>:"/\\|?*]', "", name or "").strip(" .") or "файл"
+        stem, dot, ext = clean.rpartition(".")
+        if not dot:
+            stem, ext = clean, ""
+        candidate, counter = clean, 2
+        while candidate.lower() in taken:
+            candidate = f"{stem} ({counter})" + (f".{ext}" if dot else "")
+            counter += 1
+        taken.add(candidate.lower())
+        return candidate
+
+    def _zip_time(stamp):
+        try:
+            moment = datetime.fromtimestamp(stamp or 0)
+        except (OSError, OverflowError, ValueError):
+            moment = datetime.now()
+        if moment.year < 1980:
+            return (1980, 1, 1, 0, 0, 0)
+        return (moment.year, moment.month, moment.day,
+                moment.hour, moment.minute, moment.second - moment.second % 2)
+
+    def _zip_plan(sftp, root, budget):
+        """Путь внутри архива, путь на машине (None — пустая папка), размер,
+        время. Рекурсия идёт прямо по SFTP, поэтому и лимит на число записей —
+        общий с рекурсивным удалением."""
+        plan = []
+
+        def walk(path, prefix):
+            taken = set()
+            for attr in sftp.listdir_attr(path):
+                if budget[0] <= 0:
+                    raise OSError("Слишком много файлов — архивируйте по частям.")
+                budget[0] -= 1
+                mode = attr.st_mode or 0
+                is_dir = statmod.S_ISDIR(mode)
+                child = posixpath.join(path, attr.filename)
+                if statmod.S_ISLNK(mode):
+                    try:
+                        is_dir = statmod.S_ISDIR(sftp.stat(child).st_mode or 0)
+                    except Exception:
+                        is_dir = False
+                name = _zip_name(attr.filename, taken)
+                if is_dir:
+                    plan.append((prefix + name + "/", None, 0, attr.st_mtime or 0))
+                    walk(child, prefix + name + "/")
+                else:
+                    plan.append((prefix + name, child, attr.st_size or 0, attr.st_mtime or 0))
+
+        walk(root, "")
+        return plan
+
+    def _zip_length(plan):
+        """Точный размер архива без сжатия и без ZIP64 — чтобы браузер показал
+        полосу загрузки. За гигабайтами формат меняется, тогда длину не обещаем."""
+        total = 22
+        for arcname, remote_path, size, _ in plan:
+            name_len = len(arcname.encode("utf-8"))
+            total += 30 + name_len + 16 + 46 + name_len
+            if remote_path is not None:
+                total += size
+        limit = 0xFFFFFFFF
+        if total > limit or any(size > limit for _, _, size, _ in plan):
+            return None
+        return total
+
+    class _ZipSink:
+        """Приёмник для zipfile: копит записанное и отдаёт порциями наружу."""
+
+        def __init__(self):
+            self._parts = []
+            self._pos = 0
+            self._held = 0
+
+        def write(self, data):
+            data = bytes(data)
+            self._parts.append(data)
+            self._pos += len(data)
+            self._held += len(data)
+            return len(data)
+
+        def tell(self):
+            return self._pos
+
+        def flush(self):
+            pass
+
+        @property
+        def held(self):
+            return self._held
+
+        def drain(self):
+            out = b"".join(self._parts)
+            self._parts.clear()
+            self._held = 0
+            return out
 
     def _rm_tree(sftp, path, budget):
         """Рекурсивное удаление с потолком: без него кривой путь мог бы
@@ -265,6 +370,73 @@ def create_files_blueprint(
             "Content-Disposition": f"attachment; filename=\"{quoted}\"; filename*=UTF-8''{name}",
             "Cache-Control": "private, no-store",
         })
+
+    @files_bp.get("/api/files/zip")
+    @login_required
+    def files_zip():
+        """Папка целиком одним архивом — тот же приём, что уже есть в дропе.
+
+        Без сжатия: фото и видео и так уже сжаты, второй проход только грузит
+        процессор ради процента-двух, а несжатый архив собирается со скоростью
+        сети до машины."""
+        entry = _session()
+        if not entry:
+            return jsonify(error="Нет соединения.", reconnect=True), 409
+        path = _clean(request.args.get("path", ""))
+        if not path:
+            return jsonify(error="Плохой путь."), 400
+
+        sftp = entry["sftp"]
+        try:
+            if not statmod.S_ISDIR(sftp.stat(path).st_mode or 0):
+                return jsonify(error="Это не папка."), 400
+            plan = _zip_plan(sftp, path, [SFTP_RECURSIVE_MAX])
+        except Exception as e:
+            return jsonify(error=_error_text(e)), 400
+
+        def pour():
+            sink = _ZipSink()
+            with zipfile.ZipFile(sink, "w", zipfile.ZIP_STORED, allowZip64=True) as zf:
+                for arcname, remote_path, _, mtime in plan:
+                    info = zipfile.ZipInfo(arcname, _zip_time(mtime))
+                    info.compress_type = zipfile.ZIP_STORED
+                    if remote_path is None:
+                        zf.writestr(info, b"")          # пустая папка
+                        yield sink.drain()
+                        continue
+                    try:
+                        handle = sftp.open(remote_path, "rb")
+                        handle.prefetch()
+                    except Exception:
+                        continue   # файл исчез между списком и чтением — пропускаем
+                    with zf.open(info, "w") as dst:
+                        try:
+                            while True:
+                                chunk = handle.read(SFTP_CHUNK)
+                                if not chunk:
+                                    break
+                                dst.write(chunk)
+                                if sink.held >= SFTP_CHUNK:
+                                    yield sink.drain()
+                        finally:
+                            handle.close()
+                    if sink.held:
+                        yield sink.drain()
+            yield sink.drain()
+
+        safe = (_zip_name(posixpath.basename(path) or "папка", set())) + ".zip"
+        quoted = urllib.parse.quote(safe)
+        response = Response(pour(), mimetype="application/zip")
+        # Русское имя — только в filename* процентами (заголовки идут в
+        # latin-1, сырая кириллица роняет отдачу), простое filename — латиницей.
+        response.headers["Content-Disposition"] = (
+            "attachment; filename=\"archive.zip\"; filename*=UTF-8''" + quoted)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Cache-Control"] = "no-store"
+        length = _zip_length(plan)
+        if length is not None:
+            response.headers["Content-Length"] = str(length)
+        return response
 
     @files_bp.post("/api/files/upload")
     @login_required

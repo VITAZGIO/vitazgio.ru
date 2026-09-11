@@ -17,6 +17,7 @@ Baseline before blueprint split:
   `[r for r in app.url_map.iter_rules() if r.endpoint != "static"]`.
   Число включает вебсокеты (`@sock.route` тоже попадает в `url_map`).
 - 2026-09-11: +7 в разделе «files/sftp» — файловый менеджер по SFTP.
+- 2026-09-11: +1 туда же — скачивание папки zip-архивом.
 
 Guards column includes route decorators such as `login_required`, `debtor_required`,
 `music_editor_required`, plus existing domain guards where useful.
@@ -250,5 +251,6 @@ Guards column includes route decorators such as `login_required`, `debtor_requir
 | `/api/files/disconnect` | `@files_bp.post("/api/files/disconnect")` | `files_disconnect` | `login_required` |
 | `/api/files/list` | `@files_bp.get("/api/files/list")` | `files_list` | `login_required` + живое соединение |
 | `/api/files/download` | `@files_bp.get("/api/files/download")` | `files_download` | `login_required` + живое соединение |
+| `/api/files/zip` | `@files_bp.get("/api/files/zip")` | `files_zip` | `login_required` + живое соединение |
 | `/api/files/upload` | `@files_bp.post("/api/files/upload")` | `files_upload` | `login_required` + живое соединение |
 | `/api/files/op` | `@files_bp.post("/api/files/op")` | `files_op` | `login_required` + живое соединение |

@@ -186,6 +186,31 @@ def test_upload_name_cannot_escape_folder(sftp_client, remote_root):
     assert (remote_root / "проекты" / "сбежал.txt").exists()
 
 
+def test_zip_download_of_folder(sftp_client, remote_root):
+    """Папка целиком архивом — тот же приём, что уже работает в дропе."""
+    import io
+    import zipfile
+
+    (remote_root / "проекты" / "вложенная").mkdir()
+    (remote_root / "проекты" / "код.py").write_text("print(1)", encoding="utf-8")
+
+    resp = sftp_client.get("/api/files/zip?path=%2Fпроекты")
+    assert resp.status_code == 200
+    assert resp.mimetype == "application/zip"
+    assert "Content-Encoding" not in resp.headers   # поток не должен уйти в gzip-буфер
+
+    with zipfile.ZipFile(io.BytesIO(resp.data)) as zf:
+        names = set(zf.namelist())
+        assert "код.py" in names
+        assert any(n.startswith("вложенная") for n in names)
+        assert zf.read("код.py") == b"print(1)"
+
+
+def test_zip_rejects_a_plain_file(sftp_client):
+    resp = sftp_client.get("/api/files/zip?path=%2Fзаметки.txt")
+    assert resp.status_code == 400
+
+
 def test_rename_and_delete(sftp_client, remote_root):
     resp = sftp_client.post("/api/files/op", json={
         "op": "rename", "path": "/заметки.txt", "name": "другое.txt",
