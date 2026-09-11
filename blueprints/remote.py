@@ -721,6 +721,11 @@ def create_remote_blueprint(
         html = template("netbird.html")
         return (html.replace("{{DEVICE_ITEMS}}", _netbird_device_items())
                     .replace("{{DEVICE_COUNT}}", str(len(netbird_devices)))
+                    # Список машин, где живёт SFTP — чтобы кнопка «SFTP» в
+                    # оверлее RDP/консоли знала, для какого IP пробовать
+                    # подключиться теми же учётными данными, а для какого
+                    # промолчать (VNC-устройства, телефон).
+                    .replace("{{SFTP_IPS}}", json.dumps(sorted(sftp_enabled_ips)))
                     .replace("__ICONLINKS__", icon_links))
 
     return remote_bp

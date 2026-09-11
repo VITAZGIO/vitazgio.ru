@@ -40,6 +40,16 @@
         .act.ghost { color: #8b93a6; border-color: rgba(255,255,255,.12); background: transparent; }
         .act.ghost:hover { color: #fff; border-color: rgba(255,255,255,.3); background: rgba(255,255,255,.06); }
 
+        /* Узкий экран: крошки переносились на несколько строк, а кнопки
+           («Загрузить» и т.д.), центрированные по высоте всей .bar,
+           оказывались зажаты ровно посередине этого блока. Лечится тем,
+           что крошки всегда идут отдельной полной строкой и скроллятся
+           вбок одной линией — тогда кнопкам просто неоткуда наехать. */
+        @media (max-width: 700px) {
+          .crumbs { flex-basis: 100%; flex-wrap: nowrap; overflow-x: auto; padding-bottom: 2px; }
+          .crumb, .crumb-sep { flex: none; white-space: nowrap; }
+        }
+
         .list { margin: 0; padding: 6px 18px 18px; list-style: none; }
         .row { display: grid; grid-template-columns: 22px 1fr 96px 150px 150px; align-items: center; gap: 14px;
                min-height: 46px; margin-inline: -10px; padding-inline: 10px;
@@ -292,6 +302,25 @@
           if (!(await askSsh())) gateEl.hidden = false;
         };
         document.getElementById("btn-connect").addEventListener("click", connect);
+
+        // Кнопка «SFTP» в оверлее RDP/консоли уже поднимает соединение теми
+        // же логином-паролем, что и сам вход — здесь просто подхватываем
+        // его, если оно есть, вместо повторного запроса пароля. Соединение
+        // видно в любой вкладке: тот же браузер — та же кука сессии.
+        const tryReuseConnection = async () => {
+          let data;
+          try {
+            const r = await fetch("/api/files/session", { credentials: "same-origin" });
+            data = await r.json();
+          } catch { return false; }
+          if (!data.connected || data.ip !== IP) return false;
+          try {
+            const listing = await api("/api/files/list?path=" + encodeURIComponent(data.home));
+            document.getElementById("who").textContent = data.user + "@" + IP;
+            show(listing.path, listing.entries);
+            return true;
+          } catch { return false; }
+        };
 
         // ---- отрисовка ----------------------------------------------------------
         const panel = document.getElementById("panel");
@@ -567,7 +596,7 @@
           if (files.length) uploadAll(files);
         });
 
-        connect();
+        tryReuseConnection().then((reused) => { if (!reused) connect(); });
       </script>
     </body>
     </html>

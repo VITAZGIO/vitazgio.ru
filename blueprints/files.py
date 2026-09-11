@@ -304,7 +304,7 @@ def create_files_blueprint(
         token = secrets.token_urlsafe(18)
         with live_lock:
             live[token] = {"client": client, "sftp": sftp, "ip": ip,
-                           "user": username, "used": time.time()}
+                           "user": username, "home": home, "used": time.time()}
         session["sftp_token"] = token
         return jsonify(path=home, user=username, entries=rows)
 
@@ -313,6 +313,20 @@ def create_files_blueprint(
     def files_disconnect():
         _drop_current()
         return jsonify(ok=True)
+
+    @files_bp.get("/api/files/session")
+    @login_required
+    def files_session():
+        """Есть ли уже живое соединение — и на какую машину.
+
+        Даёт странице /files пропустить повторный ввод логина/пароля, если
+        подключение уже поднято кнопкой «SFTP» из окна RDP/консоли той же
+        машины (тот же браузер — та же кука сессии, значит и то же
+        соединение видно в любой вкладке)."""
+        entry = _session()
+        if not entry:
+            return jsonify(connected=False)
+        return jsonify(connected=True, ip=entry["ip"], user=entry["user"], home=entry["home"])
 
     # ---- Работа с файлами ---------------------------------------------------
 

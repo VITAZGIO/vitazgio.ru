@@ -247,3 +247,27 @@ def test_full_folder_asks_before_wiping(sftp_client, remote_root):
 def test_disconnect_drops_the_session(sftp_client):
     assert sftp_client.post("/api/files/disconnect").status_code == 200
     assert sftp_client.get("/api/files/list?path=/").status_code == 409
+
+
+def test_session_reports_no_connection_before_connect(auth_client):
+    resp = auth_client.get("/api/files/session")
+    assert resp.status_code == 200
+    assert resp.get_json() == {"connected": False}
+
+
+def test_session_lets_files_page_skip_the_login_modal(sftp_client):
+    """Кнопка «Файлы» в оверлее RDP/консоли подключает SFTP в фоне тем же
+    логином-паролем — открыв потом /files той же машины, второй раз пароль
+    вводить не должны: /api/files/session должен опознать уже живое
+    соединение и назвать домашнюю папку."""
+    resp = sftp_client.get("/api/files/session")
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body == {"connected": True, "ip": DEVICE_IP, "user": "vitaz", "home": "/"}
+
+
+def test_session_ip_mismatch_does_not_leak_into_another_machine_page(sftp_client):
+    """Если соединение поднято для одной машины, страница другой машины не
+    должна принять его за своё."""
+    resp = sftp_client.get("/api/files/session")
+    assert resp.get_json()["ip"] == DEVICE_IP != "100.104.122.94"

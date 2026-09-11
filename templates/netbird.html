@@ -129,6 +129,11 @@
         .term-key-wide { min-width: 96px; color: #1a0d04; border: 0;
                          background: linear-gradient(90deg, #ff782f, #ffb35c); font-weight: 800; }
         .term-key-go { color: #04121c; border: 0; background: linear-gradient(90deg, #2de2ff, #7df9ff); font-weight: 800; }
+        /* Кнопка «Файлы» — не эмулятор клавиши, а переход на другую страницу
+           (тот же приём, что кнопка SFTP в списке устройств), поэтому цвет
+           её же — бирюзовый, не как у серых клавиш рядом. */
+        .term-key-sftp, .rdp-key-sftp { color: #69e8ff; border-color: rgba(45,226,255,.35); background: rgba(45,226,255,.08); }
+        .term-key-sftp:active, .rdp-key-sftp:active { color: #fff; background: rgba(45,226,255,.22); }
         .term-toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
                       z-index: 120; padding: 9px 16px; color: #04121c; font: 700 .74rem "Cascadia Code", Consolas, monospace;
                       background: #2de2ff; }
@@ -262,6 +267,7 @@
             <button class="rdp-key-combo" data-combo="65513,65505">A+Shift</button>
             <button class="rdp-key-combo" data-combo="65515,65513">Win+A</button>
             <button id="rdp-kbd-btn" class="rdp-key" type="button" hidden>⌨</button>
+            <button id="rdp-sftp-btn" class="rdp-key rdp-key-sftp" type="button" title="Файлы этой машины (SFTP), без повторного пароля" hidden>Файлы</button>
           </div>
         </div>
         <input id="rdp-kbd-input" class="rdp-kbd-input" type="text" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" inputmode="text">
@@ -282,6 +288,7 @@
           <button class="term-key" type="button" data-key="tab">Tab</button>
           <button class="term-key" type="button" data-key="ctrlc">Ctrl+C</button>
           <button class="term-key" type="button" data-key="esc">Esc</button>
+          <button id="term-sftp-btn" class="term-key term-key-sftp" type="button" title="Файлы этой машины (SFTP), без повторного пароля" hidden>Файлы</button>
         </div>
         <div id="term-body" class="term-body"></div>
       </div>
@@ -524,6 +531,22 @@
           let fitAddon = null;
           let ws = null;
 
+          // Машины, где есть SFTP — кнопка «Файлы» в оверлее RDP/консоли
+          // показывается только для них, и только когда есть логин/пароль
+          // (у VNC пароля-логина в привычном виде нет — там только пароль).
+          const SFTP_IPS = new Set({{SFTP_IPS}});
+          const quickSftpConnect = (ip, username, password) => {
+            if (!SFTP_IPS.has(ip) || !username) return;
+            // Фоном, не дожидаясь ответа: экран RDP/консоли не должен ждать
+            // файлы. Не вышло — не страшно, кнопка в /files сама спросит
+            // логин ещё раз при открытии.
+            fetch("/api/files/connect", {
+              method: "POST", credentials: "same-origin",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ ip, username, password }),
+            }).catch(() => {});
+          };
+
           const rdpLoginModal = document.getElementById("rdp-login-modal");
           const rdpLoginForm = document.getElementById("rdp-login-form");
           const rdpLoginUsername = document.getElementById("rdp-login-username");
@@ -696,6 +719,18 @@
             touchToggleBtn.hidden    = !isMobile;
             toolbarToggleBtn.hidden  = !isMobile;
             toolbarToggleBtn.onclick = () => { toolbar.hidden = !toolbar.hidden; };
+
+            // «Файлы» — только у RDP (пароль уже вводили, тем же и подключаем
+            // SFTP в фоне при отправке формы); у VNC своего логина нет,
+            // подставлять его в SFTP было бы нечего.
+            const sftpBtn = document.getElementById("rdp-sftp-btn");
+            if (protocol !== "vnc" && SFTP_IPS.has(ip)) {
+              sftpBtn.hidden = false;
+              sftpBtn.onclick = () => window.open("/files/" + ip, "_blank", "noopener");
+            } else {
+              sftpBtn.hidden = true;
+              sftpBtn.onclick = null;
+            }
 
             const displayRect = rdpDisplay.getBoundingClientRect();
             const width  = Math.round(displayRect.width)  || window.innerWidth;
@@ -938,7 +973,10 @@
             const quality = rdpLoginQuality ? rdpLoginQuality.value : "medium";
             if (rdpLoginQuality) localStorage.setItem("rdpQuality", quality);
             closeRdpLogin();
-            if (device) openRdp(device.ip, device.name, username, password, "rdp", quality);
+            if (device) {
+              quickSftpConnect(device.ip, username, password);
+              openRdp(device.ip, device.name, username, password, "rdp", quality);
+            }
           });
           // ─────────────────────────────────────────────────────────────
 
@@ -1006,7 +1044,10 @@
             sshLoginForm.reset();
             sshLoginError.textContent = "";
             pendingDevice = null;
-            if (device) openTerminal(device.ip, device.name, username, password);
+            if (device) {
+              quickSftpConnect(device.ip, username, password);
+              openTerminal(device.ip, device.name, username, password);
+            }
           });
 
           const closeTerminal = () => {
@@ -1064,6 +1105,15 @@
           const openTerminal = async (ip, name, username, password) => {
             termTitle.textContent = name + " — " + ip;
             termOverlay.hidden = false;
+
+            const termSftpBtn = document.getElementById("term-sftp-btn");
+            if (SFTP_IPS.has(ip)) {
+              termSftpBtn.hidden = false;
+              termSftpBtn.onclick = () => window.open("/files/" + ip, "_blank", "noopener");
+            } else {
+              termSftpBtn.hidden = true;
+              termSftpBtn.onclick = null;
+            }
             // xterm приезжает только сейчас, при первом открытии консоли.
             termBody.textContent = "Загружаю терминал…";
             try { await window.vendorReady("xterm"); } catch (e) {}
