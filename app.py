@@ -1062,7 +1062,12 @@ def console_password_today():
 
 DEBTS_PATH = os.path.join(DATA_DIR, "debts.json")
 debts_lock = threading.Lock()
-debts_data = {"users": [], "entries": [], "payment_requests": []}
+debts_data = {
+    "users": [],
+    "entries": [],
+    "payment_requests": [],
+    "payment_request_attempts": [],
+}
 # Палитра для кружка-аватарки должника на /debts — фиксированный набор,
 # не произвольный CSS/hex с фронта (тот же принцип, что и цвета сайта
 # через переменные, а не хардкод: тут просто ключи вместо hex).
@@ -1086,6 +1091,11 @@ def _debts_load():
         "payment_requests": (
             raw.get("payment_requests")
             if isinstance(raw.get("payment_requests"), list)
+            else []
+        ),
+        "payment_request_attempts": (
+            raw.get("payment_request_attempts")
+            if isinstance(raw.get("payment_request_attempts"), list)
             else []
         ),
     }

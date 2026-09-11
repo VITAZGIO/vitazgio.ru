@@ -34,6 +34,7 @@ def reset_debts(app_module):
                 "created": "2026-09-10T10:01:00",
             }],
             "payment_requests": [],
+            "payment_request_attempts": [],
         })
 
 
@@ -140,3 +141,32 @@ def test_payment_request_requires_known_bank(app_module):
 
     assert resp.status_code == 400
     assert "банк" in resp.get_json()["error"].lower()
+
+
+def test_debtor_can_have_at_most_five_pending_payment_requests(app_module):
+    client = _debtor_client(app_module)
+    request = {"amount": "100", "bank": "ОЗОН"}
+
+    for _ in range(5):
+        assert client.post("/api/debts/payment-requests", json=request).status_code == 200
+
+    response = client.post("/api/debts/payment-requests", json=request)
+
+    assert response.status_code == 429
+    assert "одновременно" in response.get_json()["error"].lower()
+
+
+def test_debtor_can_create_at_most_five_payment_requests_per_five_minutes(app_module):
+    client = _debtor_client(app_module)
+    request = {"amount": "100", "bank": "ОЗОН"}
+
+    for _ in range(5):
+        created = client.post("/api/debts/payment-requests", json=request)
+        assert created.status_code == 200
+        request_id = created.get_json()["payment_requests"][0]["id"]
+        assert client.delete(f"/api/debts/me/payment-requests/{request_id}").status_code == 200
+
+    response = client.post("/api/debts/payment-requests", json=request)
+
+    assert response.status_code == 429
+    assert "5 минут" in response.get_json()["error"]

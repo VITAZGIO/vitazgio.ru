@@ -1,7 +1,7 @@
 import hmac
 import time
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from flask import Blueprint, g, jsonify, request, session
@@ -40,9 +40,21 @@ def create_debts_blueprint(
 ):
     debts_bp = Blueprint("debts", __name__)
     payment_banks = ("ОЗОН", "Т-Банк")
+    payment_request_limit = 5
+    payment_request_window = timedelta(minutes=5)
+    moscow_tz = ZoneInfo("Europe/Moscow")
 
     def data():
         return debts_data() if callable(debts_data) else debts_data
+
+    def payment_request_created_at(row):
+        try:
+            created = datetime.fromisoformat(str(row.get("created") or ""))
+        except ValueError:
+            return None
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=moscow_tz)
+        return created.astimezone(moscow_tz)
 
     def _verify_debts_password(payload):
         """Пароль долгов + троттлинг попыток. Используется и для входа в
@@ -175,23 +187,46 @@ def create_debts_blueprint(
             entry_date = debt_clean_date(payload.get("date"))
         except ValueError as err:
             return jsonify(error=str(err)), 400
-        now = datetime.now(ZoneInfo("Europe/Moscow")).isoformat(timespec="seconds")
+        now = datetime.now(moscow_tz)
 
         with debts_lock:
             store = data()
-            store.setdefault("payment_requests", [])
+            requests = store.setdefault("payment_requests", [])
             user = next((u for u in store["users"] if u.get("id") == user_id), None)
             if not user:
                 session.pop("debtor_id", None)
                 return jsonify(error="Пользователь не найден."), 404
-            store["payment_requests"].append({
+
+            pending_count = sum(
+                row.get("user_id") == user_id and row.get("status", "pending") == "pending"
+                for row in requests
+            )
+            if pending_count >= payment_request_limit:
+                return jsonify(error="Можно одновременно держать не больше 5 заявок в обработке."), 429
+
+            cutoff = now - payment_request_window
+            recent_attempts = [
+                row for row in store.setdefault("payment_request_attempts", [])
+                if (created := payment_request_created_at(row)) and created >= cutoff
+            ]
+            store["payment_request_attempts"] = recent_attempts
+            recent_count = sum(row.get("user_id") == user_id for row in recent_attempts)
+            if recent_count >= payment_request_limit:
+                return jsonify(error="Можно отправить не больше 5 заявок за 5 минут."), 429
+
+            created = now.isoformat(timespec="seconds")
+            store["payment_request_attempts"].append({
+                "user_id": user_id,
+                "created": created,
+            })
+            requests.append({
                 "id": uuid.uuid4().hex,
                 "user_id": user_id,
                 "date": entry_date,
                 "amount_cents": amount_cents,
                 "bank": bank,
                 "status": "pending",
-                "created": now,
+                "created": created,
             })
             amount = f"{amount_cents / 100:.2f}".rstrip("0").rstrip(".").replace(".", ",")
             notification_add(
@@ -374,6 +409,7 @@ def create_debts_blueprint(
         # для API-запросов уже открытой страницы, см. debts_owner_required).
         html = template("debts.html")
         return (html.replace("**MODE**", mode)
+                    .replace("**OWNER_LOCKED**", "true" if owner else "false")
                     .replace("**TITLE**", title)
                     .replace("**TITLE_FIRST**", title.split()[0])
                     .replace("**TITLE_REST**", " ".join(title.split()[1:]))

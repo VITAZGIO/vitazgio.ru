@@ -14,6 +14,13 @@
     .back:hover{color:#fff;border-color:var(--cyan);background:rgba(53,224,240,.2)} .back svg{width:20px;height:20px;display:block}
     h1{margin:0;font-size:clamp(34px,4vw,58px);line-height:1;font-weight:900;letter-spacing:0} h1 span{color:var(--cyan);text-shadow:0 0 22px rgba(53,224,240,.35)} .tag{margin-left:auto;color:var(--green);font-weight:800;text-transform:uppercase;letter-spacing:.08em;font-size:12px}
     .unlock{max-width:520px;border:1px solid var(--line);background:rgba(12,22,40,.82);padding:26px;margin-top:58px;box-shadow:inset 3px 0 0 var(--cyan)} .unlock h2,.panel h2{margin:0 0 10px;font-size:22px} .muted{color:var(--muted)} .hidden{display:none!important}
+    @media (min-width:981px){
+      body[data-owner-locked="true"]{display:grid;place-items:center}
+      body[data-owner-locked="true"] .wrap{width:min(520px,calc(100vw - 56px));margin:0;padding:0}
+      body[data-owner-locked="true"] .head{margin-bottom:22px}
+      body[data-owner-locked="true"] .tag{display:none}
+      body[data-owner-locked="true"] .unlock{max-width:none;margin-top:0}
+    }
     .keypad{display:none}
     @media (max-width:640px){
       .keypad{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:4px 0}
@@ -82,7 +89,7 @@
     }
   </style>
 </head>
-<body data-mode="**MODE**">
+<body data-mode="**MODE**" data-owner-locked="**OWNER_LOCKED**">
   <main class="wrap">
     <header class="head"><a class="back" href="**BACK_HREF**" aria-label="Назад">
       <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -440,6 +447,7 @@
           await api("/api/debts/unlock", {method:"POST", body:JSON.stringify({password:$("unlock-pass").value})});
           $("unlock").classList.add("hidden");
           $("owner-app").classList.remove("hidden");
+          document.body.dataset.ownerLocked = "false";
           await loadOwner();
         } catch (err) {
           $("unlock-err").textContent = err.message;
