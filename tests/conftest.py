@@ -131,6 +131,7 @@ def app_module(tmp_path_factory, fake_openrouter):
         # Фиксированный ключ сессии: без него модуль берёт случайный, и
         # куки бы протухали между перезагрузками модуля.
         "VITAZGIO_SESSION_SECRET": "test-secret-not-a-real-one",
+        "SERVERS_PASSWORD": "1224",
         # Без приставки суточный пароль консоли не работает вовсе («консоль
         # не настроена»), а на нём висят и терминал, и файлы по SFTP.
         "SSH_GATE_PASSWORD_PREFIX": "test-console-",

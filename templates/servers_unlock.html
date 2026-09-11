@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0d1321">
+  __ICONLINKS__
+  <title>Сервер · vitazgio.ru</title>
+  <style>
+    :root{color-scheme:dark;--bg:#0d1321;--cyan:#2de2ff;--green:#63f5ad;--line:rgba(255,255,255,.14);--muted:#8b97ac}
+    *{box-sizing:border-box}
+    body{min-width:320px;min-height:100vh;margin:0;display:grid;place-items:center;padding:24px;font-family:"Cascadia Code",Consolas,monospace;color:#eaf3fb;background:radial-gradient(circle at top left,#192a44,#0d1321 55%)}
+    main{width:min(440px,100%)}
+    .back{width:44px;height:44px;display:grid;place-items:center;margin-bottom:24px;color:var(--cyan);text-decoration:none;border:1px solid rgba(45,226,255,.35);border-radius:50%;background:rgba(45,226,255,.07)}
+    .back:hover{color:#fff;border-color:var(--cyan);background:rgba(45,226,255,.18)}
+    .back svg{width:20px;height:20px}
+    .lock{width:54px;height:54px;display:grid;place-items:center;color:var(--green);border:1px solid rgba(99,245,173,.35);border-radius:8px;background:rgba(99,245,173,.08)}
+    .lock svg{width:28px;height:28px}
+    h1{margin:18px 0 8px;font-size:clamp(30px,7vw,42px);line-height:1;font-weight:800;letter-spacing:0}
+    p{margin:0 0 24px;color:var(--muted);line-height:1.55}
+    form{padding:22px;border:1px solid var(--line);border-radius:8px;background:rgba(11,19,34,.82);box-shadow:inset 3px 0 0 var(--cyan)}
+    label{display:block;margin-bottom:9px;font-size:14px;font-weight:700}
+    input{width:100%;height:48px;padding:0 13px;border:1px solid rgba(45,226,255,.6);border-radius:4px;outline:0;color:#effaff;background:#091323;font:inherit}
+    input:focus{border-color:var(--cyan);box-shadow:0 0 0 3px rgba(45,226,255,.12)}
+    button{width:100%;height:48px;margin-top:12px;border:1px solid var(--cyan);border-radius:4px;color:#eaffff;background:rgba(45,226,255,.17);font:700 15px inherit;cursor:pointer}
+    button:hover{background:rgba(45,226,255,.28)}
+    .error{min-height:20px;margin:12px 0 0;color:#ff9f9f;font-size:14px}
+  </style>
+</head>
+<body>
+  <main>
+    <a class="back" href="/" aria-label="На главную">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M19 12H5m6-6-6 6 6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </a>
+    <div class="lock" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none"><rect x="5" y="10" width="14" height="10" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M8 10V7a4 4 0 0 1 8 0v3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    </div>
+    <h1>Сервер</h1>
+    <p>Введите пароль для просмотра.</p>
+    <form method="post" action="/servers/unlock">
+      <label for="password">Пароль</label>
+      <input id="password" name="password" type="password" inputmode="numeric" autocomplete="current-password" autofocus required>
+      <button type="submit">Открыть</button>
+      <div class="error" role="alert">__ERROR__</div>
+    </form>
+  </main>
+</body>
+</html>

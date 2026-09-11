@@ -129,6 +129,7 @@ SSH_GATE_PASSWORD_PREFIX = os.environ.get("SSH_GATE_PASSWORD_PREFIX")
 # Свой пароль вкладки «Долги», не связан с ежедневным паролем консоли —
 # задаётся один раз в .env и не меняется день ото дня.
 DEBTS_PASSWORD = os.environ.get("DEBTS_PASSWORD")
+SERVERS_PASSWORD = os.environ.get("SERVERS_PASSWORD", "1224")
 
 # Дома guacd рядом (127.0.0.1). Если сайт крутится на VPS — сюда
 # подставляется Netbird-адрес домашнего сервера.
@@ -4372,6 +4373,7 @@ app.register_blueprint(create_home_blueprint(
     log_login=_log_login,
     ssh_gate_password_prefix=SSH_GATE_PASSWORD_PREFIX,
     console_password_today=console_password_today,
+    servers_password=SERVERS_PASSWORD,
 ))
 
 app.register_blueprint(create_debts_blueprint(

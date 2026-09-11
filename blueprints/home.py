@@ -2,7 +2,7 @@ import hmac
 import secrets
 import time
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, redirect, request, session
 
 
 def create_home_blueprint(
@@ -37,6 +37,7 @@ def create_home_blueprint(
     log_login,
     ssh_gate_password_prefix,
     console_password_today,
+    servers_password,
 ):
     home_bp = Blueprint("home", __name__)
 
@@ -153,6 +154,10 @@ def create_home_blueprint(
         return html.replace("__NODES__", "".join(cards)) \
                    .replace("__ICONLINKS__", icon_links)
 
+    def servers_unlock_page(error=""):
+        html = template("servers_unlock.html")
+        return html.replace("__ICONLINKS__", icon_links).replace("__ERROR__", error)
+
     @home_bp.get("/servers")
     def servers_page():
         """Хозяйство: три машины, их роли и что на них крутится.
@@ -160,8 +165,20 @@ def create_home_blueprint(
         Страница открыта всем, поэтому наружу не выносим ни публичный адрес VPS,
         ни адреса mesh-сети — только домашние 192.168.x, которые одинаковы у
         половины страны и ничего не выдают."""
+        if not session.get("servers_authenticated"):
+            return servers_unlock_page()
         html = template("servers.html")
         return html.replace("__ICONLINKS__", icon_links)
+
+    @home_bp.post("/servers/unlock")
+    def servers_unlock():
+        password = request.form.get("password", "")
+        if not isinstance(password, str) or not hmac.compare_digest(
+            password.encode(), servers_password.encode()
+        ):
+            return servers_unlock_page("Неверный пароль."), 401
+        session["servers_authenticated"] = True
+        return redirect("/servers")
 
     @home_bp.route("/")
     def home():
