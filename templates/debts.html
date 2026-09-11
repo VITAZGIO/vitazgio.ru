@@ -10,7 +10,8 @@
     *{box-sizing:border-box} body{margin:0;min-height:100vh;background:radial-gradient(circle at 20% 0,#142947 0,#08111f 46%,#060b14 100%);color:var(--text);font:15px/1.45 "Segoe UI",Arial,sans-serif;}
     body::before{content:"";position:fixed;inset:0;pointer-events:none;background:linear-gradient(transparent 96%,rgba(53,224,240,.08) 97%);background-size:100% 4px;opacity:.45}
     a{color:inherit} button,input,select{font:inherit} .wrap{width:min(1480px,calc(100vw - 56px));margin:0 auto;padding:36px 0 54px;position:relative;z-index:1}
-    .head{display:flex;align-items:center;gap:18px;margin-bottom:28px} .back{width:44px;height:44px;border-radius:50%;border:1px solid rgba(53,224,240,.55);display:grid;place-items:center;text-decoration:none;color:var(--cyan);background:rgba(53,224,240,.08);font-size:25px}
+    .head{display:flex;align-items:center;gap:18px;margin-bottom:28px} .back{width:44px;height:44px;flex:none;border-radius:50%;border:1px solid rgba(53,224,240,.55);display:grid;place-items:center;text-decoration:none;color:var(--cyan);background:rgba(53,224,240,.08);transition:all .18s}
+    .back:hover{color:#fff;border-color:var(--cyan);background:rgba(53,224,240,.2)} .back svg{width:20px;height:20px;display:block}
     h1{margin:0;font-size:clamp(34px,4vw,58px);line-height:1;font-weight:900;letter-spacing:0} h1 span{color:var(--cyan);text-shadow:0 0 22px rgba(53,224,240,.35)} .tag{margin-left:auto;color:var(--green);font-weight:800;text-transform:uppercase;letter-spacing:.08em;font-size:12px}
     .unlock{max-width:520px;border:1px solid var(--line);background:rgba(12,22,40,.82);padding:26px;margin-top:58px;box-shadow:inset 3px 0 0 var(--cyan)} .unlock h2,.panel h2{margin:0 0 10px;font-size:22px} .muted{color:var(--muted)} .hidden{display:none!important}
     .keypad{display:none}
@@ -30,7 +31,8 @@
        (цвет обводки/пароль/удаление) во всплывающей карточке. */
     .owner-shell{display:flex;gap:14px;align-items:flex-start}
     .rail{flex:0 0 72px;display:flex;flex-direction:column;align-items:center;gap:10px;border:1px solid var(--line);background:rgba(12,22,40,.78);padding:14px 8px;box-shadow:inset 3px 0 0 var(--cyan)}
-    .avatar{width:48px;height:48px;flex:0 0 auto;border-radius:50%;border:3px solid var(--ac-user,var(--cyan));background:#081427;color:var(--text);font-size:18px;font-weight:900;display:grid;place-items:center;cursor:pointer;touch-action:manipulation;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+    .avatar{width:48px;height:48px;flex:0 0 auto;border-radius:50%;border:3px solid var(--ac-user,var(--cyan));background:#081427;color:var(--text);font-size:18px;font-weight:900;line-height:1;display:flex;align-items:center;justify-content:center;cursor:pointer;touch-action:manipulation;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+    .avatar-label{display:block;line-height:1;transform:translateY(-.04em)}
     .avatar.active{box-shadow:0 0 0 3px rgba(255,255,255,.1),0 0 14px var(--ac-user,var(--cyan))}
     .avatar-add{border-style:dashed;color:var(--muted);font-size:24px;font-weight:400}
     .owner-main{flex:1;min-width:0;display:grid;gap:16px}
@@ -48,7 +50,8 @@
     .swatch.cyan{background:var(--u-cyan)} .swatch.green{background:var(--u-green)} .swatch.pink{background:var(--u-pink)} .swatch.yellow{background:var(--u-yellow)} .swatch.violet{background:var(--u-violet)} .swatch.orange{background:var(--u-orange)}
     .modal-actions{display:flex;gap:10px;margin-top:8px} .modal-actions .btn{flex:1}
     .entry-form{grid-template-columns:1.1fr .8fr .8fr 1.4fr auto;align-items:end;margin-bottom:18px} .history{width:100%;border-collapse:collapse} .history th,.history td{border-bottom:1px solid #1a2d49;padding:11px 8px;text-align:left;vertical-align:top} .history th{color:#86a1cc;font-size:12px;text-transform:uppercase;letter-spacing:.08em} .sum{font-weight:900;color:var(--cyan);white-space:nowrap} .sum.minus{color:var(--green)} .kind{font-style:normal;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.04em} .empty{padding:28px;border:1px dashed #294260;color:var(--muted);text-align:center}
-    .del-x{border:1px solid rgba(255,79,179,.55);background:rgba(255,79,179,.12);color:var(--text);width:26px;height:26px;border-radius:50%;font-size:17px;line-height:1;cursor:pointer;display:grid;place-items:center;padding:0}
+    .del-x{border:1px solid rgba(255,79,179,.55);background:rgba(255,79,179,.12);color:var(--text);width:26px;height:26px;border-radius:50%;cursor:pointer;display:grid;place-items:center;padding:0}
+    .del-x:hover{border-color:var(--pink);background:rgba(255,79,179,.24)} .del-x svg{width:12px;height:12px;display:block}
     .err{min-height:20px;color:#ff7aa9;font-weight:800} .ok{color:var(--green)} .debtor-card{max-width:960px;margin:auto} .debtor-card .history{margin-top:16px}
     @media (max-width:980px){
       .wrap{width:min(100vw - 24px,760px);padding-top:20px}.total{grid-template-columns:1fr}.entry-form{grid-template-columns:1fr}.tag{display:none}
@@ -79,7 +82,11 @@
 </head>
 <body data-mode="**MODE**">
   <main class="wrap">
-    <header class="head"><a class="back" href="**BACK_HREF**" aria-label="Назад">‹</a><h1>**TITLE_FIRST** <span>**TITLE_REST**</span></h1><div class="tag">vitazgio.ru</div></header>
+    <header class="head"><a class="back" href="**BACK_HREF**" aria-label="Назад">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M19 12H5m0 0 6-6m-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </a><h1>**TITLE_FIRST** <span>**TITLE_REST**</span></h1><div class="tag">vitazgio.ru</div></header>
 
     <section class="unlock" id="unlock" **UNLOCK_HIDDEN**>
       <h2>Пароль</h2>
@@ -160,7 +167,8 @@
       const label = entry.kind === "return" ? "вернул" : "долг";
       // "Кто" тут не нужен отдельной колонкой — историю смотрят уже
       // выбрав человека кружком-аватаркой, его имя и так на виду сверху.
-      return `<tr><td>${esc(entry.date)}</td><td><i class="kind">${label}</i></td><td class="${cls}">${money(entry.kind === "return" ? -entry.amount_cents : entry.amount_cents)}</td><td>${esc(entry.comment || "—")}</td><td>${canDelete ? `<button class="del-x" data-del="${esc(entry.id)}" aria-label="Удалить" title="Удалить">×</button>` : ""}</td></tr>`;
+      const deleteIcon = `<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 4l8 8m0-8-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`;
+      return `<tr><td>${esc(entry.date)}</td><td><i class="kind">${label}</i></td><td class="${cls}">${money(entry.kind === "return" ? -entry.amount_cents : entry.amount_cents)}</td><td>${esc(entry.comment || "—")}</td><td>${canDelete ? `<button class="del-x" data-del="${esc(entry.id)}" aria-label="Удалить" title="Удалить">${deleteIcon}</button>` : ""}</td></tr>`;
     }
 
     function tableHtml(entries, canDelete) {
@@ -320,7 +328,7 @@
       $("avatars").innerHTML = data.users.map(u => {
         const initial = (u.name || "?").trim().slice(0, 1).toUpperCase() || "?";
         return `<button type="button" class="avatar ${u.id === selected ? "active" : ""}" data-user="${esc(u.id)}"
-          style="--ac-user:var(--u-${esc(u.color || "cyan")})" title="${esc(u.name)}" aria-label="${esc(u.name)}">${esc(initial)}</button>`;
+          style="--ac-user:var(--u-${esc(u.color || "cyan")})" title="${esc(u.name)}" aria-label="${esc(u.name)}"><span class="avatar-label">${esc(initial)}</span></button>`;
       }).join("");
       $("avatars").querySelectorAll("[data-user]").forEach(btn => bindAvatarPress(btn, btn.dataset.user));
     }
