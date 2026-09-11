@@ -113,7 +113,7 @@ PING_INTERVAL_SECONDS = 10
 PING_TIMEOUT_SECONDS = 1
 PING_LATENCY_RE = re.compile(r"time[=<]\s*([\d.]+)\s*ms", re.IGNORECASE)
 
-netbird_status = {device["ip"]: {"online": False, "latency_ms": None} for device in NETBIRD_DEVICES}
+netbird_status = {device["ip"]: {"online": False, "latency_ms": None, "last_seen": None} for device in NETBIRD_DEVICES}
 netbird_status_lock = threading.Lock()
 ssh_enabled_ips = {device["ip"] for device in NETBIRD_DEVICES if device.get("ssh_enabled")}
 
@@ -1222,7 +1222,14 @@ def netbird_ping_loop():
         for device in NETBIRD_DEVICES:
             online, latency_ms = ping_once(device["ip"])
             with netbird_status_lock:
-                netbird_status[device["ip"]] = {"online": online, "latency_ms": latency_ms}
+                # last_seen — момент последнего успешного пинга; пока устройство
+                # офлайн, старое значение остаётся (иначе показывать было бы нечего).
+                prev_seen = netbird_status.get(device["ip"], {}).get("last_seen")
+                netbird_status[device["ip"]] = {
+                    "online": online,
+                    "latency_ms": latency_ms,
+                    "last_seen": time.time() if online else prev_seen,
+                }
         time.sleep(PING_INTERVAL_SECONDS)
 
 
