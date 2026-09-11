@@ -59,9 +59,11 @@
         .connect-btn:hover, .connect-btn:focus-visible { color: #fff; background: rgba(255,120,47,.22); outline: none; }
         .connect-btn.btn-offline { color: #4a5060; border-color: rgba(100,100,110,.2); background: rgba(60,65,75,.06); cursor: not-allowed; pointer-events: none; }
         .connect-btn-empty { display: block; }
-        /* SMB пока не подключён никуда — кнопка стоит местом на будущее,
-           поэтому всегда в приглушённом виде «offline», без обработчика. */
-        .smb-btn { padding: 6px 10px; color: #4a5060; font: 700 .7rem "Cascadia Code", Consolas, monospace; letter-spacing: .04em; text-transform: uppercase; border: 1px solid rgba(100,100,110,.2); background: rgba(60,65,75,.06); cursor: not-allowed; }
+        /* Файлы по SFTP. Кнопка живая только там, где есть SSH-сервер; для
+           остальных это «СКОРО» — заглушка без обработчика. */
+        .smb-btn { display: block; padding: 6px 10px; color: #69e8ff; font: 700 .7rem "Cascadia Code", Consolas, monospace; letter-spacing: .04em; text-transform: uppercase; text-align: center; text-decoration: none; border: 1px solid rgba(45,226,255,.3); background: rgba(45,226,255,.07); cursor: pointer; }
+        .smb-btn:hover, .smb-btn:focus-visible { color: #fff; background: rgba(45,226,255,.2); outline: none; }
+        .smb-btn[disabled] { color: #4a5060; border-color: rgba(100,100,110,.2); background: rgba(60,65,75,.06); cursor: not-allowed; }
         .wol-btn { padding: 5px 7px; color: #fbbf24; font-size: .9rem; border: 1px solid rgba(251,191,36,.3); background: rgba(251,191,36,.07); cursor: pointer; transition: all .2s; }
         .wol-btn:hover { background: rgba(251,191,36,.18); border-color: #fbbf24; }
         .wol-btn.wol-online { color: #ff6b81; border-color: rgba(255,107,129,.3); background: rgba(255,107,129,.07); }

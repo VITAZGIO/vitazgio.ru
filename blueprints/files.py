@@ -1,0 +1,338 @@
+"""Файловый менеджер по SFTP — то же, что умеет Termius с телефона.
+
+SFTP — не отдельная служба, а подсистема внутри SSH: тот же порт 22, тот же
+логин и пароль, что у консоли кабинета. Поэтому здесь нет ни новых портов в
+mesh-сети, ни второго набора секретов — только `paramiko`, который и так уже
+держит консоль.
+
+Пароль SSH на диск не попадает: живое соединение лежит в памяти процесса,
+ключом к нему служит случайный токен из сессии (подписанная кука). Простой
+дольше SFTP_IDLE_SECONDS закрывается сам.
+"""
+
+import posixpath
+import secrets
+import stat as statmod
+import threading
+import time
+
+import paramiko
+from flask import Blueprint, Response, jsonify, request, session
+
+SFTP_IDLE_SECONDS = 15 * 60      # столько живёт соединение без единого запроса
+SFTP_CHUNK = 256 * 1024          # кусок чтения/записи: компромисс память/скорость
+SFTP_RECURSIVE_MAX = 5000        # потолок на рекурсивное удаление, чтобы не уйти в никуда
+
+
+def _error_text(exc):
+    """Человеческая формулировка вместо «[Errno 13] Permission denied»."""
+    errno = getattr(exc, "errno", None)
+    if errno == 13:
+        return "Нет доступа."
+    if errno == 2:
+        return "Не найдено."
+    if errno == 17:
+        return "Уже существует."
+    if errno == 39 or "not empty" in str(exc).lower():
+        return "Папка не пуста."
+    return str(exc) or "Ошибка SFTP."
+
+
+def create_files_blueprint(
+    *,
+    template,
+    icon_links,
+    login_required,
+    netbird_devices,
+    sftp_enabled_ips,
+):
+    files_bp = Blueprint("files", __name__)
+
+    # token -> {"client", "sftp", "ip", "user", "used"}
+    live = {}
+    live_lock = threading.Lock()
+
+    def _shut(entry):
+        for name in ("sftp", "client"):
+            try:
+                entry[name].close()
+            except Exception:
+                pass
+
+    def _janitor():
+        while True:
+            time.sleep(60)
+            deadline = time.time() - SFTP_IDLE_SECONDS
+            with live_lock:
+                stale = [t for t, e in live.items() if e["used"] < deadline]
+                dropped = [live.pop(t) for t in stale]
+            for entry in dropped:
+                _shut(entry)
+
+    threading.Thread(target=_janitor, daemon=True).start()
+
+    def _device_name(ip):
+        for device in netbird_devices:
+            if device["ip"] == ip:
+                return device["name"]
+        return ip
+
+    def _session():
+        """Живое соединение текущего браузера или None."""
+        token = session.get("sftp_token")
+        if not token:
+            return None
+        with live_lock:
+            entry = live.get(token)
+            if entry:
+                entry["used"] = time.time()
+        return entry
+
+    def _drop_current():
+        token = session.pop("sftp_token", None)
+        if not token:
+            return
+        with live_lock:
+            entry = live.pop(token, None)
+        if entry:
+            _shut(entry)
+
+    def _clean(path):
+        """Путь всегда абсолютный и нормализованный: «..» схлопываются тут,
+        а не уезжают на машину строкой."""
+        if not isinstance(path, str) or not path.startswith("/"):
+            return None
+        return posixpath.normpath(path)
+
+    def _entries(sftp, path):
+        rows = []
+        for attr in sftp.listdir_attr(path):
+            mode = attr.st_mode or 0
+            is_dir = statmod.S_ISDIR(mode)
+            if statmod.S_ISLNK(mode):
+                # Симлинк на папку должен открываться как папка, поэтому
+                # спрашиваем, куда он ведёт. Битый — остаётся файлом.
+                try:
+                    is_dir = statmod.S_ISDIR(sftp.stat(posixpath.join(path, attr.filename)).st_mode or 0)
+                except Exception:
+                    is_dir = False
+            rows.append({
+                "name": attr.filename,
+                "dir": is_dir,
+                "size": attr.st_size or 0,
+                "mtime": attr.st_mtime or 0,
+            })
+        rows.sort(key=lambda r: (not r["dir"], r["name"].lower()))
+        return rows
+
+    def _rm_tree(sftp, path, budget):
+        """Рекурсивное удаление с потолком: без него кривой путь мог бы
+        увести в обход всего диска."""
+        for attr in sftp.listdir_attr(path):
+            if budget[0] <= 0:
+                raise OSError("Слишком много файлов — удалите частями.")
+            budget[0] -= 1
+            child = posixpath.join(path, attr.filename)
+            mode = attr.st_mode or 0
+            if statmod.S_ISDIR(mode):
+                _rm_tree(sftp, child, budget)
+            else:
+                sftp.remove(child)
+        sftp.rmdir(path)
+
+    # ---- Страница -----------------------------------------------------------
+
+    @files_bp.get("/files/<ip>")
+    @login_required
+    def files_page(ip):
+        if ip not in sftp_enabled_ips:
+            return "Для этой машины файлы недоступны.", 404
+        html = template("files.html")
+        return (html.replace("{{IP}}", ip)
+                    .replace("{{NAME}}", _device_name(ip))
+                    .replace("{{NEED_CONSOLE}}", "" if session.get("console_authenticated") else "1")
+                    .replace("__ICONLINKS__", icon_links))
+
+    # ---- Соединение ---------------------------------------------------------
+
+    @files_bp.post("/api/files/connect")
+    @login_required
+    def files_connect():
+        if not session.get("console_authenticated"):
+            return jsonify(error="Сначала пароль консоли."), 403
+
+        payload = request.get_json(silent=True) or {}
+        ip = payload.get("ip")
+        username = payload.get("username")
+        password = payload.get("password")
+        if ip not in sftp_enabled_ips:
+            return jsonify(error="Неизвестная машина."), 400
+        if not isinstance(username, str) or not isinstance(password, str) or not username or not password:
+            return jsonify(error="Нужны логин и пароль."), 400
+
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        try:
+            client.connect(ip, username=username, password=password,
+                           timeout=8, look_for_keys=False, allow_agent=False)
+        except paramiko.AuthenticationException:
+            return jsonify(error="Логин или пароль не подошли."), 401
+        except (paramiko.SSHException, OSError) as e:
+            return jsonify(error=f"Не удалось подключиться: {e}"), 502
+
+        try:
+            sftp = client.open_sftp()
+            home = sftp.normalize(".")
+            rows = _entries(sftp, home)
+        except Exception as e:
+            try:
+                client.close()
+            except Exception:
+                pass
+            return jsonify(error=f"SFTP не открылся: {e}"), 502
+
+        transport = client.get_transport()
+        if transport:
+            transport.set_keepalive(20)
+
+        _drop_current()   # второе подключение не оставляет первое висеть
+        token = secrets.token_urlsafe(18)
+        with live_lock:
+            live[token] = {"client": client, "sftp": sftp, "ip": ip,
+                           "user": username, "used": time.time()}
+        session["sftp_token"] = token
+        return jsonify(path=home, user=username, entries=rows)
+
+    @files_bp.post("/api/files/disconnect")
+    @login_required
+    def files_disconnect():
+        _drop_current()
+        return jsonify(ok=True)
+
+    # ---- Работа с файлами ---------------------------------------------------
+
+    @files_bp.get("/api/files/list")
+    @login_required
+    def files_list():
+        entry = _session()
+        if not entry:
+            return jsonify(error="Нет соединения.", reconnect=True), 409
+        path = _clean(request.args.get("path", ""))
+        if not path:
+            return jsonify(error="Плохой путь."), 400
+        try:
+            return jsonify(path=path, entries=_entries(entry["sftp"], path))
+        except Exception as e:
+            return jsonify(error=_error_text(e)), 400
+
+    @files_bp.get("/api/files/download")
+    @login_required
+    def files_download():
+        entry = _session()
+        if not entry:
+            return jsonify(error="Нет соединения.", reconnect=True), 409
+        path = _clean(request.args.get("path", ""))
+        if not path:
+            return jsonify(error="Плохой путь."), 400
+
+        sftp = entry["sftp"]
+        try:
+            size = sftp.stat(path).st_size or 0
+            handle = sftp.open(path, "rb")
+            handle.prefetch()
+        except Exception as e:
+            return jsonify(error=_error_text(e)), 400
+
+        def stream():
+            try:
+                while True:
+                    chunk = handle.read(SFTP_CHUNK)
+                    if not chunk:
+                        break
+                    yield chunk
+            finally:
+                try:
+                    handle.close()
+                except Exception:
+                    pass
+
+        name = posixpath.basename(path) or "file"
+        quoted = name.encode("utf-8", "ignore").decode("latin-1", "ignore")
+        # application/octet-stream не входит в GZIP_TYPES, поэтому after_request
+        # его не тронет — поток уедет как есть, без сбора в буфер.
+        return Response(stream(), mimetype="application/octet-stream", headers={
+            "Content-Length": str(size),
+            "Content-Disposition": f"attachment; filename=\"{quoted}\"; filename*=UTF-8''{name}",
+            "Cache-Control": "private, no-store",
+        })
+
+    @files_bp.post("/api/files/upload")
+    @login_required
+    def files_upload():
+        entry = _session()
+        if not entry:
+            return jsonify(error="Нет соединения.", reconnect=True), 409
+        folder = _clean(request.args.get("path", ""))
+        name = posixpath.basename(request.args.get("name", "") or "")
+        if not folder or not name or name in (".", ".."):
+            return jsonify(error="Плохое имя файла."), 400
+
+        target = posixpath.join(folder, name)
+        written = 0
+        try:
+            with entry["sftp"].open(target, "wb") as remote:
+                remote.set_pipelined(True)
+                while True:
+                    chunk = request.stream.read(SFTP_CHUNK)
+                    if not chunk:
+                        break
+                    remote.write(chunk)
+                    written += len(chunk)
+        except Exception as e:
+            return jsonify(error=_error_text(e)), 400
+        return jsonify(ok=True, name=name, size=written)
+
+    @files_bp.post("/api/files/op")
+    @login_required
+    def files_op():
+        entry = _session()
+        if not entry:
+            return jsonify(error="Нет соединения.", reconnect=True), 409
+
+        payload = request.get_json(silent=True) or {}
+        op = payload.get("op")
+        path = _clean(payload.get("path", ""))
+        if not path:
+            return jsonify(error="Плохой путь."), 400
+        sftp = entry["sftp"]
+
+        try:
+            if op == "mkdir":
+                sftp.mkdir(path)
+            elif op == "rename":
+                name = posixpath.basename(payload.get("name", "") or "")
+                if not name or name in (".", ".."):
+                    return jsonify(error="Плохое имя."), 400
+                sftp.rename(path, posixpath.join(posixpath.dirname(path), name))
+            elif op == "delete":
+                if statmod.S_ISDIR(sftp.stat(path).st_mode or 0):
+                    if payload.get("recursive"):
+                        _rm_tree(sftp, path, [SFTP_RECURSIVE_MAX])
+                    else:
+                        try:
+                            sftp.rmdir(path)
+                        except OSError as e:
+                            # Папка с содержимым — не молчим и не сносим втихую,
+                            # а спрашиваем у человека отдельной карточкой.
+                            if getattr(e, "errno", None) in (39, 66) or "not empty" in str(e).lower():
+                                return jsonify(error="Папка не пуста.", needs_recursive=True), 409
+                            raise
+                else:
+                    sftp.remove(path)
+            else:
+                return jsonify(error="Неизвестная операция."), 400
+        except Exception as e:
+            return jsonify(error=_error_text(e)), 400
+        return jsonify(ok=True)
+
+    return files_bp

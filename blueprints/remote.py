@@ -89,6 +89,7 @@ def create_remote_blueprint(
     console_login_max_attempts,
     log_login,
     ssh_enabled_ips,
+    sftp_enabled_ips,
     rdp_enabled_ips,
     vnc_enabled_ips,
     claude_ready,
@@ -698,9 +699,13 @@ def create_remote_blueprint(
                 if device.get("vnc_enabled")
                 else '<span class="connect-btn-empty"></span>'
             )
-            # SMB пока никуда не подключён — кнопка стоит местом на будущее,
-            # заведомо выключена, без data-type и обработчика клика.
-            + '<button class="smb-btn" type="button" disabled title="SMB — пока недоступно">SMB</button>'
+            # Файлы по SFTP — только там, где есть SSH-сервер. Остальным
+            # (телефон, винды без OpenSSH) кнопка стоит местом на будущее.
+            + (
+                f'<a class="smb-btn" href="/files/{device["ip"]}" title="Файлы по SFTP">SFTP</a>'
+                if device["ip"] in sftp_enabled_ips
+                else '<button class="smb-btn" type="button" disabled title="Файлы сюда пока не настроены">СКОРО</button>'
+            )
             + "</li>"
             for device in netbird_devices
         )

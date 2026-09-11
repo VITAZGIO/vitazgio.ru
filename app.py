@@ -34,6 +34,7 @@ from blueprints.debts import create_debts_blueprint
 from blueprints.devices import create_devices_blueprint
 from blueprints.diy import create_diy_blueprint
 from blueprints.drop import create_drop_blueprint
+from blueprints.files import create_files_blueprint
 from blueprints.home import create_home_blueprint
 from blueprints.login_log import create_login_log_blueprint
 from blueprints.music import create_music_blueprint
@@ -98,9 +99,14 @@ LOGIN_MAX_ATTEMPTS = 5
 login_attempts = defaultdict(deque)
 login_attempts_lock = threading.Lock()
 
+# sftp_enabled — на машине есть SSH-сервер, значит работает и SFTP (это его
+# подсистема, тот же порт 22). У linux-машин он подразумевается флагом
+# ssh_enabled; отдельный флаг нужен виндовым, куда SSH поставлен ради
+# выключения по кнопке, но консоль им не заводили.
 NETBIRD_DEVICES = [
     {"ip": "100.104.18.182", "name": "VitazNout", "rdp_enabled": True},
-    {"ip": "100.104.122.94", "name": "VitazComp", "rdp_enabled": True, "wol_mac": "d8:bb:c1:a6:d4:81"},
+    {"ip": "100.104.122.94", "name": "VitazComp", "rdp_enabled": True, "sftp_enabled": True,
+     "wol_mac": "d8:bb:c1:a6:d4:81"},
     {"ip": "100.104.1.172", "name": "windows10proxmox", "rdp_enabled": True},
     {"ip": "100.104.67.89", "name": "orangepizero3", "ssh_enabled": True},
     {"ip": "100.104.221.91", "name": "ubuntu-server", "ssh_enabled": True},
@@ -116,6 +122,8 @@ PING_LATENCY_RE = re.compile(r"time[=<]\s*([\d.]+)\s*ms", re.IGNORECASE)
 netbird_status = {device["ip"]: {"online": False, "latency_ms": None, "last_seen": None} for device in NETBIRD_DEVICES}
 netbird_status_lock = threading.Lock()
 ssh_enabled_ips = {device["ip"] for device in NETBIRD_DEVICES if device.get("ssh_enabled")}
+sftp_enabled_ips = {device["ip"] for device in NETBIRD_DEVICES
+                    if device.get("ssh_enabled") or device.get("sftp_enabled")}
 
 SSH_GATE_PASSWORD_PREFIX = os.environ.get("SSH_GATE_PASSWORD_PREFIX")
 # Свой пароль вкладки «Долги», не связан с ежедневным паролем консоли —
@@ -4464,12 +4472,21 @@ app.register_blueprint(create_ai_blueprint(
     sse=_sse,
 ))
 
+app.register_blueprint(create_files_blueprint(
+    template=_template,
+    icon_links=ICON_LINKS,
+    login_required=login_required,
+    netbird_devices=NETBIRD_DEVICES,
+    sftp_enabled_ips=sftp_enabled_ips,
+))
+
 app.register_blueprint(create_remote_blueprint(
     sock=sock,
     template=_template,
     icon_links=ICON_LINKS,
     login_required=login_required,
     netbird_devices=NETBIRD_DEVICES,
+    sftp_enabled_ips=sftp_enabled_ips,
     netbird_status=netbird_status,
     netbird_status_lock=netbird_status_lock,
     ssh_gate_password_prefix=SSH_GATE_PASSWORD_PREFIX,

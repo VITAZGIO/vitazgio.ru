@@ -1,0 +1,561 @@
+
+    <!DOCTYPE html>
+    <html lang="ru">
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <meta name="robots" content="noindex, nofollow">
+      <title>Файлы · {{NAME}} · vitazgio.ru</title>
+      __ICONLINKS__
+      <style>
+        * { box-sizing: border-box; }
+        body { margin: 0; min-height: 100svh; color: #e9fbff; font-family: "Cascadia Code", Consolas, monospace; background: radial-gradient(circle at top left, #192a44, #0d1321 55%); }
+        [hidden] { display: none !important; }
+        a { color: inherit; }
+        button { font-family: inherit; }
+        .wrap { max-width: 1320px; margin: 0 auto; padding: clamp(24px, 4vw, 54px); }
+        .head { display: flex; align-items: center; gap: 18px; margin-bottom: 26px; }
+        .back { width: 44px; height: 44px; flex: none; display: grid; place-items: center;
+          color: #ff9a5c; text-decoration: none; border: 1px solid rgba(255,120,47,.35); border-radius: 50%;
+          background: rgba(255,120,47,.08); transition: all .18s; }
+        .back:hover { color: #fff; border-color: #ff782f; background: rgba(255,120,47,.2); }
+        .back svg { width: 20px; height: 20px; display: block; }
+        h1 { margin: 0; font-size: clamp(1.5rem, 3.2vw, 2.1rem); font-weight: 700; letter-spacing: -.02em;
+             color: #eaf6ff; text-shadow: 0 0 22px rgba(255,120,47,.35); }
+        .sub { margin: 3px 0 0; color: #8b93a6; font-size: .84rem; }
+        .sub b { color: #63f5ad; font-weight: 700; }
+
+        .panel { border: 1px solid rgba(255,120,47,.22); background: rgba(16,24,40,.55); }
+        .bar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 12px 18px;
+               border-bottom: 1px solid rgba(255,255,255,.07); }
+        .crumbs { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; min-width: 0; flex: 1; }
+        .crumb { padding: 4px 7px; color: #69e8ff; font-size: .78rem; border: 0; background: transparent; cursor: pointer; }
+        .crumb:hover { color: #fff; background: rgba(45,226,255,.1); }
+        .crumb.last { color: #c4cad5; cursor: default; }
+        .crumb-sep { color: #4a5164; font-size: .72rem; }
+        .act { padding: 7px 12px; color: #ff782f; font: 700 .7rem "Cascadia Code", Consolas, monospace;
+               letter-spacing: .04em; text-transform: uppercase; border: 1px solid rgba(255,120,47,.35);
+               background: rgba(255,120,47,.07); cursor: pointer; transition: all .15s; }
+        .act:hover { color: #fff; background: rgba(255,120,47,.22); }
+        .act.ghost { color: #8b93a6; border-color: rgba(255,255,255,.12); background: transparent; }
+        .act.ghost:hover { color: #fff; border-color: rgba(255,255,255,.3); background: rgba(255,255,255,.06); }
+
+        .list { margin: 0; padding: 6px 18px 18px; list-style: none; }
+        .row { display: grid; grid-template-columns: 22px 1fr 96px 150px 150px; align-items: center; gap: 14px;
+               min-height: 46px; margin-inline: -10px; padding-inline: 10px;
+               border-bottom: 1px solid rgba(255,255,255,.06); transition: background .15s ease; }
+        .row:last-child { border-bottom: 0; }
+        .row:hover { background: rgba(255,120,47,.07); }
+        .row-ic { width: 18px; height: 18px; color: #7d879b; }
+        .row.dir .row-ic { color: #ff9a5c; }
+        .name { min-width: 0; display: flex; align-items: center; color: #c4cad5; font-size: .84rem;
+                text-align: left; border: 0; background: transparent; padding: 4px 0; overflow: hidden; }
+        .name span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+        .row.dir .name { color: #eaf6ff; cursor: pointer; }
+        .row.dir .name:hover span { text-decoration: underline; }
+        .size, .date { color: #6b7385; font-size: .74rem; white-space: nowrap; }
+        .size { text-align: right; }
+        .tools { display: flex; justify-content: flex-end; gap: 6px; }
+        .tool { width: 30px; height: 28px; display: grid; place-items: center; color: #7d879b;
+                border: 1px solid rgba(255,255,255,.1); background: rgba(255,255,255,.03); cursor: pointer; transition: all .15s; }
+        .tool:hover { color: #fff; border-color: rgba(255,120,47,.45); background: rgba(255,120,47,.14); }
+        .tool.danger:hover { color: #ffb3b3; border-color: rgba(255,107,129,.45); background: rgba(255,107,129,.14); }
+        .tool svg { width: 14px; height: 14px; }
+        .empty { padding: 34px 8px; color: #6b7385; font-size: .8rem; text-align: center; }
+        .gate { display: grid; justify-items: center; gap: 14px; padding: 38px 18px; }
+        .gate p { margin: 0; color: #8b93a6; font-size: .82rem; }
+
+        .drop-hint { margin: 14px 0 0; padding: 14px; color: #6b7385; font-size: .76rem; text-align: center;
+                     border: 1px dashed rgba(255,255,255,.12); }
+        body.dragging .drop-hint { color: #ff9a5c; border-color: #ff782f; background: rgba(255,120,47,.08); }
+
+        .ups { margin: 14px 0 0; display: flex; flex-direction: column; gap: 8px; }
+        .up { padding: 9px 12px; border: 1px solid rgba(255,255,255,.1); background: rgba(255,255,255,.03); }
+        .up-top { display: flex; justify-content: space-between; gap: 10px; color: #c4cad5; font-size: .76rem; }
+        .up-top b { color: #6b7385; font-weight: 400; }
+        .up-bar { height: 3px; margin-top: 7px; background: rgba(255,255,255,.08); }
+        .up-bar i { display: block; height: 100%; background: #ff782f; transition: width .2s; }
+        .up.err .up-bar i { background: #ff6b81; }
+        .up.done .up-bar i { background: #63f5ad; }
+
+        @media (max-width: 760px) {
+          .row { grid-template-columns: 22px 1fr auto; gap: 8px 12px; padding-block: 8px; }
+          .name { grid-column: 2; }
+          .tools { grid-column: 3; grid-row: 1 / span 2; }
+          .size { grid-column: 2; grid-row: 2; text-align: left; }
+          .date { display: none; }
+        }
+
+        /* Карточки вместо системных confirm/prompt/alert — в теме сайта */
+        .ui-scrim { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center;
+                    justify-content: center; padding: 16px; background: rgba(2,5,12,.7); }
+        .ui-modal { width: min(380px, 100%); padding: 22px; color: #eef2fb;
+                    border: 1px solid rgba(255,120,47,.35); background: #10162a;
+                    box-shadow: 0 24px 70px rgba(0,0,0,.6); }
+        .ui-modal h2 { margin: 0 0 16px; font-size: 1.05rem; }
+        .ui-modal p { margin: 0 0 16px; font-size: .84rem; line-height: 1.55; color: #dbe2f5; white-space: pre-line; }
+        .ui-modal input { width: 100%; height: 42px; padding: 0 12px; margin: 0 0 12px; color: #f4fbff;
+                          font: 400 .88rem inherit; border: 1px solid rgba(255,255,255,.12); outline: none;
+                          background: rgba(4,10,20,.65); }
+        .ui-modal input:focus { border-color: #ff782f; }
+        .ui-acts { display: flex; gap: 8px; justify-content: flex-end; }
+        .ui-acts button { height: 38px; padding: 0 16px; color: #cfd8ee; font: 600 .78rem inherit; cursor: pointer;
+                          border: 1px solid rgba(255,255,255,.12); background: rgba(255,255,255,.04); transition: .15s; }
+        .ui-acts button:hover { color: #fff; background: rgba(255,255,255,.09); }
+        .ui-acts button.ui-primary { color: #120a04; border-color: transparent; background: #ff782f; }
+        .ui-acts button.ui-primary:hover { filter: brightness(1.08); }
+        .ui-acts button.ui-danger { color: #ffb3b3; border-color: rgba(255,107,129,.4); background: rgba(255,107,129,.12); }
+        .ui-acts button.ui-danger:hover { background: rgba(255,107,129,.22); }
+        .ui-err { margin: 0 0 12px; color: #ff6b81; font-size: .76rem; min-height: 1em; }
+        .ui-toasts { position: fixed; z-index: 70; left: 50%; bottom: 22px; transform: translateX(-50%);
+                     display: flex; flex-direction: column; gap: 8px; align-items: center; pointer-events: none; }
+        .ui-toast { padding: 10px 15px; color: #eef2fb; font-size: .78rem; max-width: min(420px, 86vw); text-align: center;
+                    border: 1px solid rgba(255,255,255,.12); background: #10162a;
+                    box-shadow: 0 10px 30px rgba(0,0,0,.45); transition: opacity .25s; }
+        .ui-toast.err { color: #ffb3b3; border-color: rgba(255,107,129,.4); }
+        .ui-toast.ok { border-color: rgba(99,245,173,.4); }
+      </style>
+    </head>
+    <body>
+      <div class="wrap">
+        <header class="head">
+          <a class="back" href="/netbird" aria-label="Назад к устройствам">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg>
+          </a>
+          <div>
+            <h1>{{NAME}}</h1>
+            <p class="sub">файлы по SFTP · <b id="who">{{IP}}</b></p>
+          </div>
+        </header>
+
+        <section class="panel" id="panel" hidden>
+          <div class="bar">
+            <nav class="crumbs" id="crumbs"></nav>
+            <button class="act" type="button" id="btn-upload">Загрузить</button>
+            <button class="act ghost" type="button" id="btn-mkdir">Новая папка</button>
+            <button class="act ghost" type="button" id="btn-reload">Обновить</button>
+          </div>
+          <ul class="list" id="list"></ul>
+        </section>
+
+        <section class="panel gate" id="gate" hidden>
+          <p>Соединение не открыто.</p>
+          <button class="act" type="button" id="btn-connect">Подключиться</button>
+        </section>
+
+        <p class="drop-hint" id="drop-hint" hidden>Перетащи файлы сюда, чтобы загрузить в текущую папку</p>
+        <div class="ups" id="ups"></div>
+        <input type="file" id="picker" multiple hidden>
+      </div>
+
+      <script>
+        const IP = "{{IP}}";
+        const MACHINE = "{{NAME}}";
+        // Сервер знает, вводили ли уже суточный пароль консоли в этой сессии,
+        // поэтому лишнюю карточку не показываем.
+        let needConsole = "{{NEED_CONSOLE}}" === "1";
+
+        const esc = (s) => (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+        // ---- карточки вместо системных диалогов --------------------------------
+        const uiToasts = document.createElement("div");
+        uiToasts.className = "ui-toasts";
+        document.body.appendChild(uiToasts);
+        const uiToast = (text, kind) => {
+          const t = document.createElement("div");
+          t.className = "ui-toast" + (kind ? " " + kind : "");
+          t.textContent = text;
+          uiToasts.appendChild(t);
+          setTimeout(() => { t.style.opacity = "0"; setTimeout(() => t.remove(), 260); }, 2600);
+        };
+
+        const uiModal = ({ title, text, fields, okLabel, okKind, cancelLabel, onSubmit }) => new Promise((resolve) => {
+          const scrim = document.createElement("div");
+          scrim.className = "ui-scrim";
+          const box = document.createElement("div");
+          box.className = "ui-modal";
+          if (title) { const h = document.createElement("h2"); h.textContent = title; box.appendChild(h); }
+          if (text) { const p = document.createElement("p"); p.textContent = text; box.appendChild(p); }
+          const inputs = (fields || []).map((f) => {
+            const el = document.createElement("input");
+            el.type = f.type || "text";
+            el.placeholder = f.placeholder || "";
+            el.value = f.value || "";
+            el.autocomplete = "off";
+            box.appendChild(el);
+            return el;
+          });
+          const errEl = document.createElement("p");
+          errEl.className = "ui-err";
+          box.appendChild(errEl);
+
+          const acts = document.createElement("div");
+          acts.className = "ui-acts";
+          const cancelBtn = document.createElement("button");
+          cancelBtn.type = "button";
+          cancelBtn.textContent = cancelLabel || "Отмена";
+          const okBtn = document.createElement("button");
+          okBtn.type = "button";
+          okBtn.className = okKind === "danger" ? "ui-danger" : "ui-primary";
+          okBtn.textContent = okLabel || "ОК";
+          acts.append(cancelBtn, okBtn);
+          box.appendChild(acts);
+          scrim.appendChild(box);
+          document.body.appendChild(scrim);
+
+          // Обработчик Escape нельзя звать esc — так зовётся экранировщик выше.
+          const onKey = (e) => {
+            if (e.key === "Escape" && cancelLabel !== null) finish(null);
+            else if (e.key === "Enter") { e.preventDefault(); submit(); }
+          };
+          const finish = (value) => {
+            scrim.remove();
+            document.removeEventListener("keydown", onKey);
+            resolve(value);
+          };
+          const submit = async () => {
+            const values = inputs.map((el) => el.value.trim());
+            if (!onSubmit) { finish(fields && fields.length ? values : true); return; }
+            okBtn.disabled = true;
+            errEl.textContent = "";
+            const problem = await onSubmit(values);
+            okBtn.disabled = false;
+            if (problem) { errEl.textContent = problem; return; }
+            finish(values);
+          };
+          cancelBtn.addEventListener("click", () => finish(null));
+          okBtn.addEventListener("click", submit);
+          document.addEventListener("keydown", onKey);
+          if (cancelLabel === null) cancelBtn.hidden = true;
+          requestAnimationFrame(() => (inputs[0] || okBtn).focus());
+        });
+
+        const uiConfirm = (text, opts) => uiModal({
+          title: (opts && opts.title) || "Подтверди",
+          text,
+          okLabel: (opts && opts.okLabel) || "Удалить",
+          okKind: "danger",
+        });
+        const uiPrompt = (title, value) => uiModal({
+          title, fields: [{ value: value || "" }], okLabel: "ОК",
+        }).then((v) => (v ? v[0] : null));
+
+        // ---- вход: пароль консоли, затем логин SSH -----------------------------
+        const askConsole = () => uiModal({
+          title: "Пароль консоли",
+          text: "Тот же суточный пароль, что и для терминала.",
+          fields: [{ type: "password", placeholder: "Пароль" }],
+          okLabel: "Дальше",
+          onSubmit: async ([password]) => {
+            try {
+              const r = await fetch("/api/console/login", {
+                method: "POST", credentials: "same-origin",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ password }),
+              });
+              const data = await r.json().catch(() => ({}));
+              if (!r.ok) return data.error || "Не подошло.";
+            } catch { return "Сервер недоступен."; }
+            needConsole = false;
+            return null;
+          },
+        });
+
+        const askSsh = () => uiModal({
+          title: "SSH-логин — " + MACHINE,
+          text: "Логин и пароль от самой машины — те же, что в консоли.",
+          fields: [{ placeholder: "Имя пользователя" }, { type: "password", placeholder: "Пароль" }],
+          okLabel: "Подключиться",
+          onSubmit: async ([username, password]) => {
+            let data;
+            try {
+              const r = await fetch("/api/files/connect", {
+                method: "POST", credentials: "same-origin",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ ip: IP, username, password }),
+              });
+              data = await r.json().catch(() => ({}));
+              if (!r.ok) return data.error || "Не удалось подключиться.";
+            } catch { return "Сервер недоступен."; }
+            document.getElementById("who").textContent = data.user + "@" + IP;
+            show(data.path, data.entries);
+            return null;
+          },
+        });
+
+        // Сперва суточный пароль (если ещё не вводили), потом логин машины.
+        // Отказ на любом шаге — не тупик: остаётся кнопка «Подключиться».
+        const gateEl = document.getElementById("gate");
+        const connect = async () => {
+          gateEl.hidden = true;
+          if (needConsole && !(await askConsole())) { gateEl.hidden = false; return; }
+          if (!(await askSsh())) gateEl.hidden = false;
+        };
+        document.getElementById("btn-connect").addEventListener("click", connect);
+
+        // ---- отрисовка ----------------------------------------------------------
+        const panel = document.getElementById("panel");
+        const listEl = document.getElementById("list");
+        const crumbsEl = document.getElementById("crumbs");
+        const dropHint = document.getElementById("drop-hint");
+        const upsEl = document.getElementById("ups");
+        let cur = "/";
+
+        const ICON_DIR = '<svg class="row-ic" viewBox="0 0 24 24" fill="currentColor"><path d="M10 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2Z"/></svg>';
+        const ICON_FILE = '<svg class="row-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5Z"/><path d="M14 3v5h5"/></svg>';
+        const ICON_DOWN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 21h16"/></svg>';
+        const ICON_EDIT = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>';
+        const ICON_DEL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg>';
+
+        const human = (bytes) => {
+          if (bytes < 1024) return bytes + " Б";
+          const units = ["КБ", "МБ", "ГБ", "ТБ"];
+          let value = bytes / 1024, i = 0;
+          while (value >= 1024 && i < units.length - 1) { value /= 1024; i++; }
+          return (value >= 10 ? Math.round(value) : value.toFixed(1)) + " " + units[i];
+        };
+        const when = (ts) => {
+          if (!ts) return "";
+          const d = new Date(ts * 1000);
+          const two = (n) => String(n).padStart(2, "0");
+          return `${two(d.getDate())}.${two(d.getMonth() + 1)}.${d.getFullYear()} ${two(d.getHours())}:${two(d.getMinutes())}`;
+        };
+        const join = (dir, name) => (dir === "/" ? "/" + name : dir + "/" + name);
+        const parentOf = (path) => {
+          const cut = path.replace(/\/+$/, "").lastIndexOf("/");
+          return cut <= 0 ? "/" : path.slice(0, cut);
+        };
+
+        const drawCrumbs = () => {
+          crumbsEl.innerHTML = "";
+          const parts = cur.split("/").filter(Boolean);
+          const add = (label, path, last) => {
+            const b = document.createElement("button");
+            b.type = "button";
+            b.className = "crumb" + (last ? " last" : "");
+            b.textContent = label;
+            if (!last) b.addEventListener("click", () => go(path));
+            crumbsEl.appendChild(b);
+          };
+          add("/", "/", parts.length === 0);
+          let path = "";
+          parts.forEach((part, i) => {
+            path += "/" + part;
+            const sep = document.createElement("span");
+            sep.className = "crumb-sep";
+            sep.textContent = "›";
+            crumbsEl.appendChild(sep);
+            add(part, path, i === parts.length - 1);
+          });
+        };
+
+        const drawList = (entries) => {
+          listEl.innerHTML = "";
+          if (cur !== "/") {
+            const up = document.createElement("li");
+            up.className = "row dir";
+            up.innerHTML = ICON_DIR + '<button class="name" type="button"><span>..</span></button>'
+                         + '<span class="size"></span><span class="date"></span><span class="tools"></span>';
+            up.querySelector(".name").addEventListener("click", () => go(parentOf(cur)));
+            listEl.appendChild(up);
+          }
+          if (!entries.length && cur === "/") {
+            listEl.insertAdjacentHTML("beforeend", '<li class="empty">Пусто</li>');
+          } else if (!entries.length) {
+            listEl.insertAdjacentHTML("beforeend", '<li class="empty">Папка пуста</li>');
+          }
+
+          entries.forEach((item) => {
+            const path = join(cur, item.name);
+            const li = document.createElement("li");
+            li.className = "row" + (item.dir ? " dir" : "");
+            li.innerHTML = (item.dir ? ICON_DIR : ICON_FILE)
+              + `<button class="name" type="button"><span>${esc(item.name)}</span></button>`
+              + `<span class="size">${item.dir ? "" : human(item.size)}</span>`
+              + `<span class="date">${when(item.mtime)}</span>`
+              + '<span class="tools"></span>';
+
+            const nameBtn = li.querySelector(".name");
+            nameBtn.title = item.name;
+            if (item.dir) nameBtn.addEventListener("click", () => go(path));
+            else nameBtn.addEventListener("click", () => download(path));
+
+            const tools = li.querySelector(".tools");
+            const tool = (html, title, cls, fn) => {
+              const b = document.createElement("button");
+              b.type = "button";
+              b.className = "tool" + (cls ? " " + cls : "");
+              b.title = title;
+              b.innerHTML = html;
+              b.addEventListener("click", fn);
+              tools.appendChild(b);
+              return b;
+            };
+            if (!item.dir) tool(ICON_DOWN, "Скачать", "", () => download(path));
+            tool(ICON_EDIT, "Переименовать", "", () => rename(path, item.name));
+            tool(ICON_DEL, "Удалить", "danger", () => remove(path, item.name, item.dir));
+            listEl.appendChild(li);
+          });
+        };
+
+        const show = (path, entries) => {
+          cur = path;
+          panel.hidden = false;
+          dropHint.hidden = false;
+          drawCrumbs();
+          drawList(entries);
+        };
+
+        // ---- запросы ------------------------------------------------------------
+        const api = async (url, options) => {
+          const r = await fetch(url, Object.assign({ credentials: "same-origin" }, options || {}));
+          const data = await r.json().catch(() => ({}));
+          if (!r.ok) {
+            if (data.reconnect) { panel.hidden = true; dropHint.hidden = true; connect(); }
+            const err = new Error(data.error || "Ошибка.");
+            err.data = data;
+            throw err;
+          }
+          return data;
+        };
+
+        const go = async (path) => {
+          try {
+            const data = await api("/api/files/list?path=" + encodeURIComponent(path));
+            show(data.path, data.entries);
+          } catch (e) { uiToast(e.message, "err"); }
+        };
+        const reload = () => go(cur);
+
+        const download = (path) => {
+          // Скачивание отдаёт браузер: обычная ссылка с той же кукой сессии.
+          const a = document.createElement("a");
+          a.href = "/api/files/download?path=" + encodeURIComponent(path);
+          a.rel = "noopener";
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+        };
+
+        const rename = async (path, name) => {
+          const next = await uiPrompt("Новое имя", name);
+          if (!next || next === name) return;
+          try {
+            await api("/api/files/op", {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ op: "rename", path, name: next }),
+            });
+            reload();
+          } catch (e) { uiToast(e.message, "err"); }
+        };
+
+        const remove = async (path, name, isDir) => {
+          const sure = await uiConfirm(`Удалить ${isDir ? "папку" : "файл"} «${name}»?\nЭто навсегда — корзины на той стороне нет.`);
+          if (!sure) return;
+          const send = (recursive) => api("/api/files/op", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ op: "delete", path, recursive }),
+          });
+          try {
+            await send(false);
+            reload();
+          } catch (e) {
+            if (!e.data || !e.data.needs_recursive) { uiToast(e.message, "err"); return; }
+            const deep = await uiConfirm(`Папка «${name}» не пуста.\nУдалить вместе со всем содержимым?`, { okLabel: "Удалить всё" });
+            if (!deep) return;
+            try { await send(true); reload(); } catch (err) { uiToast(err.message, "err"); }
+          }
+        };
+
+        const mkdir = async () => {
+          const name = await uiPrompt("Имя новой папки", "");
+          if (!name) return;
+          try {
+            await api("/api/files/op", {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ op: "mkdir", path: join(cur, name) }),
+            });
+            reload();
+          } catch (e) { uiToast(e.message, "err"); }
+        };
+
+        // ---- загрузка -----------------------------------------------------------
+        const uploadOne = (file, folder) => new Promise((resolve) => {
+          const card = document.createElement("div");
+          card.className = "up";
+          card.innerHTML = `<div class="up-top"><span></span><b>0%</b></div><div class="up-bar"><i style="width:0"></i></div>`;
+          card.querySelector("span").textContent = file.name;
+          const pct = card.querySelector("b");
+          const bar = card.querySelector(".up-bar i");
+          upsEl.appendChild(card);
+
+          // XHR, а не fetch: только он умеет отдавать прогресс отправки.
+          const xhr = new XMLHttpRequest();
+          xhr.open("POST", "/api/files/upload?path=" + encodeURIComponent(folder)
+                          + "&name=" + encodeURIComponent(file.name));
+          xhr.upload.addEventListener("progress", (e) => {
+            if (!e.lengthComputable) return;
+            const done = Math.round(e.loaded / e.total * 100);
+            pct.textContent = done + "%";
+            bar.style.width = done + "%";
+          });
+          const finish = (ok, message) => {
+            card.classList.add(ok ? "done" : "err");
+            pct.textContent = ok ? "готово" : (message || "ошибка");
+            bar.style.width = "100%";
+            setTimeout(() => card.remove(), ok ? 2200 : 6000);
+            resolve(ok);
+          };
+          xhr.addEventListener("load", () => {
+            let data = {};
+            try { data = JSON.parse(xhr.responseText); } catch {}
+            finish(xhr.status === 200, data.error);
+          });
+          xhr.addEventListener("error", () => finish(false, "сеть"));
+          xhr.send(file);
+        });
+
+        const uploadAll = async (files) => {
+          const folder = cur;
+          let ok = 0;
+          for (const file of files) {
+            if (await uploadOne(file, folder)) ok++;
+          }
+          if (ok) uiToast(ok === 1 ? "Файл загружен" : `Загружено файлов: ${ok}`, "ok");
+          if (folder === cur) reload();
+        };
+
+        const picker = document.getElementById("picker");
+        picker.addEventListener("change", () => {
+          if (picker.files.length) uploadAll([...picker.files]);
+          picker.value = "";
+        });
+        document.getElementById("btn-upload").addEventListener("click", () => picker.click());
+        document.getElementById("btn-mkdir").addEventListener("click", mkdir);
+        document.getElementById("btn-reload").addEventListener("click", reload);
+
+        let dragDepth = 0;
+        window.addEventListener("dragenter", (e) => {
+          e.preventDefault();
+          if (panel.hidden) return;
+          dragDepth++;
+          document.body.classList.add("dragging");
+        });
+        window.addEventListener("dragover", (e) => e.preventDefault());
+        window.addEventListener("dragleave", () => {
+          dragDepth = Math.max(0, dragDepth - 1);
+          if (!dragDepth) document.body.classList.remove("dragging");
+        });
+        window.addEventListener("drop", (e) => {
+          e.preventDefault();
+          dragDepth = 0;
+          document.body.classList.remove("dragging");
+          if (panel.hidden) return;
+          const files = [...(e.dataTransfer?.files || [])];
+          if (files.length) uploadAll(files);
+        });
+
+        connect();
+      </script>
+    </body>
+    </html>
