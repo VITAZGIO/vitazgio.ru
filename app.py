@@ -1062,7 +1062,7 @@ def console_password_today():
 
 DEBTS_PATH = os.path.join(DATA_DIR, "debts.json")
 debts_lock = threading.Lock()
-debts_data = {"users": [], "entries": []}
+debts_data = {"users": [], "entries": [], "payment_requests": []}
 # Палитра для кружка-аватарки должника на /debts — фиксированный набор,
 # не произвольный CSS/hex с фронта (тот же принцип, что и цвета сайта
 # через переменные, а не хардкод: тут просто ключи вместо hex).
@@ -1083,6 +1083,11 @@ def _debts_load():
     debts_data = {
         "users": raw.get("users") if isinstance(raw.get("users"), list) else [],
         "entries": raw.get("entries") if isinstance(raw.get("entries"), list) else [],
+        "payment_requests": (
+            raw.get("payment_requests")
+            if isinstance(raw.get("payment_requests"), list)
+            else []
+        ),
     }
 
 
@@ -1155,6 +1160,15 @@ def _debt_user_total_locked(user_id):
     return total
 
 
+def _debt_pending_return_total_locked(user_id):
+    total = 0
+    for row in debts_data.get("payment_requests", []):
+        if row.get("user_id") != user_id or row.get("status", "pending") != "pending":
+            continue
+        total += int(row.get("amount_cents") or 0)
+    return total
+
+
 def _debt_entry_public_locked(entry):
     user = next((u for u in debts_data["users"] if u.get("id") == entry.get("user_id")), None)
     return {
@@ -1169,15 +1183,33 @@ def _debt_entry_public_locked(entry):
     }
 
 
+def _debt_payment_request_public_locked(row):
+    user = next((u for u in debts_data["users"] if u.get("id") == row.get("user_id")), None)
+    return {
+        "id": row.get("id"),
+        "user_id": row.get("user_id"),
+        "user_name": user.get("name", "Должник") if user else "Должник",
+        "date": row.get("date") or _today_iso(),
+        "amount_cents": int(row.get("amount_cents") or 0),
+        "bank": row.get("bank") or "Банк",
+        "status": row.get("status") or "pending",
+        "created": row.get("created") or "",
+    }
+
+
 def _debt_user_public_locked(user):
     user_id = user.get("id")
     entries = [e for e in debts_data["entries"] if e.get("user_id") == user_id]
+    pending_return_cents = _debt_pending_return_total_locked(user_id)
+    total_cents = _debt_user_total_locked(user_id)
     color = user.get("color")
     return {
         "id": user_id,
         "name": user.get("name", "Должник"),
         "password": user.get("password_plain") or "",
-        "total_cents": _debt_user_total_locked(user_id),
+        "total_cents": total_cents,
+        "pending_return_cents": pending_return_cents,
+        "projected_total_cents": total_cents - pending_return_cents,
         "entry_count": len(entries),
         "created": user.get("created") or "",
         "color": color if color in DEBT_USER_COLORS else DEBT_USER_COLORS[0],
@@ -1189,8 +1221,25 @@ def _debts_snapshot_locked(user_id=None):
     users.sort(key=lambda u: u["name"].lower())
     entries = [_debt_entry_public_locked(e) for e in debts_data["entries"] if user_id is None or e.get("user_id") == user_id]
     entries.sort(key=lambda e: (e["date"], e["created"]), reverse=True)
+    payment_requests = [
+        _debt_payment_request_public_locked(r)
+        for r in debts_data.get("payment_requests", [])
+        if user_id is None or r.get("user_id") == user_id
+    ]
+    payment_requests.sort(key=lambda r: (r["date"], r["created"]), reverse=True)
     total = sum(u["total_cents"] for u in users if user_id is None or u["id"] == user_id)
-    return {"users": users, "entries": entries, "total_cents": total, "today": _today_iso()}
+    pending_total = sum(
+        u["pending_return_cents"] for u in users if user_id is None or u["id"] == user_id
+    )
+    return {
+        "users": users,
+        "entries": entries,
+        "payment_requests": payment_requests,
+        "total_cents": total,
+        "pending_return_cents": pending_total,
+        "projected_total_cents": total - pending_total,
+        "today": _today_iso(),
+    }
 
 
 # «Долги» — как сейф: страница СВЕЖИМ открытием (GET /debts) спрашивает

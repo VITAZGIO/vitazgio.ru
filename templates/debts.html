@@ -24,7 +24,7 @@
     .panel{border:1px solid var(--line);background:rgba(12,22,40,.78);padding:20px;min-width:0} .panel.accent{box-shadow:inset 3px 0 0 var(--cyan)}
     .total{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-bottom:18px} .stat{border:1px solid var(--line);background:rgba(7,14,27,.82);padding:16px} .stat b{display:block;font-size:28px;color:var(--cyan)} .stat i{font-style:normal;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.08em}
     form{display:grid;gap:10px} label{display:grid;gap:6px;color:#b8c8e8;font-weight:800;font-size:12px;text-transform:uppercase;letter-spacing:.06em} input,select{width:100%;border:1px solid #28405f;background:#071021;color:var(--text);padding:11px 12px;outline:none} input:focus,select:focus{border-color:var(--cyan);box-shadow:0 0 0 2px rgba(53,224,240,.14)} .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-    .btn{border:1px solid rgba(53,224,240,.7);background:rgba(53,224,240,.16);color:var(--text);padding:11px 14px;font-weight:900;cursor:pointer} .btn:hover{background:rgba(53,224,240,.24)} .btn.danger{border-color:rgba(255,79,179,.55);background:rgba(255,79,179,.12)} .btn.small{padding:7px 9px;font-size:12px}
+    .btn{border:1px solid rgba(53,224,240,.7);background:rgba(53,224,240,.16);color:var(--text);padding:11px 14px;font-weight:900;cursor:pointer} .btn:hover{background:rgba(53,224,240,.24)} .btn.danger{border-color:rgba(255,79,179,.55);background:rgba(255,79,179,.12)} .btn.ok{border-color:rgba(99,245,173,.62);background:rgba(99,245,173,.14)} .btn.small{padding:7px 9px;font-size:12px}
     /* Выбор человека — узкая полоска кружков-аватарок (первая буква имени),
        не список карточек на всю ширину: на телефоне для формы и истории
        остаётся куда больше места. Тап — выбрать, зажать — редактировать
@@ -39,7 +39,7 @@
     .user-head{border:1px solid var(--line);background:rgba(12,22,40,.78);padding:16px 20px;box-shadow:inset 3px 0 0 var(--ac-user,var(--cyan))}
     .user-head .uh-name{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;font-weight:800}
     .user-head .uh-total{font-size:32px;font-weight:900;color:var(--ac-user,var(--cyan));line-height:1.3}
-    .user-head .uh-sub{font-size:12px}
+    .user-head .uh-sub{font-size:12px}.projected{color:var(--green);font-size:.72em}
     .no-user{border:1px dashed #294260;color:var(--muted);padding:36px;text-align:center}
     .modal-back{position:fixed;inset:0;background:rgba(4,8,16,.72);display:grid;place-items:center;padding:20px;z-index:50}
     .modal{width:min(380px,100%);border:1px solid var(--line);background:#0c1628;padding:22px;box-shadow:0 20px 60px rgba(0,0,0,.5)}
@@ -49,13 +49,13 @@
     .swatch.active{border-color:#fff}
     .swatch.cyan{background:var(--u-cyan)} .swatch.green{background:var(--u-green)} .swatch.pink{background:var(--u-pink)} .swatch.yellow{background:var(--u-yellow)} .swatch.violet{background:var(--u-violet)} .swatch.orange{background:var(--u-orange)}
     .modal-actions{display:flex;gap:10px;margin-top:8px} .modal-actions .btn{flex:1}
-    .entry-form{grid-template-columns:1.1fr .8fr .8fr 1.4fr auto;align-items:end;margin-bottom:18px} .history{width:100%;border-collapse:collapse} .history th,.history td{border-bottom:1px solid #1a2d49;padding:11px 8px;text-align:left;vertical-align:top} .history th{color:#86a1cc;font-size:12px;text-transform:uppercase;letter-spacing:.08em} .sum{font-weight:900;color:var(--cyan);white-space:nowrap} .sum.minus{color:var(--green)} .kind{font-style:normal;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.04em} .empty{padding:28px;border:1px dashed #294260;color:var(--muted);text-align:center}
+    .entry-form{grid-template-columns:1.1fr .8fr .8fr 1.4fr auto;align-items:end;margin-bottom:18px}.pay-toggle{margin:8px 0 14px}.pay-form{grid-template-columns:1fr 1fr 1fr auto auto;align-items:end;margin:8px 0 18px}.history{width:100%;border-collapse:collapse} .history th,.history td{border-bottom:1px solid #1a2d49;padding:11px 8px;text-align:left;vertical-align:top} .history th{color:#86a1cc;font-size:12px;text-transform:uppercase;letter-spacing:.08em} .sum{font-weight:900;color:var(--cyan);white-space:nowrap} .sum.minus{color:var(--green)} .kind{font-style:normal;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.04em}.request-row{opacity:.66;background:rgba(138,162,199,.06)}.status-pill{display:inline-block;margin-top:5px;padding:2px 7px;border:1px solid #37506f;color:#b8c8e8;font-size:11px;text-transform:uppercase;letter-spacing:.06em}.row-actions{display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap}.empty{padding:28px;border:1px dashed #294260;color:var(--muted);text-align:center}
     .del-x{border:1px solid rgba(255,79,179,.55);background:rgba(255,79,179,.12);color:var(--text);width:26px;height:26px;border-radius:50%;cursor:pointer;display:grid;place-items:center;padding:0}
     .del-x:hover{border-color:var(--pink);background:rgba(255,79,179,.24)} .del-x svg{width:12px;height:12px;display:block}
     .err{min-height:20px;color:#ff7aa9;font-weight:800} .ok{color:var(--green)} .debtor-card{max-width:960px;margin:auto} .debtor-card .history{margin-top:16px}
     @media (max-width:980px){
       .wrap{width:min(100vw - 24px,760px);padding-top:20px}.total{grid-template-columns:1fr}.entry-form{grid-template-columns:1fr}.tag{display:none}
-      .rail{flex:0 0 60px;padding:10px 6px;gap:8px} .avatar{width:42px;height:42px;font-size:16px}
+      .rail{flex:0 0 60px;padding:10px 6px;gap:8px} .avatar{width:42px;height:42px;font-size:16px}.pay-form{grid-template-columns:1fr}
       /* Таблица истории на телефоне не влезает в ширину (дата, тип, сумма,
          комментарий, крестик — реально требуют больше 400px, да ещё и рядом
          теперь полоска аватарок) и раньше просто уезжала вбок вместе со
@@ -132,6 +132,15 @@
         <div class="stat"><i>записей</i><b id="me-count">0</b></div>
         <div class="stat"><i>режим</i><b>просмотр</b></div>
       </div>
+      <button class="btn pay-toggle" id="pay-open" type="button">Внести взнос</button>
+      <form class="pay-form hidden" id="pay-form">
+        <label>Когда<input id="pay-date" type="date"></label>
+        <label>Сумма<input id="pay-amount" inputmode="decimal" placeholder="2000"></label>
+        <label>Банк<select id="pay-bank"><option value="ОЗОН">ОЗОН</option><option value="Т-Банк">Т-Банк</option></select></label>
+        <button class="btn" type="submit">Создать заявку</button>
+        <button class="btn danger" id="pay-cancel" type="button">Отмена</button>
+      </form>
+      <div class="err" id="pay-err"></div>
       <h2 id="me-name">История</h2>
       <div id="me-history"></div>
     </section>
@@ -147,7 +156,7 @@
       const value = Math.abs(cents || 0) / 100;
       return sign + value.toLocaleString("ru-RU", {minimumFractionDigits: 0, maximumFractionDigits: 2}) + " ₽";
     };
-    let data = {users:[],entries:[],total_cents:0,today:""};
+    let data = {users:[],entries:[],payment_requests:[],total_cents:0,today:""};
     let selected = null;
     const PALETTE = ["cyan","green","pink","yellow","violet","orange"];
 
@@ -162,6 +171,12 @@
       return result;
     }
 
+    function totalHtml(user) {
+      const total = money(user.total_cents);
+      if (!user.pending_return_cents) return esc(total);
+      return `${esc(total)} <span class="projected">(${esc(money(user.projected_total_cents))})</span>`;
+    }
+
     function rowHtml(entry, canDelete) {
       const cls = entry.kind === "return" ? "sum minus" : "sum";
       const label = entry.kind === "return" ? "вернул" : "долг";
@@ -171,9 +186,21 @@
       return `<tr><td>${esc(entry.date)}</td><td><i class="kind">${label}</i></td><td class="${cls}">${money(entry.kind === "return" ? -entry.amount_cents : entry.amount_cents)}</td><td>${esc(entry.comment || "—")}</td><td>${canDelete ? `<button class="del-x" data-del="${esc(entry.id)}" aria-label="Удалить" title="Удалить">${deleteIcon}</button>` : ""}</td></tr>`;
     }
 
-    function tableHtml(entries, canDelete) {
-      if (!entries.length) return `<div class="empty">Пока нет записей.</div>`;
-      return `<table class="history"><thead><tr><th>Дата</th><th>Тип</th><th>Сумма</th><th>Комментарий</th><th></th></tr></thead><tbody>${entries.map(e => rowHtml(e, canDelete)).join("")}</tbody></table>`;
+    function requestRowHtml(row, canModerate) {
+      const actions = canModerate ? `<div class="row-actions">
+        <button class="btn ok small" type="button" data-approve="${esc(row.id)}">Одобрить</button>
+        <button class="btn danger small" type="button" data-cancel-request="${esc(row.id)}">Отменить</button>
+      </div>` : "";
+      return `<tr class="request-row"><td>${esc(row.date)}</td><td><i class="kind">взнос</i><br><span class="status-pill">в обработке</span></td><td class="sum minus">${money(-row.amount_cents)}</td><td>Банк: ${esc(row.bank || "—")}</td><td>${actions}</td></tr>`;
+    }
+
+    function tableHtml(entries, canDelete, requests=[], canModerate=false) {
+      const rows = [
+        ...requests.map(r => ({...r, _row: "request"})),
+        ...entries.map(e => ({...e, _row: "entry"}))
+      ].sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")) || String(b.created || "").localeCompare(String(a.created || "")));
+      if (!rows.length) return `<div class="empty">Пока нет записей.</div>`;
+      return `<table class="history"><thead><tr><th>Дата</th><th>Тип</th><th>Сумма</th><th>Комментарий</th><th></th></tr></thead><tbody>${rows.map(row => row._row === "request" ? requestRowHtml(row, canModerate) : rowHtml(row, canDelete)).join("")}</tbody></table>`;
     }
 
     // ---- Свои карточки поверх страницы (вместо confirm()/prompt()) --------
@@ -344,12 +371,13 @@
       if (active) {
         head.hidden = false;
         head.style.setProperty("--ac-user", `var(--u-${active.color || "cyan"})`);
-        head.innerHTML = `<div class="uh-name">${esc(active.name)}</div><div class="uh-total">${money(active.total_cents)}</div><div class="uh-sub muted">${active.entry_count} записей</div>`;
+        const activeRequests = (data.payment_requests || []).filter(r => r.user_id === selected);
+        head.innerHTML = `<div class="uh-name">${esc(active.name)}</div><div class="uh-total">${totalHtml(active)}</div><div class="uh-sub muted">${active.entry_count} записей · ${activeRequests.length} заявок</div>`;
         entryPanel.hidden = false;
         noUser.hidden = true;
         $("entry-date").value = data.today || new Date().toISOString().slice(0,10);
         const shown = data.entries.filter(e => e.user_id === selected);
-        $("history").innerHTML = tableHtml(shown, true);
+        $("history").innerHTML = tableHtml(shown, true, activeRequests, true);
       } else {
         head.hidden = true;
         entryPanel.hidden = true;
@@ -364,10 +392,13 @@
 
     async function loadDebtor() {
       const me = await api("/api/debts/me");
-      $("me-total").textContent = money(me.me.total_cents);
-      $("me-count").textContent = String(me.entries.length);
+      data = me;
+      $("me-total").innerHTML = totalHtml(me.me);
+      const requests = me.payment_requests || [];
+      $("me-count").textContent = String(me.entries.length + requests.length);
       $("me-name").textContent = me.me.name;
-      $("me-history").innerHTML = tableHtml(me.entries, false);
+      $("pay-date").value = me.today || new Date().toISOString().slice(0,10);
+      $("me-history").innerHTML = tableHtml(me.entries, false, requests, false);
     }
 
     if (mode === "owner") {
@@ -416,6 +447,22 @@
         } catch (err) { $("entry-err").textContent = err.message; }
       });
       $("history").addEventListener("click", e => {
+        const approve = e.target.closest("[data-approve]");
+        if (approve) {
+          $("entry-err").textContent = "";
+          api("/api/debts/payment-requests/" + encodeURIComponent(approve.dataset.approve) + "/approve", {method:"POST"})
+            .then(next => { data = next; renderOwner(); })
+            .catch(err => { $("entry-err").textContent = err.message; });
+          return;
+        }
+        const cancelRequest = e.target.closest("[data-cancel-request]");
+        if (cancelRequest) {
+          $("entry-err").textContent = "";
+          api("/api/debts/payment-requests/" + encodeURIComponent(cancelRequest.dataset.cancelRequest), {method:"DELETE"})
+            .then(next => { data = next; renderOwner(); })
+            .catch(err => { $("entry-err").textContent = err.message; });
+          return;
+        }
         const btn = e.target.closest("[data-del]");
         if (!btn) return;
         const id = btn.dataset.del;
@@ -426,6 +473,29 @@
       });
       if (!$("owner-app").classList.contains("hidden")) loadOwner().catch(err => $("entry-err").textContent = err.message);
     } else {
+      $("pay-open").addEventListener("click", () => {
+        $("pay-form").classList.remove("hidden");
+        $("pay-open").classList.add("hidden");
+        $("pay-date").value = data.today || new Date().toISOString().slice(0,10);
+        $("pay-amount").focus();
+      });
+      $("pay-cancel").addEventListener("click", () => {
+        $("pay-form").classList.add("hidden");
+        $("pay-open").classList.remove("hidden");
+        $("pay-err").textContent = "";
+      });
+      $("pay-form").addEventListener("submit", async e => {
+        e.preventDefault();
+        $("pay-err").textContent = "";
+        try {
+          const next = await api("/api/debts/payment-requests", {method:"POST", body:JSON.stringify({date:$("pay-date").value, amount:$("pay-amount").value, bank:$("pay-bank").value})});
+          $("pay-amount").value = "";
+          $("pay-form").classList.add("hidden");
+          $("pay-open").classList.remove("hidden");
+          data = next;
+          await loadDebtor();
+        } catch (err) { $("pay-err").textContent = err.message; }
+      });
       loadDebtor().catch(err => $("me-history").innerHTML = `<div class="empty">${esc(err.message)}</div>`);
     }
   })();

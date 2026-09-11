@@ -38,6 +38,7 @@ def create_debts_blueprint(
     log_login,
 ):
     debts_bp = Blueprint("debts", __name__)
+    payment_banks = ("ОЗОН", "Т-Банк")
 
     def data():
         return debts_data() if callable(debts_data) else debts_data
@@ -159,6 +160,81 @@ def create_debts_blueprint(
             debts_write_locked()
             return jsonify(debts_snapshot_locked())
 
+    @debts_bp.post("/api/debts/payment-requests")
+    def debts_payment_request_create_api():
+        user_id = session.get("debtor_id")
+        if not user_id:
+            return jsonify(error="Нужен вход."), 403
+        payload = request.get_json(silent=True) or {}
+        bank = str(payload.get("bank") or "").strip()
+        if bank not in payment_banks:
+            return jsonify(error="Выберите банк из списка."), 400
+        try:
+            amount_cents = debt_amount_cents(payload.get("amount"))
+            entry_date = debt_clean_date(payload.get("date"))
+        except ValueError as err:
+            return jsonify(error=str(err)), 400
+        now = datetime.now(ZoneInfo("Europe/Moscow")).isoformat(timespec="seconds")
+
+        with debts_lock:
+            store = data()
+            store.setdefault("payment_requests", [])
+            if not any(u.get("id") == user_id for u in store["users"]):
+                session.pop("debtor_id", None)
+                return jsonify(error="Пользователь не найден."), 404
+            store["payment_requests"].append({
+                "id": uuid.uuid4().hex,
+                "user_id": user_id,
+                "date": entry_date,
+                "amount_cents": amount_cents,
+                "bank": bank,
+                "status": "pending",
+                "created": now,
+            })
+            debts_write_locked()
+            snapshot = debts_snapshot_locked(user_id)
+            user = next(u for u in store["users"] if u.get("id") == user_id)
+            snapshot["me"] = debt_user_public_locked(user)
+            return jsonify(snapshot)
+
+    @debts_bp.post("/api/debts/payment-requests/<request_id>/approve")
+    @debts_owner_required
+    def debts_payment_request_approve_api(request_id):
+        now = datetime.now(ZoneInfo("Europe/Moscow")).isoformat(timespec="seconds")
+        with debts_lock:
+            store = data()
+            requests = store.setdefault("payment_requests", [])
+            payment = next((r for r in requests if r.get("id") == request_id), None)
+            if not payment:
+                return jsonify(error="Заявка не найдена."), 404
+            if not any(u.get("id") == payment.get("user_id") for u in store["users"]):
+                return jsonify(error="Должник не найден."), 404
+            store["entries"].append({
+                "id": uuid.uuid4().hex,
+                "user_id": payment.get("user_id"),
+                "kind": "return",
+                "date": payment.get("date") or debt_clean_date(None),
+                "amount_cents": int(payment.get("amount_cents") or 0),
+                "comment": f"Взнос: {payment.get('bank') or 'банк'}",
+                "created": now,
+            })
+            store["payment_requests"] = [r for r in requests if r.get("id") != request_id]
+            debts_write_locked()
+            return jsonify(debts_snapshot_locked())
+
+    @debts_bp.delete("/api/debts/payment-requests/<request_id>")
+    @debts_owner_required
+    def debts_payment_request_cancel_api(request_id):
+        with debts_lock:
+            store = data()
+            requests = store.setdefault("payment_requests", [])
+            before = len(requests)
+            store["payment_requests"] = [r for r in requests if r.get("id") != request_id]
+            if len(store["payment_requests"]) == before:
+                return jsonify(error="Заявка не найдена."), 404
+            debts_write_locked()
+            return jsonify(debts_snapshot_locked())
+
     @debts_bp.delete("/api/debts/entries/<entry_id>")
     @debts_owner_required
     def debts_entry_delete_api(entry_id):
@@ -202,6 +278,9 @@ def create_debts_blueprint(
             if len(store["users"]) == before:
                 return jsonify(error="Пользователь не найден."), 404
             store["entries"] = [e for e in store["entries"] if e.get("user_id") != user_id]
+            store["payment_requests"] = [
+                r for r in store.setdefault("payment_requests", []) if r.get("user_id") != user_id
+            ]
             debts_write_locked()
             return jsonify(debts_snapshot_locked())
 
