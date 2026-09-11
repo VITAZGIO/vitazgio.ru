@@ -29,6 +29,7 @@ from flask import Blueprint, Response, jsonify, request, session
 SFTP_IDLE_SECONDS = 15 * 60      # столько живёт соединение без единого запроса
 SFTP_CHUNK = 256 * 1024          # кусок чтения/записи: компромисс память/скорость
 SFTP_RECURSIVE_MAX = 5000        # потолок на рекурсивное удаление/архивацию, чтобы не уйти в никуда
+TO_DROP_JOB_TTL = 5 * 60         # доделанная передача видна ещё столько — успеть долистать список
 
 
 def _error_text(exc):
@@ -62,9 +63,16 @@ def create_files_blueprint(
 ):
     files_bp = Blueprint("files", __name__)
 
-    # token -> {"client", "sftp", "ip", "user", "used"}
+    # token -> {"client", "sftp", "ip", "user", "used", "io_lock"}
     live = {}
     live_lock = threading.Lock()
+
+    # job_id -> {"state", "name", "kind", "total", "done", "error", "finished"}
+    # Прогресс кнопки VG (перенос на сайт): паровозик POST запускает фоновый
+    # поток и сразу отвечает, страница опрашивает состояние отдельным GET —
+    # тот же приём, что у пакетных действий дропа (drop_op_start/status).
+    to_drop_jobs = {}
+    to_drop_lock = threading.Lock()
 
     def _shut(entry):
         for name in ("sftp", "client"):
@@ -82,6 +90,11 @@ def create_files_blueprint(
                 dropped = [live.pop(t) for t in stale]
             for entry in dropped:
                 _shut(entry)
+            job_deadline = time.time() - TO_DROP_JOB_TTL
+            with to_drop_lock:
+                for job_id in [j for j, v in to_drop_jobs.items()
+                              if v["state"] != "run" and v.get("finished", 0) < job_deadline]:
+                    to_drop_jobs.pop(job_id, None)
 
     threading.Thread(target=_janitor, daemon=True).start()
 
@@ -246,7 +259,7 @@ def create_files_blueprint(
     # Download (см. DROP_DOWNLOAD_ID в app.py) — ровно так же, как «Поделиться»
     # с телефона: выбирать папку тут не из чего, спрашивать некого.
 
-    def _to_drop_file(sftp, remote_path, parent_id):
+    def _to_drop_file(sftp, remote_path, parent_id, on_chunk=None):
         name = (posixpath.basename(remote_path) or "файл")[:120]
         try:
             expected_size = sftp.stat(remote_path).st_size or 0
@@ -269,6 +282,8 @@ def create_files_blueprint(
                             break
                         dst.write(chunk)
                         written += len(chunk)
+                        if on_chunk:
+                            on_chunk(len(chunk))
         except Exception:
             try:
                 os.remove(drop_path(item_id))
@@ -294,7 +309,7 @@ def create_files_blueprint(
             drop_write_index()
         return item_id
 
-    def _to_drop_folder(sftp, remote_path, parent_id, budget):
+    def _to_drop_folder(sftp, remote_path, parent_id, budget, on_chunk=None):
         name = (posixpath.basename(remote_path.rstrip("/")) or "папка")[:60]
         folder_id = str(uuid.uuid4())
         with drop_lock:
@@ -316,14 +331,43 @@ def create_files_blueprint(
                 except Exception:
                     is_dir = False
             if is_dir:
-                _to_drop_folder(sftp, child, folder_id, budget)
+                _to_drop_folder(sftp, child, folder_id, budget, on_chunk)
             else:
-                _to_drop_file(sftp, child, folder_id)
+                _to_drop_file(sftp, child, folder_id, on_chunk)
         return folder_id
+
+    def _to_drop_plan_size(sftp, path, is_dir, budget):
+        """Только чтобы прикинуть общий размер для полосы загрузки — тот же
+        обход, что и у zip-архива, но нужна лишь сумма размеров файлов."""
+        if not is_dir:
+            try:
+                return sftp.stat(path).st_size or 0
+            except Exception:
+                return 0
+        total = 0
+        for attr in sftp.listdir_attr(path):
+            if budget[0] <= 0:
+                break
+            budget[0] -= 1
+            child = posixpath.join(path, attr.filename)
+            mode = attr.st_mode or 0
+            child_is_dir = statmod.S_ISDIR(mode)
+            if statmod.S_ISLNK(mode):
+                try:
+                    child_is_dir = statmod.S_ISDIR(sftp.stat(child).st_mode or 0)
+                except Exception:
+                    child_is_dir = False
+            if child_is_dir:
+                total += _to_drop_plan_size(sftp, child, True, budget)
+            else:
+                total += attr.st_size or 0
+        return total
 
     @files_bp.post("/api/files/to-drop")
     @login_required
     def files_to_drop():
+        """Запускает перенос в фоне и сразу отвечает — страница дальше
+        опрашивает /api/files/to-drop/<job_id>, чтобы показать полосу."""
         entry = _session()
         if not entry:
             return jsonify(error="Нет соединения.", reconnect=True), 409
@@ -333,15 +377,55 @@ def create_files_blueprint(
             return jsonify(error="Плохой путь."), 400
 
         sftp = entry["sftp"]
+        name = posixpath.basename(path.rstrip("/")) or path
         try:
-            is_dir = statmod.S_ISDIR(sftp.stat(path).st_mode or 0)
-            if is_dir:
-                new_id = _to_drop_folder(sftp, path, drop_download_id, [SFTP_RECURSIVE_MAX])
-            else:
-                new_id = _to_drop_file(sftp, path, drop_download_id)
+            with entry["io_lock"]:
+                is_dir = statmod.S_ISDIR(sftp.stat(path).st_mode or 0)
+                total = _to_drop_plan_size(sftp, path, is_dir, [SFTP_RECURSIVE_MAX])
         except Exception as e:
             return jsonify(error=_error_text(e)), 400
-        return jsonify(ok=True, id=new_id, kind="folder" if is_dir else "file")
+
+        job_id = secrets.token_urlsafe(12)
+        with to_drop_lock:
+            to_drop_jobs[job_id] = {
+                "state": "run", "name": name, "kind": "folder" if is_dir else "file",
+                "total": total, "done": 0, "error": "", "finished": 0,
+            }
+
+        def on_chunk(n):
+            with to_drop_lock:
+                job = to_drop_jobs.get(job_id)
+                if job:
+                    job["done"] += n
+
+        def work():
+            try:
+                with entry["io_lock"]:
+                    if is_dir:
+                        _to_drop_folder(sftp, path, drop_download_id, [SFTP_RECURSIVE_MAX], on_chunk)
+                    else:
+                        _to_drop_file(sftp, path, drop_download_id, on_chunk)
+                state, error = "done", ""
+            except Exception as e:                       # noqa: BLE001 — причину показываем как есть
+                state, error = "error", _error_text(e)
+            with to_drop_lock:
+                job = to_drop_jobs.get(job_id)
+                if job:
+                    job["state"] = state
+                    job["error"] = error
+                    job["finished"] = time.time()
+
+        threading.Thread(target=work, daemon=True).start()
+        return jsonify(job=job_id, name=name, total=total, kind="folder" if is_dir else "file")
+
+    @files_bp.get("/api/files/to-drop/<job_id>")
+    @login_required
+    def files_to_drop_status(job_id):
+        with to_drop_lock:
+            job = to_drop_jobs.get(job_id)
+            if not job:
+                return jsonify(error="Задача не найдена."), 404
+            return jsonify(**{k: v for k, v in job.items() if k != "finished"})
 
     def _rm_tree(sftp, path, budget):
         """Рекурсивное удаление с потолком: без него кривой путь мог бы
@@ -417,7 +501,13 @@ def create_files_blueprint(
         token = secrets.token_urlsafe(18)
         with live_lock:
             live[token] = {"client": client, "sftp": sftp, "ip": ip,
-                           "user": username, "home": home, "used": time.time()}
+                           "user": username, "home": home, "used": time.time(),
+                           # paramiko не гарантирует потокобезопасность при
+                           # одновременной работе с одним SFTP-клиентом из
+                           # нескольких потоков — а перенос кнопкой VG теперь
+                           # идёт в фоне, параллельно обычным запросам этой же
+                           # вкладки. Лок сериализует любое обращение к sftp.
+                           "io_lock": threading.Lock()}
         session["sftp_token"] = token
         return jsonify(path=home, user=username, entries=rows)
 
@@ -453,7 +543,9 @@ def create_files_blueprint(
         if not path:
             return jsonify(error="Плохой путь."), 400
         try:
-            return jsonify(path=path, entries=_entries(entry["sftp"], path))
+            with entry["io_lock"]:
+                rows = _entries(entry["sftp"], path)
+            return jsonify(path=path, entries=rows)
         except Exception as e:
             return jsonify(error=_error_text(e)), 400
 
@@ -469,24 +561,29 @@ def create_files_blueprint(
 
         sftp = entry["sftp"]
         try:
-            size = sftp.stat(path).st_size or 0
-            handle = sftp.open(path, "rb")
-            handle.prefetch()
+            with entry["io_lock"]:
+                size = sftp.stat(path).st_size or 0
+                handle = sftp.open(path, "rb")
+                handle.prefetch()
         except Exception as e:
             return jsonify(error=_error_text(e)), 400
 
         def stream():
-            try:
-                while True:
-                    chunk = handle.read(SFTP_CHUNK)
-                    if not chunk:
-                        break
-                    yield chunk
-            finally:
+            # Лок держим на всё чтение — фоновый перенос кнопкой VG работает
+            # тем же sftp-клиентом, а paramiko не рассчитан на одновременную
+            # работу с ним из разных потоков.
+            with entry["io_lock"]:
                 try:
-                    handle.close()
-                except Exception:
-                    pass
+                    while True:
+                        chunk = handle.read(SFTP_CHUNK)
+                        if not chunk:
+                            break
+                        yield chunk
+                finally:
+                    try:
+                        handle.close()
+                    except Exception:
+                        pass
 
         name = posixpath.basename(path) or "file"
         quoted = name.encode("utf-8", "ignore").decode("latin-1", "ignore")
@@ -515,41 +612,43 @@ def create_files_blueprint(
 
         sftp = entry["sftp"]
         try:
-            if not statmod.S_ISDIR(sftp.stat(path).st_mode or 0):
-                return jsonify(error="Это не папка."), 400
-            plan = _zip_plan(sftp, path, [SFTP_RECURSIVE_MAX])
+            with entry["io_lock"]:
+                if not statmod.S_ISDIR(sftp.stat(path).st_mode or 0):
+                    return jsonify(error="Это не папка."), 400
+                plan = _zip_plan(sftp, path, [SFTP_RECURSIVE_MAX])
         except Exception as e:
             return jsonify(error=_error_text(e)), 400
 
         def pour():
-            sink = _ZipSink()
-            with zipfile.ZipFile(sink, "w", zipfile.ZIP_STORED, allowZip64=True) as zf:
-                for arcname, remote_path, _, mtime in plan:
-                    info = zipfile.ZipInfo(arcname, _zip_time(mtime))
-                    info.compress_type = zipfile.ZIP_STORED
-                    if remote_path is None:
-                        zf.writestr(info, b"")          # пустая папка
-                        yield sink.drain()
-                        continue
-                    try:
-                        handle = sftp.open(remote_path, "rb")
-                        handle.prefetch()
-                    except Exception:
-                        continue   # файл исчез между списком и чтением — пропускаем
-                    with zf.open(info, "w") as dst:
+            with entry["io_lock"]:
+                sink = _ZipSink()
+                with zipfile.ZipFile(sink, "w", zipfile.ZIP_STORED, allowZip64=True) as zf:
+                    for arcname, remote_path, _, mtime in plan:
+                        info = zipfile.ZipInfo(arcname, _zip_time(mtime))
+                        info.compress_type = zipfile.ZIP_STORED
+                        if remote_path is None:
+                            zf.writestr(info, b"")          # пустая папка
+                            yield sink.drain()
+                            continue
                         try:
-                            while True:
-                                chunk = handle.read(SFTP_CHUNK)
-                                if not chunk:
-                                    break
-                                dst.write(chunk)
-                                if sink.held >= SFTP_CHUNK:
-                                    yield sink.drain()
-                        finally:
-                            handle.close()
-                    if sink.held:
-                        yield sink.drain()
-            yield sink.drain()
+                            handle = sftp.open(remote_path, "rb")
+                            handle.prefetch()
+                        except Exception:
+                            continue   # файл исчез между списком и чтением — пропускаем
+                        with zf.open(info, "w") as dst:
+                            try:
+                                while True:
+                                    chunk = handle.read(SFTP_CHUNK)
+                                    if not chunk:
+                                        break
+                                    dst.write(chunk)
+                                    if sink.held >= SFTP_CHUNK:
+                                        yield sink.drain()
+                            finally:
+                                handle.close()
+                        if sink.held:
+                            yield sink.drain()
+                yield sink.drain()
 
         safe = (_zip_name(posixpath.basename(path) or "папка", set())) + ".zip"
         quoted = urllib.parse.quote(safe)
@@ -579,14 +678,15 @@ def create_files_blueprint(
         target = posixpath.join(folder, name)
         written = 0
         try:
-            with entry["sftp"].open(target, "wb") as remote:
-                remote.set_pipelined(True)
-                while True:
-                    chunk = request.stream.read(SFTP_CHUNK)
-                    if not chunk:
-                        break
-                    remote.write(chunk)
-                    written += len(chunk)
+            with entry["io_lock"]:
+                with entry["sftp"].open(target, "wb") as remote:
+                    remote.set_pipelined(True)
+                    while True:
+                        chunk = request.stream.read(SFTP_CHUNK)
+                        if not chunk:
+                            break
+                        remote.write(chunk)
+                        written += len(chunk)
         except Exception as e:
             return jsonify(error=_error_text(e)), 400
         return jsonify(ok=True, name=name, size=written)
@@ -606,30 +706,31 @@ def create_files_blueprint(
         sftp = entry["sftp"]
 
         try:
-            if op == "mkdir":
-                sftp.mkdir(path)
-            elif op == "rename":
-                name = posixpath.basename(payload.get("name", "") or "")
-                if not name or name in (".", ".."):
-                    return jsonify(error="Плохое имя."), 400
-                sftp.rename(path, posixpath.join(posixpath.dirname(path), name))
-            elif op == "delete":
-                if statmod.S_ISDIR(sftp.stat(path).st_mode or 0):
-                    if payload.get("recursive"):
-                        _rm_tree(sftp, path, [SFTP_RECURSIVE_MAX])
+            with entry["io_lock"]:
+                if op == "mkdir":
+                    sftp.mkdir(path)
+                elif op == "rename":
+                    name = posixpath.basename(payload.get("name", "") or "")
+                    if not name or name in (".", ".."):
+                        return jsonify(error="Плохое имя."), 400
+                    sftp.rename(path, posixpath.join(posixpath.dirname(path), name))
+                elif op == "delete":
+                    if statmod.S_ISDIR(sftp.stat(path).st_mode or 0):
+                        if payload.get("recursive"):
+                            _rm_tree(sftp, path, [SFTP_RECURSIVE_MAX])
+                        else:
+                            try:
+                                sftp.rmdir(path)
+                            except OSError as e:
+                                # Папка с содержимым — не молчим и не сносим втихую,
+                                # а спрашиваем у человека отдельной карточкой.
+                                if getattr(e, "errno", None) in (39, 66) or "not empty" in str(e).lower():
+                                    return jsonify(error="Папка не пуста.", needs_recursive=True), 409
+                                raise
                     else:
-                        try:
-                            sftp.rmdir(path)
-                        except OSError as e:
-                            # Папка с содержимым — не молчим и не сносим втихую,
-                            # а спрашиваем у человека отдельной карточкой.
-                            if getattr(e, "errno", None) in (39, 66) or "not empty" in str(e).lower():
-                                return jsonify(error="Папка не пуста.", needs_recursive=True), 409
-                            raise
+                        sftp.remove(path)
                 else:
-                    sftp.remove(path)
-            else:
-                return jsonify(error="Неизвестная операция."), 400
+                    return jsonify(error="Неизвестная операция."), 400
         except Exception as e:
             return jsonify(error=_error_text(e)), 400
         return jsonify(ok=True)

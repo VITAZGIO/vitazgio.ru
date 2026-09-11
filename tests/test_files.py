@@ -9,6 +9,7 @@
 import os
 import stat as statmod
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -212,30 +213,60 @@ def test_zip_rejects_a_plain_file(sftp_client):
 
 
 # ---- Кнопка VG: перенос файла/папки с машины прямо в личный дроп ----------
+# Перенос идёт в фоновом потоке, POST отвечает сразу job_id — страница
+# опрашивает /api/files/to-drop/<job_id>, чтобы показать полосу загрузки.
 
-def test_vg_button_sends_file_into_download_folder(sftp_client):
-    resp = sftp_client.post("/api/files/to-drop", json={"path": "/заметки.txt"})
-    assert resp.status_code == 200
-    body = resp.get_json()
+def _wait_job(client, job_id, timeout=5):
+    """Ждёт, пока фоновый перенос перестанет быть 'run'. В тестах он занимает
+    доли секунды (обычная запись в temp-папку), но всё равно другой поток."""
+    deadline = time.time() + timeout
+    status = None
+    while time.time() < deadline:
+        resp = client.get(f"/api/files/to-drop/{job_id}")
+        assert resp.status_code == 200
+        status = resp.get_json()
+        if status["state"] != "run":
+            return status
+        time.sleep(0.02)
+    raise AssertionError(f"задача не завершилась за {timeout}с: {status}")
+
+
+def test_vg_button_reports_progress_and_lands_in_download_folder(sftp_client):
+    start = sftp_client.post("/api/files/to-drop", json={"path": "/заметки.txt"})
+    assert start.status_code == 200
+    body = start.get_json()
     assert body["kind"] == "file"
+    assert body["total"] == len("привет".encode("utf-8"))
+    job_id = body["job"]
+
+    status = _wait_job(sftp_client, job_id)
+    assert status["state"] == "done"
+    assert status["done"] == body["total"]
 
     rows = {row["name"]: row for row in sftp_client.get("/api/drop/list?parent=download").get_json()["items"]}
     assert "заметки.txt" in rows
     assert rows["заметки.txt"]["size"] == len("привет".encode("utf-8"))
 
 
+def test_to_drop_job_status_unknown_id(sftp_client):
+    assert sftp_client.get("/api/files/to-drop/нет-такой-задачи").status_code == 404
+
+
 def test_vg_button_sends_folder_recursively(sftp_client, remote_root):
     (remote_root / "проекты" / "вложенная").mkdir()
     (remote_root / "проекты" / "код.py").write_text("print(1)", encoding="utf-8")
 
-    resp = sftp_client.post("/api/files/to-drop", json={"path": "/проекты"})
-    assert resp.status_code == 200
-    assert resp.get_json()["kind"] == "folder"
-    folder_id = resp.get_json()["id"]
+    start = sftp_client.post("/api/files/to-drop", json={"path": "/проекты"})
+    assert start.status_code == 200
+    body = start.get_json()
+    assert body["kind"] == "folder"
+
+    status = _wait_job(sftp_client, body["job"])
+    assert status["state"] == "done"
 
     top = {row["name"]: row for row in sftp_client.get("/api/drop/list?parent=download").get_json()["items"]}
     assert top["проекты"]["kind"] == "folder"
-    assert top["проекты"]["id"] == folder_id
+    folder_id = top["проекты"]["id"]
 
     inside = {row["name"]: row for row in sftp_client.get(f"/api/drop/list?parent={folder_id}").get_json()["items"]}
     assert inside["код.py"]["kind"] == "file"
@@ -258,9 +289,11 @@ def test_vg_button_respects_drop_quota(sftp_client, app_module):
             "size": app_module.DROP_QUOTA, "created": 0, "share": None,
         }
     try:
-        resp = sftp_client.post("/api/files/to-drop", json={"path": "/заметки.txt"})
-        assert resp.status_code == 400
-        assert "квота" in resp.get_json()["error"].lower()
+        start = sftp_client.post("/api/files/to-drop", json={"path": "/заметки.txt"})
+        assert start.status_code == 200          # задача стартует всегда — квоту проверяет фон
+        status = _wait_job(sftp_client, start.get_json()["job"])
+        assert status["state"] == "error"
+        assert "квота" in status["error"].lower()
 
         after = {row["id"] for row in sftp_client.get("/api/drop/list?parent=download").get_json()["items"]}
         assert after == before   # ничего нового не появилось — отказ не наполовину

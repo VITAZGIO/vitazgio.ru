@@ -13,11 +13,15 @@ Baseline before blueprint split:
 
 Текущее состояние (проверяется одной строкой, а не на глаз):
 
-- Роутов сейчас: `139`. Считать так — поднять приложение и посмотреть
+- Роутов сейчас: `143`. Считать так — поднять приложение и посмотреть
   `[r for r in app.url_map.iter_rules() if r.endpoint != "static"]`.
   Число включает вебсокеты (`@sock.route` тоже попадает в `url_map`).
 - 2026-09-11: +7 в разделе «files/sftp» — файловый менеджер по SFTP.
 - 2026-09-11: +1 туда же — скачивание папки zip-архивом.
+- 2026-09-11: +1 туда же — `/api/files/session` (в таблице раньше был
+  пропущен, хотя в коде уже существовал).
+- 2026-09-11: +2 туда же — `/api/files/to-drop` (POST, запускает перенос)
+  и `/api/files/to-drop/<job_id>` (GET, прогресс) для кнопки VG.
 
 Guards column includes route decorators such as `login_required`, `debtor_required`,
 `music_editor_required`, plus existing domain guards where useful.
@@ -249,8 +253,11 @@ Guards column includes route decorators such as `login_required`, `debtor_requir
 | `/files/<ip>` | `@files_bp.get("/files/<ip>")` | `files_page` | `login_required` + машина из `sftp_enabled_ips` |
 | `/api/files/connect` | `@files_bp.post("/api/files/connect")` | `files_connect` | `login_required` + пароль консоли |
 | `/api/files/disconnect` | `@files_bp.post("/api/files/disconnect")` | `files_disconnect` | `login_required` |
+| `/api/files/session` | `@files_bp.get("/api/files/session")` | `files_session` | `login_required` |
 | `/api/files/list` | `@files_bp.get("/api/files/list")` | `files_list` | `login_required` + живое соединение |
 | `/api/files/download` | `@files_bp.get("/api/files/download")` | `files_download` | `login_required` + живое соединение |
 | `/api/files/zip` | `@files_bp.get("/api/files/zip")` | `files_zip` | `login_required` + живое соединение |
 | `/api/files/upload` | `@files_bp.post("/api/files/upload")` | `files_upload` | `login_required` + живое соединение |
 | `/api/files/op` | `@files_bp.post("/api/files/op")` | `files_op` | `login_required` + живое соединение |
+| `/api/files/to-drop` | `@files_bp.post("/api/files/to-drop")` | `files_to_drop` | `login_required` + живое соединение |
+| `/api/files/to-drop/<job_id>` | `@files_bp.get("/api/files/to-drop/<job_id>")` | `files_to_drop_status` | `login_required` |

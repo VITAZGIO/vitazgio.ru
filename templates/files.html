@@ -124,9 +124,49 @@
                     box-shadow: 0 10px 30px rgba(0,0,0,.45); transition: opacity .25s; }
         .ui-toast.err { color: #ffb3b3; border-color: rgba(255,107,129,.4); }
         .ui-toast.ok { border-color: rgba(99,245,173,.4); }
+
+        /* Трей переносов на сайт (кнопка VG) — как загрузки в браузере:
+           значок справа сверху, кольцо вокруг растёт по общему проценту,
+           клик разворачивает список того, что сейчас едет. */
+        .dl-wrap { position: fixed; top: 16px; right: 16px; z-index: 80; }
+        .dl-tray { position: relative; width: 44px; height: 44px; display: grid; place-items: center;
+                   color: #69e8ff; cursor: pointer; border: 0; background: transparent; }
+        .dl-tray svg.dl-ring-svg { position: absolute; inset: 0; width: 44px; height: 44px;
+                                    transform: rotate(-90deg); }
+        .dl-ring-bg { fill: none; stroke: rgba(255,255,255,.1); stroke-width: 3; }
+        .dl-ring-fg { fill: none; stroke: #69e8ff; stroke-width: 3; stroke-linecap: round;
+                      transition: stroke-dashoffset .25s ease; }
+        .dl-tray.has-error .dl-ring-fg { stroke: #ff6b81; }
+        .dl-tray.has-error { color: #ff6b81; }
+        .dl-icon { width: 18px; height: 18px; position: relative; }
+        .dl-panel { position: absolute; top: 50px; right: 0; width: min(320px, 82vw);
+                    padding: 10px; color: #eef2fb; border: 1px solid rgba(45,226,255,.3);
+                    background: #10162a; box-shadow: 0 20px 60px rgba(0,0,0,.55); }
+        .dl-panel-title { margin: 2px 8px 8px; color: #8b93a6; font-size: .72rem;
+                           text-transform: uppercase; letter-spacing: .06em; }
+        .dl-row { display: flex; align-items: center; gap: 10px; padding: 7px 8px; font-size: .8rem; }
+        .dl-row + .dl-row { border-top: 1px solid rgba(255,255,255,.06); }
+        .dl-name { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+        .dl-pct { flex: none; color: #69e8ff; font-size: .74rem; }
+        .dl-pct.done { color: #63f5ad; }
+        .dl-pct.error { color: #ff6b81; }
       </style>
     </head>
     <body>
+      <div class="dl-wrap" id="dl-wrap" hidden>
+        <button class="dl-tray" id="dl-tray" type="button" title="Передачи на сайт">
+          <svg class="dl-ring-svg" viewBox="0 0 44 44">
+            <circle class="dl-ring-bg" cx="22" cy="22" r="18"/>
+            <circle class="dl-ring-fg" id="dl-ring" cx="22" cy="22" r="18"/>
+          </svg>
+          <svg class="dl-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 21h16"/></svg>
+        </button>
+        <div class="dl-panel" id="dl-panel" hidden>
+          <div class="dl-panel-title">Передачи на сайт</div>
+          <div id="dl-list"></div>
+        </div>
+      </div>
+
       <div class="wrap">
         <header class="head">
           <a class="back" href="/netbird" aria-label="Назад к устройствам">
@@ -482,18 +522,90 @@
           a.remove();
         };
 
+        // ---- трей переносов на сайт (кнопка VG) — как загрузки в браузере ----
+        const dlWrap = document.getElementById("dl-wrap");
+        const dlTray = document.getElementById("dl-tray");
+        const dlPanel = document.getElementById("dl-panel");
+        const dlList = document.getElementById("dl-list");
+        const dlRing = document.getElementById("dl-ring");
+        const DL_RING_C = 2 * Math.PI * 18;
+        dlRing.style.strokeDasharray = String(DL_RING_C);
+
+        const dlJobs = new Map();   // job_id -> {name, total, done, state, error}
+        let dlPollTimer = null;
+
+        const dlSetRing = (pct) => {
+          dlRing.style.strokeDashoffset = String(DL_RING_C - DL_RING_C * Math.min(100, Math.max(0, pct)) / 100);
+        };
+
+        const dlRender = () => {
+          const jobs = [...dlJobs.values()];
+          if (!jobs.length) { dlWrap.hidden = true; dlPanel.hidden = true; return; }
+          dlWrap.hidden = false;
+
+          let doneSum = 0, totalSum = 0, anyError = false, allSettled = true;
+          jobs.forEach((j) => {
+            const total = j.total || 1;
+            doneSum += Math.min(j.done, total);
+            totalSum += total;
+            if (j.state === "run") allSettled = false;
+            if (j.state === "error") anyError = true;
+          });
+          dlSetRing(totalSum ? (doneSum / totalSum * 100) : 100);
+          dlTray.classList.toggle("has-error", anyError);
+
+          dlList.innerHTML = jobs.map((j) => {
+            const pct = j.total ? Math.round(Math.min(j.done, j.total) / j.total * 100) : 100;
+            const label = j.state === "error" ? "ошибка" : j.state === "done" ? "готово" : pct + "%";
+            return `<div class="dl-row"><span class="dl-name" title="${esc(j.name)}">${esc(j.name)}</span>` +
+                   `<span class="dl-pct ${j.state}">${label}</span></div>`;
+          }).join("");
+
+          if (allSettled) {
+            // Как в браузере: подождать и убрать, если за это время не
+            // прилетело что-то новое (проверяем состояние заново на таймере).
+            setTimeout(() => {
+              if ([...dlJobs.values()].every((j) => j.state !== "run")) {
+                dlJobs.clear();
+                dlWrap.hidden = true;
+                dlPanel.hidden = true;
+              }
+            }, 5000);
+          }
+        };
+
+        const dlPoll = async () => {
+          const running = [...dlJobs.keys()].filter((id) => dlJobs.get(id).state === "run");
+          if (!running.length) { clearInterval(dlPollTimer); dlPollTimer = null; return; }
+          await Promise.all(running.map(async (id) => {
+            try {
+              const r = await fetch("/api/files/to-drop/" + id, { credentials: "same-origin" });
+              if (!r.ok) return;
+              dlJobs.set(id, await r.json());
+            } catch { /* сеть моргнула — попробуем на следующем тике */ }
+          }));
+          dlRender();
+        };
+
+        const dlStart = (jobId, name, total, kind) => {
+          dlJobs.set(jobId, { name, total, done: 0, state: "run", kind, error: "" });
+          dlRender();
+          if (!dlPollTimer) dlPollTimer = setInterval(dlPoll, 400);
+        };
+
+        dlTray.addEventListener("click", () => { dlPanel.hidden = !dlPanel.hidden; });
+
         const sendToDrop = async (path, name, isDir) => {
           const sure = await uiConfirm(
             `Отправить ${isDir ? "папку" : "файл"} «${name}» на сайт?\nЛяжет в личный дроп, в папку Download.`,
             { okLabel: "Отправить", okKind: "primary" });
           if (!sure) return;
-          uiToast("Переносим на сайт — идёт по этому же соединению, без браузера…");
           try {
-            await api("/api/files/to-drop", {
+            const data = await api("/api/files/to-drop", {
               method: "POST", headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ path }),
             });
-            uiToast("Готово — лежит в дропе, папка Download", "ok");
+            dlStart(data.job, data.name || name, data.total || 0, data.kind);
           } catch (e) { uiToast(e.message, "err"); }
         };
 
