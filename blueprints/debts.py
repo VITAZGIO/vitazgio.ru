@@ -235,6 +235,28 @@ def create_debts_blueprint(
             debts_write_locked()
             return jsonify(debts_snapshot_locked())
 
+    @debts_bp.delete("/api/debts/me/payment-requests/<request_id>")
+    @debtor_required
+    def debts_own_payment_request_cancel_api(request_id):
+        debtor_id = session.get("debtor_id")
+        with debts_lock:
+            store = data()
+            requests = store.setdefault("payment_requests", [])
+            payment = next((r for r in requests if r.get("id") == request_id), None)
+            if not payment:
+                return jsonify(error="Заявка не найдена."), 404
+            if payment.get("user_id") != debtor_id:
+                return jsonify(error="Нельзя удалить чужую заявку."), 403
+            store["payment_requests"] = [r for r in requests if r.get("id") != request_id]
+            debts_write_locked()
+            snapshot = debts_snapshot_locked(debtor_id)
+            user = next((u for u in store["users"] if u.get("id") == debtor_id), None)
+            if not user:
+                session.pop("debtor_id", None)
+                return jsonify(error="Пользователь не найден."), 404
+            snapshot["me"] = debt_user_public_locked(user)
+            return jsonify(snapshot)
+
     @debts_bp.delete("/api/debts/entries/<entry_id>")
     @debts_owner_required
     def debts_entry_delete_api(entry_id):

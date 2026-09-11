@@ -164,6 +164,7 @@ Guards column includes route decorators such as `login_required`, `debtor_requir
 | `/api/debts/payment-requests` | `@app.post("/api/debts/payment-requests")` | `debts_payment_request_create_api` | - |
 | `/api/debts/payment-requests/<request_id>/approve` | `@app.post("/api/debts/payment-requests/<request_id>/approve")` | `debts_payment_request_approve_api` | `debts_owner_required` |
 | `/api/debts/payment-requests/<request_id>` | `@app.delete("/api/debts/payment-requests/<request_id>")` | `debts_payment_request_cancel_api` | `debts_owner_required` |
+| `/api/debts/me/payment-requests/<request_id>` | `@app.delete("/api/debts/me/payment-requests/<request_id>")` | `debts_own_payment_request_cancel_api` | `debtor_required` |
 | `/api/debts/entries/<entry_id>` | `@app.delete("/api/debts/entries/<entry_id>")` | `debts_entry_delete_api` | `debts_owner_required` |
 | `/api/debts/me` | `@app.get("/api/debts/me")` | `debts_me_api` | - |
 | `/api/debts/users/<user_id>` | `@app.delete("/api/debts/users/<user_id>")` | `debts_user_delete_api` | `debts_owner_required` |

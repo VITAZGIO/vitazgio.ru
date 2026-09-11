@@ -107,6 +107,22 @@ def test_owner_cancels_payment_request_without_changing_debt(app_module, auth_cl
     assert all(e["kind"] != "return" for e in body["entries"])
 
 
+def test_debtor_can_cancel_own_pending_payment_request(app_module):
+    client = _debtor_client(app_module)
+    created = client.post("/api/debts/payment-requests", json={
+        "amount": "500",
+        "bank": "ОЗОН",
+    }).get_json()
+    request_id = created["payment_requests"][0]["id"]
+
+    resp = client.delete(f"/api/debts/me/payment-requests/{request_id}")
+
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["payment_requests"] == []
+    assert body["me"]["total_cents"] == 200000
+
+
 def test_payment_request_requires_known_bank(app_module):
     client = _debtor_client(app_module)
 

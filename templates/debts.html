@@ -22,7 +22,7 @@
       .keypad button[data-bksp]{font-size:18px;color:var(--muted)}
     }
     .panel{border:1px solid var(--line);background:rgba(12,22,40,.78);padding:20px;min-width:0} .panel.accent{box-shadow:inset 3px 0 0 var(--cyan)}
-    .total{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-bottom:18px} .stat{border:1px solid var(--line);background:rgba(7,14,27,.82);padding:16px} .stat b{display:block;font-size:28px;color:var(--cyan)} .stat i{font-style:normal;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.08em}
+    .total{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-bottom:18px} .stat{border:1px solid var(--line);background:rgba(7,14,27,.82);padding:16px} .stat b{display:block;font-size:28px;color:var(--cyan)} .stat i{font-style:normal;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.08em}
     form{display:grid;gap:10px} label{display:grid;gap:6px;color:#b8c8e8;font-weight:800;font-size:12px;text-transform:uppercase;letter-spacing:.06em} input,select{width:100%;border:1px solid #28405f;background:#071021;color:var(--text);padding:11px 12px;outline:none} input:focus,select:focus{border-color:var(--cyan);box-shadow:0 0 0 2px rgba(53,224,240,.14)} .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
     .btn{border:1px solid rgba(53,224,240,.7);background:rgba(53,224,240,.16);color:var(--text);padding:11px 14px;font-weight:900;cursor:pointer} .btn:hover{background:rgba(53,224,240,.24)} .btn.danger{border-color:rgba(255,79,179,.55);background:rgba(255,79,179,.12)} .btn.ok{border-color:rgba(99,245,173,.62);background:rgba(99,245,173,.14)} .btn.small{padding:7px 9px;font-size:12px}
     /* Выбор человека — узкая полоска кружков-аватарок (первая буква имени),
@@ -49,12 +49,12 @@
     .swatch.active{border-color:#fff}
     .swatch.cyan{background:var(--u-cyan)} .swatch.green{background:var(--u-green)} .swatch.pink{background:var(--u-pink)} .swatch.yellow{background:var(--u-yellow)} .swatch.violet{background:var(--u-violet)} .swatch.orange{background:var(--u-orange)}
     .modal-actions{display:flex;gap:10px;margin-top:8px} .modal-actions .btn{flex:1}
-    .entry-form{grid-template-columns:1.1fr .8fr .8fr 1.4fr auto;align-items:end;margin-bottom:18px}.pay-toggle{margin:8px 0 14px}.pay-form{grid-template-columns:1fr 1fr 1fr auto auto;align-items:end;margin:8px 0 18px}.history{width:100%;border-collapse:collapse} .history th,.history td{border-bottom:1px solid #1a2d49;padding:11px 8px;text-align:left;vertical-align:top} .history th{color:#86a1cc;font-size:12px;text-transform:uppercase;letter-spacing:.08em} .sum{font-weight:900;color:var(--cyan);white-space:nowrap} .sum.minus{color:var(--green)} .kind{font-style:normal;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.04em}.request-row{opacity:.66;background:rgba(138,162,199,.06)}.status-pill{display:inline-block;margin-top:5px;padding:2px 7px;border:1px solid #37506f;color:#b8c8e8;font-size:11px;text-transform:uppercase;letter-spacing:.06em}.row-actions{display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap}.empty{padding:28px;border:1px dashed #294260;color:var(--muted);text-align:center}
+    .entry-form{grid-template-columns:1.1fr .8fr .8fr 1.4fr auto;align-items:end;margin-bottom:18px}.pay-toggle{margin:8px 0 14px}.pay-form{grid-template-columns:1fr 1fr 1fr auto auto;align-items:end;margin:8px 0 18px}.history{width:100%;border-collapse:collapse} .history th,.history td{border-bottom:1px solid #1a2d49;padding:11px 8px;text-align:left;vertical-align:top} .history th{color:#86a1cc;font-size:12px;text-transform:uppercase;letter-spacing:.08em} .sum{font-weight:900;color:var(--cyan);white-space:nowrap} .sum.minus{color:var(--green)} .kind{font-style:normal;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.04em}.request-row{opacity:.66;background:rgba(138,162,199,.06)}.status-pill{display:inline-block;margin-top:5px;padding:2px 7px;border:1px solid #37506f;color:#b8c8e8;font-size:11px;text-transform:uppercase;letter-spacing:.06em}.row-actions{display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap}.celebration-row td{border:1px solid rgba(246,192,74,.75);background:rgba(246,192,74,.14);color:#ffe6a2;padding:14px 16px;font-weight:900;text-align:center}.celebration-row span{display:inline-block;margin:0 8px;color:var(--yellow);font-size:20px}.empty{padding:28px;border:1px dashed #294260;color:var(--muted);text-align:center}
     .del-x{border:1px solid rgba(255,79,179,.55);background:rgba(255,79,179,.12);color:var(--text);width:26px;height:26px;border-radius:50%;cursor:pointer;display:grid;place-items:center;padding:0}
     .del-x:hover{border-color:var(--pink);background:rgba(255,79,179,.24)} .del-x svg{width:12px;height:12px;display:block}
     .err{min-height:20px;color:#ff7aa9;font-weight:800} .ok{color:var(--green)} .debtor-card{max-width:960px;margin:auto} .debtor-card .history{margin-top:16px}
     @media (max-width:980px){
-      .wrap{width:min(100vw - 24px,760px);padding-top:20px}.total{grid-template-columns:1fr}.entry-form{grid-template-columns:1fr}.tag{display:none}
+      .wrap{width:min(100vw - 24px,760px);padding-top:14px}.head{gap:12px;margin-bottom:18px}.head h1{font-size:30px;line-height:1.05}.total{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.stat{padding:13px}.stat b{font-size:23px}.entry-form{grid-template-columns:1fr}.tag{display:none}
       .rail{flex:0 0 60px;padding:10px 6px;gap:8px} .avatar{width:42px;height:42px;font-size:16px}.pay-form{grid-template-columns:1fr}
       /* Таблица истории на телефоне не влезает в ширину (дата, тип, сумма,
          комментарий, крестик — реально требуют больше 400px, да ещё и рядом
@@ -77,6 +77,8 @@
       .history td:nth-child(3){grid-area:sum;text-align:right;align-self:center;font-size:19px}
       .history td:nth-child(4){grid-area:comment;color:var(--muted);font-size:13px;padding-top:8px;border-top:1px solid #1a2d49;margin-top:2px}
       .history td:nth-child(5){grid-area:act;justify-self:end;align-self:start}
+      .history tr.celebration-row{display:block;border:0;background:transparent;padding:0;margin:14px 0}
+      .history tr.celebration-row td{display:block;border:1px solid rgba(246,192,74,.75);background:rgba(246,192,74,.14);padding:16px 12px;font-size:15px}
     }
   </style>
 </head>
@@ -127,10 +129,10 @@
     </section>
 
     <section id="debtor-app" class="panel accent debtor-card **DEBTOR_APP_HIDDEN**">
+      <h2 class="debtor-name" id="me-name">Мои долги</h2>
       <div class="total">
         <div class="stat"><i>к оплате</i><b id="me-total">0</b></div>
         <div class="stat"><i>записей</i><b id="me-count">0</b></div>
-        <div class="stat"><i>режим</i><b>просмотр</b></div>
       </div>
       <button class="btn pay-toggle" id="pay-open" type="button">Внести взнос</button>
       <form class="pay-form hidden" id="pay-form">
@@ -141,7 +143,7 @@
         <button class="btn danger" id="pay-cancel" type="button">Отмена</button>
       </form>
       <div class="err" id="pay-err"></div>
-      <h2 id="me-name">История</h2>
+      <h2>История</h2>
       <div id="me-history"></div>
     </section>
   </main>
@@ -186,21 +188,28 @@
       return `<tr><td>${esc(entry.date)}</td><td><i class="kind">${label}</i></td><td class="${cls}">${money(entry.kind === "return" ? -entry.amount_cents : entry.amount_cents)}</td><td>${esc(entry.comment || "—")}</td><td>${canDelete ? `<button class="del-x" data-del="${esc(entry.id)}" aria-label="Удалить" title="Удалить">${deleteIcon}</button>` : ""}</td></tr>`;
     }
 
-    function requestRowHtml(row, canModerate) {
+    function requestRowHtml(row, canModerate, canCancel) {
+      const deleteIcon = `<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 4l8 8m0-8-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`;
       const actions = canModerate ? `<div class="row-actions">
         <button class="btn ok small" type="button" data-approve="${esc(row.id)}">Одобрить</button>
         <button class="btn danger small" type="button" data-cancel-request="${esc(row.id)}">Отменить</button>
-      </div>` : "";
+      </div>` : canCancel ? `<button class="del-x" type="button" data-cancel-own-request="${esc(row.id)}" aria-label="Удалить заявку" title="Удалить заявку">${deleteIcon}</button>` : "";
       return `<tr class="request-row"><td>${esc(row.date)}</td><td><i class="kind">взнос</i><br><span class="status-pill">в обработке</span></td><td class="sum minus">${money(-row.amount_cents)}</td><td>Банк: ${esc(row.bank || "—")}</td><td>${actions}</td></tr>`;
     }
 
-    function tableHtml(entries, canDelete, requests=[], canModerate=false) {
+    function celebrationRowHtml() {
+      return `<tr class="celebration-row"><td colspan="5"><span>🎉</span>Ура, рабству конец. Долги выплачены.<span>🎉</span></td></tr>`;
+    }
+
+    function tableHtml(entries, canDelete, requests=[], canModerate=false, canCancelRequests=false, showCelebration=false) {
       const rows = [
         ...requests.map(r => ({...r, _row: "request"})),
         ...entries.map(e => ({...e, _row: "entry"}))
       ].sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")) || String(b.created || "").localeCompare(String(a.created || "")));
       if (!rows.length) return `<div class="empty">Пока нет записей.</div>`;
-      return `<table class="history"><thead><tr><th>Дата</th><th>Тип</th><th>Сумма</th><th>Комментарий</th><th></th></tr></thead><tbody>${rows.map(row => row._row === "request" ? requestRowHtml(row, canModerate) : rowHtml(row, canDelete)).join("")}</tbody></table>`;
+      const hasDebt = entries.some(entry => entry.kind === "debt");
+      const celebration = showCelebration && hasDebt ? celebrationRowHtml() : "";
+      return `<table class="history"><thead><tr><th>Дата</th><th>Тип</th><th>Сумма</th><th>Комментарий</th><th></th></tr></thead><tbody>${celebration}${rows.map(row => row._row === "request" ? requestRowHtml(row, canModerate, canCancelRequests) : rowHtml(row, canDelete)).join("")}</tbody></table>`;
     }
 
     // ---- Свои карточки поверх страницы (вместо confirm()/prompt()) --------
@@ -398,7 +407,7 @@
       $("me-count").textContent = String(me.entries.length + requests.length);
       $("me-name").textContent = me.me.name;
       $("pay-date").value = me.today || new Date().toISOString().slice(0,10);
-      $("me-history").innerHTML = tableHtml(me.entries, false, requests, false);
+      $("me-history").innerHTML = tableHtml(me.entries, false, requests, false, true, me.me.total_cents <= 0);
     }
 
     if (mode === "owner") {
@@ -493,6 +502,15 @@
           $("pay-form").classList.add("hidden");
           $("pay-open").classList.remove("hidden");
           data = next;
+          await loadDebtor();
+        } catch (err) { $("pay-err").textContent = err.message; }
+      });
+      $("me-history").addEventListener("click", async e => {
+        const cancelRequest = e.target.closest("[data-cancel-own-request]");
+        if (!cancelRequest) return;
+        $("pay-err").textContent = "";
+        try {
+          data = await api("/api/debts/me/payment-requests/" + encodeURIComponent(cancelRequest.dataset.cancelOwnRequest), {method:"DELETE"});
           await loadDebtor();
         } catch (err) { $("pay-err").textContent = err.message; }
       });
