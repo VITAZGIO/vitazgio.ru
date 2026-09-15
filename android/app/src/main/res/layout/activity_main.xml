@@ -1,91 +1,73 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Красота здесь не нужна, нужен читаемый журнал: без него удалённая
-     отладка ночного теста превращается в гадание. -->
+<!-- Нативной разметки тут ровно два куска, всё остальное рисует сам сайт:
+     тонкая полоска состояния агента сверху и заглушка «нет связи» поверх
+     WebView. Больше нативных экранов быть не должно — иначе правка кнопки
+     означала бы пересборку APK вместо обычного деплоя.
+
+     Полоска стоит отдельной строкой, а не поверх страницы: наложением она
+     закрывала бы верх сайта (в кабинете там шапка со ссылками). -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
     android:fitsSystemWindows="true"
-    android:padding="16dp">
+    android:background="#0d1321">
 
     <TextView
-        android:id="@+id/status"
+        android:id="@+id/strip"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:paddingBottom="12dp"
-        android:textSize="18sp"
-        android:textStyle="bold" />
+        android:background="#141c2e"
+        android:paddingHorizontal="10dp"
+        android:paddingVertical="2dp"
+        android:textSize="11sp"
+        android:textColor="#8b93a7"
+        android:maxLines="1"
+        android:ellipsize="end" />
 
-    <EditText
-        android:id="@+id/server"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:hint="@string/server_hint"
-        android:inputType="textUri"
-        android:autofillHints="" />
-
-    <EditText
-        android:id="@+id/token"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:hint="@string/token_hint"
-        android:inputType="textPassword"
-        android:autofillHints="" />
-
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:paddingTop="8dp">
-
-        <Button
-            android:id="@+id/start"
-            android:layout_width="0dp"
-            android:layout_weight="1"
-            android:layout_height="wrap_content"
-            android:text="@string/start" />
-
-        <Button
-            android:id="@+id/stop"
-            android:layout_width="0dp"
-            android:layout_weight="1"
-            android:layout_height="wrap_content"
-            android:text="@string/stop" />
-    </LinearLayout>
-
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:paddingTop="8dp">
-
-        <TextView
-            android:layout_width="0dp"
-            android:layout_weight="1"
-            android:layout_height="wrap_content"
-            android:text="@string/log_title"
-            android:textStyle="bold" />
-
-        <Button
-            android:id="@+id/copyLog"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@string/copy_log" />
-    </LinearLayout>
-
-    <ScrollView
-        android:id="@+id/logScroll"
+    <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1">
 
-        <TextView
-            android:id="@+id/log"
+        <WebView
+            android:id="@+id/web"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:fontFamily="monospace"
-            android:textSize="12sp"
-            android:textIsSelectable="true" />
-    </ScrollView>
+            android:layout_height="match_parent" />
+
+        <LinearLayout
+            android:id="@+id/offline"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="#0d1321"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:padding="24dp"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/offline_title"
+                android:textColor="#e8fbff"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/offline_why"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:gravity="center"
+                android:textColor="#8b93a7"
+                android:textSize="13sp" />
+
+            <Button
+                android:id="@+id/retry"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="18dp"
+                android:text="@string/retry" />
+        </LinearLayout>
+    </FrameLayout>
 </LinearLayout>

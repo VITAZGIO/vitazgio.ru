@@ -1,5 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Значок — тот же знак VG, что у PWA (static/icons/maskable-512.png):
+     на телефоне должен стоять один знакомый значок, а не два похожих.
+     Взят именно маскируемый вариант — у него знак ужат внутрь круга, и
+     обрезка углов его не кусает. -->
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
     <background android:drawable="@color/ic_launcher_background" />
-    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+    <foreground android:drawable="@mipmap/ic_launcher_fg" />
 </adaptive-icon>

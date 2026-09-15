@@ -696,6 +696,10 @@ os.makedirs(DATA_DIR, exist_ok=True)
 # переживает пересборку контейнера, как дроп и фонотека.
 PHONE_APK_DIR = os.path.join(DATA_DIR, "apk")
 os.makedirs(PHONE_APK_DIR, exist_ok=True)
+# Личные токены устройств (ступень 2): на диске только хэши, как у пароля
+# корзины дропа. Файл обязан пережить деплой — телефон держит свой токен у
+# себя, и после пересборки сервер должен его узнать.
+PHONE_TOKENS_PATH = os.path.join(DATA_DIR, "phone_tokens.json")
 
 # ---- Музыка ----------------------------------------------------------------
 # Файлы лежат под своими именами в data/music — так их можно просто закинуть
@@ -4766,6 +4770,7 @@ app.register_blueprint(create_phone_blueprint(
     publish_status=_phone_publish_status,
     apk_dir=PHONE_APK_DIR,
     apk_repo=PHONE_APK_REPO,
+    tokens_path=PHONE_TOKENS_PATH,
 ))
 
 app.register_blueprint(create_pwa_blueprint(

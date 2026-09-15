@@ -201,3 +201,60 @@ def test_agent_token_opens_the_version_check(client):
     assert ok.status_code == 200
     bad = client.get("/api/app/version", headers={"X-Agent-Token": "не тот токен"})
     assert bad.status_code == 403
+
+
+# ---- Токены устройств (ступень 2: оболочка-браузер) -------------------------
+
+def test_token_issue_is_behind_the_door(client):
+    assert client.get("/api/phone/token").status_code in (302, 401, 403)
+    assert client.get("/api/phone/tokens").status_code in (302, 401, 403)
+    assert client.delete("/api/phone/token/whatever").status_code in (302, 401, 403)
+
+
+def test_issued_token_opens_the_socket_and_revoked_one_does_not(phone_bp, auth_client, app_module):
+    issued = auth_client.get("/api/phone/token?label=Tecno").get_json()
+    assert issued["token"] and issued["id"]
+
+    # Секрет ушёл ровно один раз: в списке его нет, на диске — только хэш.
+    listed = auth_client.get("/api/phone/tokens").get_json()["tokens"]
+    row = next(r for r in listed if r["id"] == issued["id"])
+    assert row["label"] == "Tecno"
+    assert row["last_used"] is None
+    assert "token" not in row and "hash" not in row
+    with open(app_module.PHONE_TOKENS_PATH, encoding="utf-8") as handle:
+        on_disk = handle.read()
+    assert issued["token"] not in on_disk, "сырой токен на диск попадать не должен"
+
+    ws = FakeWs([_hello(token=issued["token"], agent="Tecno")])
+    thread = _run(phone_bp, ws)
+    assert _wait(lambda: phone_bp.agent_snapshot()["online"]), "личный токен обязан пускать"
+    ws.close()
+    thread.join(3)
+
+    # Подключение отметилось на самом токене — видно, какой из них живой.
+    row = next(r for r in auth_client.get("/api/phone/tokens").get_json()["tokens"]
+               if r["id"] == issued["id"])
+    assert row["last_used"], "после подключения у токена должна быть отметка"
+
+    assert auth_client.delete(f"/api/phone/token/{issued['id']}").status_code == 200
+    assert auth_client.delete(f"/api/phone/token/{issued['id']}").status_code == 404
+
+    dead = FakeWs([_hello(token=issued["token"])])
+    _run(phone_bp, dead).join(3)
+    assert dead.closed, "отозванный токен пускать нельзя"
+    assert phone_bp.agent_snapshot()["online"] is False
+
+
+def test_shared_env_token_still_works_next_to_device_tokens(phone_bp, auth_client):
+    auth_client.get("/api/phone/token?label=лишний")
+    ws = FakeWs([_hello()])                      # тот самый общий из .env
+    thread = _run(phone_bp, ws)
+    assert _wait(lambda: phone_bp.agent_snapshot()["online"])
+    ws.close()
+    thread.join(3)
+
+
+def test_cabinet_asks_the_bridge_for_a_token(auth_client):
+    page = auth_client.get("/cabinet").get_data(as_text=True)
+    assert "window.VGPhone" in page
+    assert "/api/phone/token" in page

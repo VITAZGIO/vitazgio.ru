@@ -971,6 +971,24 @@
         // время работы и так подписано в своей карточке. /api/uptime жив —
         // он ещё пригодится, просто на витрине его никто не показывает.
 
+        // Оболочка-приложение (ТЗ 2): токен агента больше не вбивают руками.
+        // Хозяин вошёл в кабинет внутри приложения — значит, он и есть хозяин,
+        // и страница сама выдаёт устройству личный токен через мост. В обычном
+        // браузере window.VGPhone попросту нет, и весь этот кусок молчит.
+        {
+          const bridge = window.VGPhone;
+          if (bridge) {
+            let state = {};
+            try { state = JSON.parse(bridge.getStatus() || "{}"); } catch {}
+            if (!state.hasToken) {
+              fetch("/api/phone/token", { credentials: "same-origin" })
+                .then(response => response.ok ? response.json() : null)
+                .then(data => { if (data && data.token) bridge.saveToken(data.token); })
+                .catch(() => {});
+            }
+          }
+        }
+
         {
           const tile = document.getElementById("notifications-tile");
           if (tile) {

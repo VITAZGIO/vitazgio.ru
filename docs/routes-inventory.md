@@ -13,10 +13,10 @@ Baseline before blueprint split:
 
 Текущее состояние (проверяется одной строкой, а не на глаз):
 
-- Роутов сейчас: `158`. Считать так — поднять приложение и посмотреть
+- Роутов сейчас: `161`. Считать так — поднять приложение и посмотреть
   `[r for r in app.url_map.iter_rules() if r.endpoint != "static"]`.
   Число включает вебсокеты (`@sock.route` тоже попадает в `url_map`).
-  Уникальных адресов при этом `139`: один и тот же URL под GET и POST —
+  Уникальных адресов при этом `142`: один и тот же URL под GET и POST —
   два правила в `url_map`, но одна строка в таблицах ниже встречается
   дважды (по строке на метод), поэтому сходится.
 - 2026-09-11: +7 в разделе «files/sftp» — файловый менеджер по SFTP.
@@ -28,6 +28,9 @@ Baseline before blueprint split:
 - 2026-09-15: +5 — новый раздел «phone/agent» (ТЗ 1 ретранслятора):
   `/ws/agent`, `/api/phone/agent`, `/app`, `/api/app/version`,
   `/api/app/pull`.
+- 2026-09-15: +3 в раздел «phone/agent» (ТЗ 2, оболочка-браузер):
+  `/api/phone/token` (выдать личный токен устройству), `/api/phone/tokens`
+  (список) и `/api/phone/token/<token_id>` (отозвать).
 - 2026-09-15: +1 — `/servers/unlock` (в коде был давно, в таблице
   «servers/themes/home» его пропустили). Заодно пересчитано число в шапке:
   стояло `143`, а в коде на тот момент было `153` — таблицы всё это время
@@ -293,6 +296,9 @@ Guards column includes route decorators such as `login_required`, `debtor_requir
 | --- | --- | --- | --- |
 | `/ws/agent` | `@sock.route("/ws/agent")` | `agent_ws` | `PHONE_AGENT_TOKEN` в первом сообщении `hello` |
 | `/api/phone/agent` | `@phone_bp.get("/api/phone/agent")` | `phone_agent_api` | `login_required` |
+| `/api/phone/token` | `@phone_bp.get("/api/phone/token")` | `phone_token_issue` | `login_required` |
+| `/api/phone/tokens` | `@phone_bp.get("/api/phone/tokens")` | `phone_tokens_api` | `login_required` |
+| `/api/phone/token/<token_id>` | `@phone_bp.delete("/api/phone/token/<token_id>")` | `phone_token_revoke` | `login_required` |
 | `/app` | `@phone_bp.get("/app")` | `app_apk` | `login_required` |
 | `/api/app/version` | `@phone_bp.get("/api/app/version")` | `app_version_api` | `login_required` ИЛИ заголовок `X-Agent-Token` |
 | `/api/app/pull` | `@phone_bp.post("/api/app/pull")` | `app_pull_api` | `login_required` |

@@ -1,6 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">VG Агент</string>
+    <!-- Имя как у нынешней PWA: на телефоне должен стоять один знакомый
+         значок, а не два похожих с разными названиями. -->
+    <string name="app_name">Vitaz Gio</string>
+    <string name="agent_screen">VG Агент — служебный экран</string>
+    <string name="offline_title">Сайт не отвечает</string>
+    <string name="retry">Повторить</string>
     <string name="server_hint">Адрес сайта (https://vitazgio.ru)</string>
     <string name="token_hint">Токен агента</string>
     <string name="start">Подключиться</string>

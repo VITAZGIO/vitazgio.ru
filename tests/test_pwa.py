@@ -53,3 +53,20 @@ def test_share_target_fallback_lands_in_download_folder(auth_client):
     rows = {row["name"]: row for row in auth_client.get("/api/drop/list?parent=download").get_json()["items"]}
     assert "снимок.jpg" in rows
     assert rows["снимок.jpg"]["size"] == len(b"hello from android")
+
+
+def test_share_target_saves_plain_text_as_a_file(auth_client):
+    """Поделились одной ссылкой без файла — она тоже обязана доехать.
+
+    В пути через service worker текст попадает в поле заметки на странице
+    дропа, но оболочка-приложение шлёт его прямо сюда, без страницы: не
+    сохранить его значило бы потерять отправленное молча."""
+    resp = auth_client.post("/share-target", data={
+        "title": "Заголовок статьи",
+        "url": "https://example.org/статья",
+    }, content_type="multipart/form-data")
+    assert resp.status_code == 302
+    assert "saved=1" in resp.headers["Location"]
+
+    rows = {row["name"]: row for row in auth_client.get("/api/drop/list?parent=download").get_json()["items"]}
+    assert "Заголовок статьи.txt" in rows

@@ -148,7 +148,9 @@ def create_pwa_blueprint(
     @pwa.post("/share-target")
     @login_required
     def share_target_fallback():
-        """Сюда попадаем, только если обработчик в браузере ещё не встал.
+        """Сюда попадаем, если обработчик в браузере ещё не встал — и всегда
+        из приложения-оболочки: там манифест с его share_target никто не
+        читает, файл приносит intent-filter и кладёт ровно сюда.
 
         Папку не выбирают — «Поделиться» происходит не со страницы дропа, там
         спросить некого, — поэтому по умолчанию всё падает в особую папку
@@ -178,6 +180,38 @@ def create_pwa_blueprint(
                 }
                 drop_write_index()
             saved += 1
+
+        # Поделились одним только текстом (ссылка из браузера, кусок заметки).
+        # У пути через service worker он попадает в поле заметки на странице
+        # дропа, но здесь страницы нет — сохраняем текстовым файлом, иначе
+        # отправленное просто пропало бы молча.
+        if not saved:
+            text = "\n".join(
+                part for part in (request.form.get("title"), request.form.get("text"),
+                                  request.form.get("url"))
+                if part and part.strip()
+            ).strip()
+            if text:
+                body = text.encode("utf-8")
+                item_id = str(uuid.uuid4())
+                path = drop_path(item_id)
+                with drop_lock:
+                    if len(body) <= drop_max_size and drop_used() + len(body) <= drop_quota:
+                        try:
+                            with open(path, "wb") as handle:
+                                handle.write(body)
+                        except OSError:
+                            pass
+                        else:
+                            name = (text.splitlines()[0][:40] or "заметка").strip()
+                            drop_items[item_id] = {
+                                "kind": "file", "name": f"{name}.txt",
+                                "parent": drop_download_id, "content_type": "text/plain",
+                                "size": len(body), "created": time.time(), "share": None,
+                            }
+                            drop_write_index()
+                            saved += 1
+
         return redirect(url_for("drop.drop_page") + ("?saved=%d" % saved if saved else ""))
 
     return pwa

@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="ic_launcher_background">#1D2233</color>
+    <!-- Тот же тёмный фон, что background_color в манифесте сайта. -->
+    <color name="ic_launcher_background">#0d1321</color>
 </resources>

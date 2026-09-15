@@ -12,8 +12,18 @@
 Реестр живых агентов — обычный словарь в памяти процесса. Это законно:
 сайт однопроцессный (`app.run(threaded=True)`), ровно так же живут
 `netbird_status` в `app.py` и пул SFTP-соединений в `blueprints/files.py`.
+
+Ступень 2 добавила сюда **токены устройств**: приложение больше не просит
+вбить общий пароль руками — хозяин заходит в кабинет внутри оболочки, и
+страница сама выдаёт устройству личный токен (`/api/phone/token`), а JS-мост
+кладёт его в `EncryptedSharedPreferences`. Отозвать такой токен можно с
+сайта поштучно, не меняя общий пароль всем сразу. На диске лежат только
+хэши (sha256) — как у пароля корзины дропа: утечка файла доступа не даёт.
+Общий `PHONE_AGENT_TOKEN` из `.env` при этом никуда не делся: он запасной
+путь на случай, если войти в кабинет с телефона почему-то не выходит.
 """
 
+import hashlib
 import hmac
 import json
 import os
@@ -31,6 +41,8 @@ AGENT_PING_SECONDS = 25      # молчит столько — сами шлём
 AGENT_STALE_SECONDS = 60     # молчит дольше — считаем офлайн и выкидываем
 AGENT_SWEEP_SECONDS = 10     # как часто дворник проверяет протухших
 AGENT_EVENTS_MAX = 60        # хвост журнала: кто когда пришёл и когда отвалился
+DEVICE_TOKEN_BYTES = 32      # длина личного токена устройства
+DEVICE_LABEL_MAX = 64
 
 # Версия сборки — число в имени файла (`vg-agent-7.apk` → 7). Так же его
 # видит приложение при самообновлении: больше номер — есть что ставить.
@@ -47,6 +59,7 @@ def create_phone_blueprint(
     publish_status,
     apk_dir,
     apk_repo,
+    tokens_path,
 ):
     phone_bp = Blueprint("phone", __name__)
 
@@ -99,12 +112,65 @@ def create_phone_blueprint(
 
     threading.Thread(target=_sweeper, daemon=True).start()
 
+    # ---- Токены устройств ------------------------------------------------
+    # Файл переживает перезапуск сайта: телефон держит свой токен у себя, и
+    # после деплоя сервер обязан его узнать. На диске — только хэши.
+
+    devices = {}                 # token_id -> {"label", "hash", "created", "last_used"}
+    devices_lock = threading.Lock()
+
+    def _devices_load():
+        try:
+            with open(tokens_path, "r", encoding="utf-8") as handle:
+                data = json.load(handle)
+        except (OSError, ValueError):
+            return
+        if isinstance(data, dict):
+            for token_id, row in data.items():
+                if isinstance(row, dict) and row.get("hash"):
+                    devices[str(token_id)] = {
+                        "label": str(row.get("label") or "телефон")[:DEVICE_LABEL_MAX],
+                        "hash": str(row["hash"]),
+                        "created": float(row.get("created") or 0),
+                        "last_used": float(row.get("last_used") or 0) or None,
+                    }
+
+    def _devices_write_locked():
+        os.makedirs(os.path.dirname(tokens_path), exist_ok=True)
+        tmp = tokens_path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as handle:
+            json.dump(devices, handle, ensure_ascii=False, indent=1)
+        os.replace(tmp, tokens_path)
+
+    _devices_load()
+
+    def _hash(raw):
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+    def _device_match(candidate):
+        """id устройства, чей это токен, или None. Сравнение — по хэшам и
+        через compare_digest: обычное `==` на строках выходит из сравнения на
+        первом же несовпавшем символе и тем выдаёт длину общего начала."""
+        if not isinstance(candidate, str) or not candidate:
+            return None
+        digest = _hash(candidate)
+        with devices_lock:
+            for token_id, row in devices.items():
+                if hmac.compare_digest(digest, row["hash"]):
+                    return token_id
+        return None
+
     def _token_ok(candidate):
-        if not agent_token or not isinstance(candidate, str):
+        """Пускаем и по общему паролю из .env, и по личному токену устройства."""
+        if not isinstance(candidate, str) or not candidate:
             return False
-        # Сравниваем байтами: compare_digest на строках с кириллицей (а токен
-        # мог быть набран каким угодно) падает TypeError, а не отвечает «нет».
-        return hmac.compare_digest(candidate.encode("utf-8"), str(agent_token).encode("utf-8"))
+        if agent_token:
+            # Сравниваем байтами: compare_digest на строках с кириллицей (а
+            # токен мог быть набран каким угодно) падает TypeError, а не
+            # отвечает «нет».
+            if hmac.compare_digest(candidate.encode("utf-8"), str(agent_token).encode("utf-8")):
+                return True
+        return _device_match(candidate) is not None
 
     def handle_agent(ws, peer=""):
         """Весь разговор с телефоном. Вынесено из роута отдельной функцией:
@@ -124,6 +190,17 @@ def create_phone_blueprint(
             except Exception:
                 pass
             return
+
+        # Пришёл по личному токену — отмечаем, что устройство на связи. По
+        # этой отметке на сайте видно, какой из выданных токенов живой, а
+        # какой можно отзывать.
+        device_id = _device_match(hello.get("token"))
+        if device_id:
+            with devices_lock:
+                row = devices.get(device_id)
+                if row:
+                    row["last_used"] = time.time()
+                    _devices_write_locked()
 
         conn_id = secrets.token_hex(8)
         now = time.time()
@@ -200,6 +277,57 @@ def create_phone_blueprint(
         snapshot["ip"] = agent_ip
         snapshot["configured"] = bool(agent_token)
         return jsonify(snapshot)
+
+    @phone_bp.get("/api/phone/token")
+    @login_required
+    def phone_token_issue():
+        """Выдать этому устройству личный токен.
+
+        Зовёт JS-мост оболочки, когда хозяин уже вошёл в кабинет внутри
+        приложения, — потому руками токен больше не вбивают. Секрет уходит
+        в ответе один-единственный раз: на диске остаётся только хэш, и
+        показать его заново неоткуда."""
+        raw = secrets.token_urlsafe(DEVICE_TOKEN_BYTES)
+        payload = request.get_json(silent=True) or {}
+        label = str(payload.get("label") or request.args.get("label") or "телефон")
+        token_id = secrets.token_hex(8)
+        with devices_lock:
+            devices[token_id] = {
+                "label": label[:DEVICE_LABEL_MAX],
+                "hash": _hash(raw),
+                "created": time.time(),
+                "last_used": None,
+            }
+            _devices_write_locked()
+        _log(f"выдан токен устройству: {label[:DEVICE_LABEL_MAX]}")
+        return jsonify(id=token_id, token=raw)
+
+    @phone_bp.get("/api/phone/tokens")
+    @login_required
+    def phone_tokens_api():
+        with devices_lock:
+            rows = [
+                {"id": token_id, "label": row["label"],
+                 "created": row["created"], "last_used": row["last_used"]}
+                for token_id, row in devices.items()
+            ]
+        rows.sort(key=lambda r: r["created"], reverse=True)
+        return jsonify(tokens=rows)
+
+    @phone_bp.delete("/api/phone/token/<token_id>")
+    @login_required
+    def phone_token_revoke(token_id):
+        """Отзыв поштучный и с сайта — в этом весь смысл личных токенов.
+        Общий пароль из .env менять ради одного потерянного телефона не
+        придётся."""
+        with devices_lock:
+            row = devices.pop(token_id, None)
+            if row:
+                _devices_write_locked()
+        if not row:
+            return jsonify(error="Такого токена нет."), 404
+        _log(f"токен отозван: {row['label']}")
+        return jsonify(ok=True)
 
     # ---- Раздача сборки --------------------------------------------------
     # APK лежит не в образе, а в `data/apk` рядом с остальными данными: тот

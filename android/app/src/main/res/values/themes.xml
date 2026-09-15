@@ -1,4 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <style name="Theme.VgAgent" parent="Theme.AppCompat.DayNight.NoActionBar" />
+
+    <!-- Для приёма «Поделиться»: экрана у него нет вовсе, только всплывающие
+         подсказки, поэтому окно прозрачное и без заголовка. -->
+    <style name="Theme.VgAgent.Invisible" parent="android:Theme.Translucent.NoTitleBar">
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:backgroundDimEnabled">false</item>
+    </style>
 </resources>

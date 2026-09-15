@@ -12,21 +12,63 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Камера и микрофон — не «на всякий случай»: без них страницы сайта,
+         просящие их через getUserMedia, в WebView просто не работают.
+         Разрешение всё равно спрашивается у человека в момент запроса. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Самообновление: магазина нет, ставить сборку предлагает само
+         приложение. Установку всё равно подтверждает система. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <application
         android:allowBackup="false"
+        android:usesCleartextTraffic="false"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@style/Theme.VgAgent">
 
+        <!-- Оболочка: сайт внутри приложения. Единственный видимый экран. -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode"
             android:label="@string/app_name">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Служебный экран с журналом: открывается долгим тычком по полоске
+             состояния. В списке приложений его нет — это отладка, не витрина. -->
+        <activity
+            android:name=".AgentActivity"
+            android:exported="false"
+            android:label="@string/agent_screen" />
+
+        <!-- Приём «Поделиться». В PWA это делал share_target из манифеста;
+             внутри оболочки манифест никто не читает, поэтому обычный
+             intent-filter. Типы перечислены так же широко, как в манифесте
+             сайта: на голый "*/*" Android часто не показывает приложение при
+             отправке документов и архивов. -->
+        <activity
+            android:name=".ShareActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@style/Theme.VgAgent.Invisible">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
             </intent-filter>
         </activity>
 
