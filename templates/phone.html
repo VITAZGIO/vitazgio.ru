@@ -43,6 +43,12 @@
         .btn:hover:not([disabled]) { color: #fff; background: color-mix(in srgb, var(--ac) 22%, transparent); }
         .btn[disabled] { color: #4a5060; cursor: not-allowed;
                          border-color: rgba(100,100,110,.2); background: rgba(60,65,75,.06); }
+        .tick { display: flex; align-items: center; gap: 6px; color: #8b93a6; font-size: .76rem;
+                text-transform: uppercase; letter-spacing: .04em; cursor: pointer; }
+        .tick input { accent-color: var(--ac); width: 15px; height: 15px; }
+        /* Пока управление включено, курсор над картинкой — прицел, а не
+           стрелка: видно, что клик уйдёт в телефон. */
+        canvas.ruling { cursor: crosshair; }
         .state { margin-left: auto; color: #8b93a6; font-size: .78rem; }
         .state b { color: #63f5ad; font-weight: 700; }
         .state b.off { color: #ff6b81; }
@@ -93,7 +99,17 @@
           <button class="btn" id="go" type="button">Показать экран</button>
           <button class="btn" id="halt" type="button" disabled>Остановить</button>
           <button class="btn" id="full" type="button" disabled>Во весь экран</button>
+          <label class="tick"><input type="checkbox" id="rule"> управление</label>
           <span class="state">телефон: <b id="agent-state" class="off">нет связи</b> · <span id="fps">—</span></span>
+        </div>
+
+        <!-- Кнопки телефона — не жесты: тыкать в их места на экране было бы
+             гаданием, у разных оболочек они в разных местах. -->
+        <div class="bar" id="keys" hidden>
+          <button class="btn" type="button" data-key="back">← Назад</button>
+          <button class="btn" type="button" data-key="home">⌂ Домой</button>
+          <button class="btn" type="button" data-key="recents">▤ Недавние</button>
+          <span class="state">клавиатура печатает в поле, выбранное на телефоне</span>
         </div>
       </div>
 
@@ -287,6 +303,7 @@
             let data;
             try { data = JSON.parse(event.data); } catch { return; }
             if (data.type === "state") onState(data);
+            else if (data.type === "touch-reply" && !data.ok) uiToast(data.error || "Нажатие не прошло.", "err");
             else if (data.type === "asked" && !data.ok) uiToast(data.error || "Телефон не ответил.", "err");
             else if (data.type === "asked") uiToast("Жду подтверждения на телефоне…");
           });
@@ -301,6 +318,102 @@
             setTimeout(connect, 2000);
           });
         };
+
+        /* ---- Управление пальцем (ступень 5) --------------------------------
+           По умолчанию выключено намеренно: случайный клик по картинке не
+           должен ничего нажимать на телефоне. Координаты уходят долями
+           (0…1), а не пикселями — у ПК и телефона разные разрешения, а
+           телефон ещё и поворачивается. */
+        const ruleBox = document.getElementById("rule");
+        const keysBar = document.getElementById("keys");
+        let ruling = false;
+        let press = null;
+
+        const setRuling = (on) => {
+          ruling = on;
+          keysBar.hidden = !on;
+          canvas.classList.toggle("ruling", on);
+          uiToast(on ? "Управление включено" : "Управление выключено", on ? "ok" : "");
+        };
+        ruleBox.addEventListener("change", () => setRuling(ruleBox.checked));
+
+        const spot = (event) => {
+          const box = canvas.getBoundingClientRect();
+          if (!box.width || !box.height) return null;
+          return {
+            x: Math.min(1, Math.max(0, (event.clientX - box.left) / box.width)),
+            y: Math.min(1, Math.max(0, (event.clientY - box.top) / box.height)),
+          };
+        };
+
+        const touch = (payload) => {
+          if (socket && socket.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify({ type: "touch", ...payload }));
+          }
+        };
+
+        canvas.addEventListener("pointerdown", (event) => {
+          if (!ruling) return;
+          const at = spot(event);
+          if (!at) return;
+          press = { ...at, at: performance.now() };
+          canvas.setPointerCapture(event.pointerId);
+          event.preventDefault();
+        });
+
+        canvas.addEventListener("pointerup", (event) => {
+          if (!ruling || !press) return;
+          const at = spot(event);
+          const held = performance.now() - press.at;
+          const moved = at ? Math.hypot(at.x - press.x, at.y - press.y) : 0;
+          // Что это было, решаем по следу: увело в сторону — свайп,
+          // задержали на месте — долгое нажатие, иначе обычный тычок.
+          if (at && moved > 0.03) {
+            touch({ action: "swipe", x: press.x, y: press.y, x2: at.x, y2: at.y,
+                    ms: Math.round(Math.min(600, Math.max(120, held))) });
+          } else if (held > 500) {
+            touch({ action: "long", x: press.x, y: press.y, ms: Math.round(held) });
+          } else {
+            touch({ action: "tap", x: press.x, y: press.y });
+          }
+          press = null;
+          event.preventDefault();
+        });
+
+        canvas.addEventListener("pointercancel", () => { press = null; });
+
+        // Колесо мыши — это свайп: листать страницу на телефоне иначе нечем.
+        let wheelAt = 0;
+        canvas.addEventListener("wheel", (event) => {
+          if (!ruling) return;
+          event.preventDefault();
+          const now = performance.now();
+          if (now - wheelAt < 260) return;          // не сыпать жестами подряд
+          wheelAt = now;
+          const at = spot(event) || { x: 0.5, y: 0.5 };
+          const step = event.deltaY > 0 ? -0.28 : 0.28;
+          touch({ action: "swipe", x: at.x, y: Math.min(0.9, Math.max(0.1, at.y)),
+                  x2: at.x, y2: Math.min(0.95, Math.max(0.05, at.y + step)), ms: 180 });
+        }, { passive: false });
+
+        keysBar.addEventListener("click", (event) => {
+          const button = event.target.closest("[data-key]");
+          if (!button) return;
+          touch({ action: "key", name: button.dataset.key });
+        });
+
+        document.addEventListener("keydown", (event) => {
+          if (!ruling) return;
+          if (event.target && /^(INPUT|TEXTAREA)$/.test(event.target.tagName)) return;
+          if (event.key === "Escape") { touch({ action: "key", name: "back" }); return; }
+          if (event.key === "Backspace") { touch({ action: "backspace" }); event.preventDefault(); return; }
+          if (event.key === "Enter") { touch({ action: "text", text: "\n" }); return; }
+          // Печатаем только настоящие символы: сочетания с Ctrl/Alt — это
+          // команды браузера, им на телефоне делать нечего.
+          if (event.key.length === 1 && !event.ctrlKey && !event.altKey && !event.metaKey) {
+            touch({ action: "text", text: event.key });
+          }
+        });
 
         goBtn.addEventListener("click", () => {
           ask("start");

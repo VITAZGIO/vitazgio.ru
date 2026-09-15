@@ -228,6 +228,10 @@ class AgentService : Service() {
                     // Файлы телефона под готовой страницей /files сайта.
                     "fs" -> ensureFiles().handle(webSocket, JSONObject(text))
 
+                    // Управление пальцем с ПК. Работает, только если человек
+                    // сам включил службу спец-возможностей на телефоне.
+                    "touch" -> handleTouch(webSocket, JSONObject(text))
+
                     // Неизвестный тип игнорируем, а не падаем и не толкуем
                     // наугад — сервер на той стороне делает ровно так же.
                 }
@@ -281,6 +285,41 @@ class AgentService : Service() {
         )
         caster = fresh
         return fresh
+    }
+
+    /** Жест или кнопка с сайта. Отвечаем честно: служба не включена — так и
+     *  говорим, чтобы страница не делала вид, будто нажатие прошло. */
+    private fun handleTouch(socket: WebSocket, payload: JSONObject) {
+        val touch = TouchService.live
+        if (touch == null) {
+            socket.send(JSONObject()
+                .put("type", "touch-reply")
+                .put("ok", false)
+                .put("error", "Управление не включено: разреши службу спец-возможностей на телефоне.")
+                .toString())
+            return
+        }
+        val done = when (payload.optString("action")) {
+            "tap", "long", "swipe" -> touch.gesture(
+                payload.optString("action"),
+                payload.optDouble("x", 0.0),
+                payload.optDouble("y", 0.0),
+                payload.optDouble("x2", 0.0),
+                payload.optDouble("y2", 0.0),
+                payload.optLong("ms", 0L),
+            )
+            "key" -> touch.key(payload.optString("name"))
+            "text" -> touch.type(payload.optString("text"))
+            "backspace" -> touch.backspace()
+            else -> false
+        }
+        if (!done) {
+            socket.send(JSONObject()
+                .put("type", "touch-reply")
+                .put("ok", false)
+                .put("error", "Телефон не принял нажатие.")
+                .toString())
+        }
     }
 
     private fun ensureFiles(): FileAgent {

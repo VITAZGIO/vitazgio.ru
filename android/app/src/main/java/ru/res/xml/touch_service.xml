@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Служба ничего не слушает: событий не запрашиваем вовсе, окон не читаем.
+     Ей нужно ровно одно право — нажимать за человека (canPerformGestures),
+     и ещё доступ к полю в фокусе, чтобы принимать текст с клавиатуры ПК. -->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeViewFocused"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagDefault"
+    android:canPerformGestures="true"
+    android:canRetrieveWindowContent="true"
+    android:description="@string/touch_service_desc"
+    android:notificationTimeout="100" />

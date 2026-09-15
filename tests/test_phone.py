@@ -422,3 +422,54 @@ def test_unknown_message_from_agent_does_not_break_the_talk(phone_bp):
     assert _wait(lambda: "pong" in agent.types()), "разговор должен продолжаться"
     agent.close()
     thread.join(3)
+
+
+# ---- Управление пальцем (ступень 5) -----------------------------------------
+
+def test_touch_travels_to_the_phone(phone_bp):
+    agent = FakeWs([_hello()])
+    agent_thread = _run(phone_bp, agent)
+    assert _wait(lambda: phone_bp.agent_snapshot()["online"])
+
+    viewer = FakeWs()
+    viewer_thread = _viewer(phone_bp, viewer)
+    assert _wait(lambda: phone_bp.screen_snapshot()["viewers"] == 1)
+
+    viewer.push({"type": "touch", "action": "tap", "x": 0.25, "y": 0.75})
+    assert _wait(lambda: any(
+        json.loads(m).get("action") == "tap" for m in agent.sent
+        if isinstance(m, str) and json.loads(m).get("type") == "touch"
+    ))
+    sent = [json.loads(m) for m in agent.sent
+            if isinstance(m, str) and json.loads(m).get("type") == "touch"][0]
+    # Доли, а не пиксели: у ПК и телефона разные экраны, и телефон вертится.
+    assert sent["x"] == 0.25 and sent["y"] == 0.75
+
+    viewer.push({"type": "touch", "action": "key", "name": "back"})
+    assert _wait(lambda: any(
+        json.loads(m).get("name") == "back" for m in agent.sent
+        if isinstance(m, str) and json.loads(m).get("type") == "touch"
+    ))
+
+    viewer.close()
+    viewer_thread.join(3)
+    agent.close()
+    agent_thread.join(3)
+
+
+def test_touch_without_phone_is_refused_honestly(phone_bp):
+    viewer = FakeWs()
+    thread = _viewer(phone_bp, viewer)
+    viewer.push({"type": "touch", "action": "tap", "x": 0.5, "y": 0.5})
+    assert _wait(lambda: _messages(viewer, "touch-reply"))
+    assert _messages(viewer, "touch-reply")[0]["ok"] is False
+    viewer.close()
+    thread.join(3)
+
+
+def test_page_has_control_switched_off_by_default(auth_client):
+    """Случайный клик по картинке не должен ничего нажимать на телефоне."""
+    page = auth_client.get("/phone").get_data(as_text=True)
+    assert 'id="rule"' in page
+    assert 'id="rule" checked' not in page
+    assert "let ruling = false" in page

@@ -13,4 +13,6 @@
     <string name="copy_log">Скопировать журнал</string>
     <string name="log_title">Журнал</string>
     <string name="channel_name">Соединение с сайтом</string>
+    <string name="touch_service_label">Vitaz Gio — управление с ПК</string>
+    <string name="touch_service_desc">Позволяет нажимать на экран телефона со страницы сайта: тапы, свайпы и кнопки «Назад», «Домой», «Недавние». Включается только хозяином и работает, пока включён тумблер «управление» на странице.</string>
 </resources>

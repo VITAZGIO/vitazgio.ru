@@ -94,6 +94,22 @@
                 android:value="Постоянное исходящее соединение с личным сайтом владельца телефона: телефон не может принимать входящие (CGNAT у оператора), поэтому держит открытый сокет сам." />
         </service>
 
+        <!-- Управление пальцем с ПК (ступень 5). Включает её человек сам,
+             в настройках спец-возможностей: другого законного способа
+             нажимать за него у приложения нет. -->
+        <service
+            android:name=".TouchService"
+            android:exported="true"
+            android:label="@string/touch_service_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/touch_service" />
+        </service>
+
         <!-- Перезагрузка телефона не должна означать «агент умер»: ночной
              тест может начаться с неё же. -->
         <receiver

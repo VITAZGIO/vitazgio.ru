@@ -554,6 +554,8 @@ def create_phone_blueprint(
                             ws.send(json.dumps({"type": "pong", "t": payload.get("t")}))
                     except Exception:
                         break
+                elif kind == "touch-reply":
+                    _viewers_tell(payload)
                 elif kind == "fs-reply":
                     _fs_reply(payload)
                 elif kind == "screen-state":
@@ -669,6 +671,27 @@ def create_phone_blueprint(
                 elif kind == "key":
                     viewer["need_key"] = True
                     _agent_send({"type": "screen-key"})
+                elif kind == "touch":
+                    # Управление пальцем (ступень 5). Сайт ничего тут не
+                    # решает — только передаёт: что можно нажимать, решает
+                    # служба спец-возможностей на самом телефоне, которую
+                    # человек включил руками.
+                    ok = _agent_send({
+                        "type": "touch",
+                        "action": str(payload.get("action") or "")[:16],
+                        "x": float(payload.get("x") or 0),
+                        "y": float(payload.get("y") or 0),
+                        "x2": float(payload.get("x2") or 0),
+                        "y2": float(payload.get("y2") or 0),
+                        "ms": int(payload.get("ms") or 0),
+                        "name": str(payload.get("name") or "")[:16],
+                        "text": str(payload.get("text") or "")[:500],
+                    })
+                    if not ok:
+                        _viewer_put(viewer, json.dumps({
+                            "type": "touch-reply", "ok": False,
+                            "error": "Телефон не на связи.",
+                        }))
                 elif kind == "ping":
                     _viewer_put(viewer, json.dumps({"type": "pong"}))
         finally:
