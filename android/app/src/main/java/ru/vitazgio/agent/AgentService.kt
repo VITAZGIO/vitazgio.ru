@@ -22,7 +22,7 @@ import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
-import okio.ByteString
+import okio.ByteString.Companion.toByteString
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
@@ -273,7 +273,9 @@ class AgentService : Service() {
         val open = socket ?: return
         // Двоичным сообщением, а не строкой: кадр — это байты H.264, и
         // любое текстовое кодирование раздуло бы его на треть.
-        open.send(ByteString.of(frame, 0, frame.size))
+        // toByteString, а не ByteString.of: в okio 3 старый вызов помечен
+        // не предупреждением, а ошибкой компиляции — сборка на нём и легла.
+        open.send(frame.toByteString(0, frame.size))
     }
 
     private fun sendJson(payload: JSONObject) {
