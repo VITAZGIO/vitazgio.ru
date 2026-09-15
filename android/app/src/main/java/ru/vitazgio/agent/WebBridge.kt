@@ -17,9 +17,9 @@ import android.webkit.JavascriptInterface
  *    взаимной блокировкой).
  * 2. **Методов мало и все узкие.** Никакого «сделай, что скажут»: команды
  *    «выполни строку» здесь нет и не будет, как и в самом протоколе агента.
- * 3. Что появится дальше (`startScreen`/`stopScreen` из ТЗ 3) всё равно
- *    спросит системное подтверждение Android — даже пробитый мост не включит
- *    трансляцию тихо.
+ * 3. `startScreen`/`stopScreen` упираются в системное подтверждение Android:
+ *    даже пробитый мост не включит трансляцию тихо — человек увидит запрос
+ *    на самом телефоне и обязан нажать «Начать».
  */
 class WebBridge(private val host: Host) {
 
@@ -30,6 +30,8 @@ class WebBridge(private val host: Host) {
         fun currentUrl(): String
         fun statusJson(): String
         fun saveAgentToken(token: String)
+        fun startScreen()
+        fun stopScreen()
         fun note(text: String)
     }
 
@@ -53,6 +55,24 @@ class WebBridge(private val host: Host) {
     fun getStatus(): String {
         if (!allowed()) return "{}"
         return host.statusJson()
+    }
+
+    /** Показать экран телефона. Страница сайта, открытая в самой оболочке,
+     *  может спросить согласие прямо здесь; с ПК та же просьба приходит
+     *  телефону по сокету. И там, и там подтверждение даёт человек на
+     *  телефоне — системным запросом Android, который не отключается. */
+    @JavascriptInterface
+    fun startScreen(): Boolean {
+        if (!allowed()) return false
+        host.startScreen()
+        return true
+    }
+
+    @JavascriptInterface
+    fun stopScreen(): Boolean {
+        if (!allowed()) return false
+        host.stopScreen()
+        return true
     }
 
     /** Сайт выдал устройству личный токен — кладём его в шифрованное

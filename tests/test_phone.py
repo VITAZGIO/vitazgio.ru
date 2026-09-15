@@ -258,3 +258,167 @@ def test_cabinet_asks_the_bridge_for_a_token(auth_client):
     page = auth_client.get("/cabinet").get_data(as_text=True)
     assert "window.VGPhone" in page
     assert "/api/phone/token" in page
+
+
+# ---- Экран телефона (ступень 3) ---------------------------------------------
+# Настоящего H.264 тут нет и не нужно: сайт — мост, он кадры не разбирает.
+# Проверяем ровно то, за что он отвечает: гейт, пересылку и поведение, когда
+# одна из сторон отвалилась.
+
+def _frame(kind, payload=b"nal", stamp=0):
+    """Кадр в том же виде, в каком его шлёт телефон: тип, метка времени
+    (8 байт big-endian), дальше Annex-B."""
+    return bytes([kind]) + stamp.to_bytes(8, "big") + payload
+
+
+def _viewer(phone_bp, ws):
+    thread = threading.Thread(target=phone_bp.handle_viewer, args=(ws,))
+    thread.daemon = True
+    thread.start()
+    return thread
+
+
+def _received(ws, kind_byte, limit=3.0):
+    """Дождаться двоичного кадра нужного типа среди присланного зрителю."""
+    deadline = time.time() + limit
+    while time.time() < deadline:
+        for item in list(ws.sent):
+            if isinstance(item, (bytes, bytearray)) and item[:1] == bytes([kind_byte]):
+                return bytes(item)
+        time.sleep(0.02)
+    return None
+
+
+def _messages(ws, kind):
+    out = []
+    for item in ws.sent:
+        if not isinstance(item, str):
+            continue
+        try:
+            payload = json.loads(item)
+        except ValueError:
+            continue
+        if payload.get("type") == kind:
+            out.append(payload)
+    return out
+
+
+def test_phone_page_is_behind_the_door(client, auth_client):
+    assert client.get("/phone").status_code in (302, 401, 403)
+    page = auth_client.get("/phone").get_data(as_text=True)
+    assert "Экран телефона" in page
+    # Суточный пароль ещё не вводили — страница обязана спросить его сама.
+    assert '"{{CONSOLE_OK}}"' not in page, "заглушка шаблона должна быть подставлена"
+    assert 'const consoleOk = "0"' in page
+
+
+def test_viewer_socket_needs_console_password(app_module):
+    """Гейт как у консоли: одного пароля кабинета мало."""
+    c = app_module.app.test_client()
+    with c.session_transaction() as session:
+        session["authenticated"] = True         # вошёл, но консольного пароля нет
+    page = c.get("/phone").get_data(as_text=True)
+    assert 'const consoleOk = "0"' in page
+
+
+def test_frames_travel_from_agent_to_viewer(phone_bp):
+    agent = FakeWs([_hello()])
+    agent_thread = _run(phone_bp, agent)
+    assert _wait(lambda: phone_bp.agent_snapshot()["online"])
+
+    viewer = FakeWs()
+    viewer_thread = _viewer(phone_bp, viewer)
+    assert _wait(lambda: phone_bp.screen_snapshot()["viewers"] == 1)
+
+    # Зритель просит показать экран — телефон получает команду, а не отказ.
+    viewer.push({"type": "start"})
+    assert _wait(lambda: any(t == "screen-start" for t in agent.types()))
+    assert _messages(viewer, "asked")[0]["ok"] is True
+
+    # Телефон подтвердил захват, прислал параметры кодека и два кадра.
+    agent.push({"type": "screen-state", "running": True, "width": 1080, "height": 2400})
+    assert _wait(lambda: phone_bp.screen_snapshot()["running"])
+    agent.inbox.put(_frame(1, b"sps-pps"))
+    agent.inbox.put(_frame(2, b"keyframe", 1000))
+    agent.inbox.put(_frame(3, b"delta", 2000))
+
+    assert _received(viewer, 1), "параметры кодека обязаны дойти"
+    assert _received(viewer, 2), "опорный кадр обязан дойти"
+    assert _received(viewer, 3), "разностный кадр обязан дойти"
+    assert _received(viewer, 2).endswith(b"keyframe")
+
+    viewer.close()
+    viewer_thread.join(3)
+    # Зрителей не осталось — телефону сказано не кодировать в пустоту.
+    assert _wait(lambda: "screen-pause" in agent.types())
+
+    agent.close()
+    agent_thread.join(3)
+
+
+def test_late_viewer_gets_config_and_a_fresh_keyframe(phone_bp):
+    agent = FakeWs([_hello()])
+    agent_thread = _run(phone_bp, agent)
+    assert _wait(lambda: phone_bp.agent_snapshot()["online"])
+    agent.push({"type": "screen-state", "running": True, "width": 720, "height": 1600})
+    assert _wait(lambda: phone_bp.screen_snapshot()["running"])
+    agent.inbox.put(_frame(1, b"sps-pps"))
+    time.sleep(0.2)
+
+    late = FakeWs()
+    late_thread = _viewer(phone_bp, late)
+    # Пришёл посреди трансляции: сперва параметры (иначе декодер не заведётся),
+    # потом просьба телефону дать опорный кадр — без него была бы каша.
+    assert _received(late, 1), "опоздавший зритель обязан получить параметры кодека"
+    assert _wait(lambda: "screen-key" in agent.types())
+
+    late.close()
+    late_thread.join(3)
+    agent.close()
+    agent_thread.join(3)
+
+
+def test_viewer_without_agent_is_told_the_truth(phone_bp):
+    assert phone_bp.agent_snapshot()["online"] is False
+    viewer = FakeWs()
+    thread = _viewer(phone_bp, viewer)
+    viewer.push({"type": "start"})
+    assert _wait(lambda: _messages(viewer, "asked"))
+    asked = _messages(viewer, "asked")[0]
+    assert asked["ok"] is False
+    assert "не на связи" in asked["error"].lower()
+    viewer.close()
+    thread.join(3)
+
+
+def test_agent_leaving_drops_the_screen_state(phone_bp):
+    agent = FakeWs([_hello()])
+    agent_thread = _run(phone_bp, agent)
+    assert _wait(lambda: phone_bp.agent_snapshot()["online"])
+    agent.push({"type": "screen-state", "running": True, "width": 720, "height": 1600})
+    assert _wait(lambda: phone_bp.screen_snapshot()["running"])
+
+    viewer = FakeWs()
+    viewer_thread = _viewer(phone_bp, viewer)
+    assert _wait(lambda: phone_bp.screen_snapshot()["viewers"] == 1)
+
+    agent.close()
+    agent_thread.join(3)
+    # Телефон пропал — зритель обязан узнать об этом, а не смотреть в
+    # застывший кадр и гадать.
+    assert _wait(lambda: phone_bp.screen_snapshot()["running"] is False)
+    assert _wait(lambda: any(m.get("agent") is False for m in _messages(viewer, "state")))
+    viewer.close()
+    viewer_thread.join(3)
+
+
+def test_unknown_message_from_agent_does_not_break_the_talk(phone_bp):
+    """Неизвестный тип агент и сайт игнорируют, а не падают."""
+    agent = FakeWs([_hello()])
+    thread = _run(phone_bp, agent)
+    assert _wait(lambda: phone_bp.agent_snapshot()["online"])
+    agent.push({"type": "нечто-невиданное", "payload": 1})
+    agent.push({"type": "ping", "t": 5})
+    assert _wait(lambda: "pong" in agent.types()), "разговор должен продолжаться"
+    agent.close()
+    thread.join(3)

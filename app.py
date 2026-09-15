@@ -4764,6 +4764,8 @@ app.register_blueprint(create_remote_blueprint(
 
 app.register_blueprint(create_phone_blueprint(
     sock=sock,
+    template=_template,
+    icon_links=ICON_LINKS,
     login_required=login_required,
     agent_token=PHONE_AGENT_TOKEN,
     agent_ip=PHONE_AGENT_IP,

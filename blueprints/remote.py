@@ -696,7 +696,13 @@ def create_remote_blueprint(
             )
             + '</span>'
             + (
-                f'<button class="connect-btn" type="button" data-ip="{device["ip"]}" data-name="{device["name"]}" data-type="ssh">SSH</button>'
+                # Телефон — не машина с логином: там нечего спрашивать, экран
+                # отдаёт сам агент. Ссылкой, а не кнопкой с модалкой, поэтому
+                # класс `screen-btn` — обработчик кнопок подключения её
+                # намеренно не трогает.
+                f'<a class="connect-btn screen-btn" href="/phone" data-ip="{device["ip"]}" title="Экран телефона">ЭКРАН</a>'
+                if device.get("agent_enabled")
+                else f'<button class="connect-btn" type="button" data-ip="{device["ip"]}" data-name="{device["name"]}" data-type="ssh">SSH</button>'
                 if device.get("ssh_enabled")
                 else f'<button class="connect-btn" type="button" data-ip="{device["ip"]}" data-name="{device["name"]}" data-type="rdp">RDP</button>'
                 if device.get("rdp_enabled")

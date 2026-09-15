@@ -9,6 +9,10 @@
          сокет под таким лимитом не живёт — ночь он бы не пережил в любом
          случае, и тест перестал бы что-либо значить. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!-- Захват экрана (ступень 3): с Android 14 служба обязана объявить и
+         этот тип, иначе система не отдаст проекцию вовсе. Согласие человека
+         при этом всё равно спрашивается каждый раз — отключить это нечем. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
@@ -75,7 +79,7 @@
         <service
             android:name=".AgentService"
             android:exported="false"
-            android:foregroundServiceType="specialUse">
+            android:foregroundServiceType="specialUse|mediaProjection">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Постоянное исходящее соединение с личным сайтом владельца телефона: телефон не может принимать входящие (CGNAT у оператора), поэтому держит открытый сокет сам." />

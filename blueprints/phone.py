@@ -29,6 +29,7 @@ import json
 import os
 import re
 import secrets
+import queue
 import threading
 import time
 import urllib.error
@@ -44,6 +45,22 @@ AGENT_EVENTS_MAX = 60        # хвост журнала: кто когда пр
 DEVICE_TOKEN_BYTES = 32      # длина личного токена устройства
 DEVICE_LABEL_MAX = 64
 
+# ---- Экран телефона (ступень 3) --------------------------------------------
+# Кадры ходят двоичными сообщениями с коротким заголовком: тип (1 байт) и
+# метка времени в микросекундах (8 байт, big-endian), дальше сам H.264 в
+# Annex-B. Заголовок нужен зрителю: WebCodecs обязан знать, опорный это кадр
+# или разностный, и с какой меткой его показывать.
+FRAME_CONFIG = 1             # SPS/PPS — параметры кодека
+FRAME_KEY = 2                # опорный кадр
+FRAME_DELTA = 3              # разностный
+FRAME_HEADER = 9
+
+# Очередь кадров на зрителя. Медленный зритель не должен тормозить телефон:
+# очередь переполнилась — выбрасываем накопленное и просим новый опорный
+# кадр, иначе кадры копились бы в памяти сервера, а картинка всё равно
+# отставала бы на минуты.
+VIEWER_QUEUE_MAX = 90
+
 # Версия сборки — число в имени файла (`vg-agent-7.apk` → 7). Так же его
 # видит приложение при самообновлении: больше номер — есть что ставить.
 APK_VERSION_RE = re.compile(r"(\d+)")
@@ -53,6 +70,8 @@ APK_PULL_MAX = 200 * 1024 * 1024   # потолок на скачивание р
 def create_phone_blueprint(
     *,
     sock,
+    template,
+    icon_links,
     login_required,
     agent_token,
     agent_ip,
@@ -172,6 +191,99 @@ def create_phone_blueprint(
                 return True
         return _device_match(candidate) is not None
 
+    # ---- Экран телефона: сайт как мост между двумя исходящими -------------
+    # Тот же приём, что уже работает у guacamole (`/ws/rdp`, `/ws/vnc` в
+    # blueprints/remote.py): телефон пришёл сам, зритель пришёл сам, сайт
+    # перекладывает байты между ними. Ни к телефону, ни к браузеру никто
+    # снаружи не стучится — входящих соединений в этой схеме нет вовсе.
+
+    agent_send_lock = threading.Lock()   # в сокет агента пишут и насос, и зрители
+    live_agent = {"ws": None}
+
+    screen = {
+        "running": False,      # телефон реально отдаёт кадры
+        "paused": False,       # захват жив, но зрителей нет и кодировать некуда
+        "config": None,        # последние SPS/PPS: без них поздний зритель слеп
+        "width": 0,
+        "height": 0,
+        "error": "",
+    }
+    screen_lock = threading.Lock()
+
+    viewers = {}               # id -> {"queue", "ws", "alive"}
+    viewers_lock = threading.Lock()
+
+    def _agent_send(payload):
+        """Команда телефону. Врать о результате нельзя: зритель по ответу
+        решает, показывать ли «жду подтверждения на телефоне»."""
+        ws = live_agent["ws"]
+        if ws is None:
+            return False
+        try:
+            with agent_send_lock:
+                ws.send(json.dumps(payload))
+            return True
+        except Exception:
+            return False
+
+    def _screen_snapshot():
+        with screen_lock:
+            state = dict(screen)
+        state.pop("config", None)
+        with agents_lock:
+            state["agent"] = bool(agents)
+        with viewers_lock:
+            state["viewers"] = len(viewers)
+        return state
+
+    def _viewers_tell(payload):
+        message = json.dumps(payload)
+        with viewers_lock:
+            targets = list(viewers.values())
+        for viewer in targets:
+            _viewer_put(viewer, message)
+
+    def _viewer_put(viewer, item):
+        """Положить кадр (или строку) в очередь зрителя.
+
+        Переполнилась — чистим и просим опорный кадр: показать отставшую на
+        минуту картинку хуже, чем на секунду замереть и продолжить со свежей."""
+        try:
+            viewer["queue"].put_nowait(item)
+        except queue.Full:
+            drained = 0
+            try:
+                while True:
+                    viewer["queue"].get_nowait()
+                    drained += 1
+            except queue.Empty:
+                pass
+            viewer["need_key"] = True
+            _agent_send({"type": "screen-key"})
+            try:
+                viewer["queue"].put_nowait(item)
+            except queue.Full:
+                pass
+
+    def _screen_frame(data):
+        """Кадр от телефона — всем зрителям. Параметры кодека запоминаем:
+        зритель, подключившийся посреди трансляции, обязан получить их
+        первым сообщением, иначе декодер не заведётся вовсе."""
+        if len(data) < FRAME_HEADER:
+            return
+        kind = data[0]
+        if kind == FRAME_CONFIG:
+            with screen_lock:
+                screen["config"] = bytes(data)
+        with viewers_lock:
+            targets = list(viewers.values())
+        for viewer in targets:
+            if viewer.get("need_key") and kind == FRAME_DELTA:
+                continue                      # ждём опорный, разностные ему не помогут
+            if kind in (FRAME_CONFIG, FRAME_KEY):
+                viewer["need_key"] = False
+            _viewer_put(viewer, data)
+
     def handle_agent(ws, peer=""):
         """Весь разговор с телефоном. Вынесено из роута отдельной функцией:
         так её зовёт тест с фальшивым сокетом, не поднимая сети."""
@@ -213,6 +325,7 @@ def create_phone_blueprint(
         }
         with agents_lock:
             agents[conn_id] = entry
+        live_agent["ws"] = ws
         _log(f"агент на связи: {entry['name']}")
         _publish()
 
@@ -247,18 +360,49 @@ def create_phone_blueprint(
                 with agents_lock:
                     if conn_id not in agents:     # дворник успел выкинуть — возвращаем
                         agents[conn_id] = entry
+
+                # Двоичное — это кадр экрана. Разбирать его незачем: сайт
+                # только мост, картинку собирает браузер зрителя.
+                if isinstance(message, (bytes, bytearray, memoryview)):
+                    _screen_frame(bytes(message))
+                    continue
+
                 try:
                     payload = json.loads(message)
                 except (TypeError, ValueError):
                     continue
-                if isinstance(payload, dict) and payload.get("type") == "ping":
+                if not isinstance(payload, dict):
+                    continue
+                kind = payload.get("type")
+                if kind == "ping":
                     try:
-                        ws.send(json.dumps({"type": "pong", "t": payload.get("t")}))
+                        with agent_send_lock:
+                            ws.send(json.dumps({"type": "pong", "t": payload.get("t")}))
                     except Exception:
                         break
+                elif kind == "screen-state":
+                    with screen_lock:
+                        screen["running"] = bool(payload.get("running"))
+                        screen["paused"] = bool(payload.get("paused"))
+                        screen["width"] = int(payload.get("width") or 0)
+                        screen["height"] = int(payload.get("height") or 0)
+                        screen["error"] = str(payload.get("error") or "")[:200]
+                        if not screen["running"]:
+                            # Захват кончился — старые SPS/PPS больше не
+                            # описывают ничего, следующий зритель должен
+                            # дождаться новых, а не завести декодер зря.
+                            screen["config"] = None
+                    _viewers_tell({"type": "state", **_screen_snapshot()})
+                # Неизвестный тип сообщения не роняет разговор и не толкуется
+                # наугад — то же правило, что у агента на той стороне.
         finally:
             with agents_lock:
                 agents.pop(conn_id, None)
+            if live_agent["ws"] is ws:
+                live_agent["ws"] = None
+            with screen_lock:
+                screen.update(running=False, paused=False, config=None, error="")
+            _viewers_tell({"type": "state", **_screen_snapshot()})
             _log(f"агент отключился: {entry['name']}")
             _publish()
             try:
@@ -269,6 +413,119 @@ def create_phone_blueprint(
     @sock.route("/ws/agent", bp=phone_bp)
     def agent_ws(ws):
         handle_agent(ws, peer=request.headers.get("X-Forwarded-For", "") or (request.remote_addr or ""))
+
+    # ---- Зритель: браузер на ПК -------------------------------------------
+
+    def handle_viewer(ws):
+        """Один зритель экрана. Отдельной функцией — как и разговор с
+        агентом: тест зовёт её с фальшивым сокетом, без сети."""
+        viewer_id = secrets.token_hex(8)
+        viewer = {"queue": queue.Queue(maxsize=VIEWER_QUEUE_MAX), "need_key": False}
+        with viewers_lock:
+            first = not viewers
+            viewers[viewer_id] = viewer
+
+        # Кадры уходят своим потоком, а не прямо из насоса агента: медленный
+        # зритель иначе тормозил бы телефон, у которого на другом конце
+        # копился бы неотправленный поток.
+        stop = threading.Event()
+
+        def pump():
+            while not stop.is_set():
+                try:
+                    item = viewer["queue"].get(timeout=0.5)
+                except queue.Empty:
+                    continue
+                try:
+                    ws.send(item)
+                except Exception:
+                    stop.set()
+                    return
+
+        sender = threading.Thread(target=pump, daemon=True)
+        sender.start()
+
+        try:
+            _viewer_put(viewer, json.dumps({"type": "state", **_screen_snapshot()}))
+            with screen_lock:
+                config = screen["config"]
+                running = screen["running"]
+            if running:
+                # Пришёл посреди трансляции: сперва параметры кодека, потом
+                # просим опорный кадр — без него зритель смотрел бы на кашу,
+                # пока телефон не соберётся послать опорный сам.
+                if config:
+                    _viewer_put(viewer, config)
+                viewer["need_key"] = True
+                if first:
+                    _agent_send({"type": "screen-resume"})
+                _agent_send({"type": "screen-key"})
+            elif first:
+                _agent_send({"type": "screen-resume"})
+
+            while not stop.is_set():
+                try:
+                    message = ws.receive(timeout=30)
+                except Exception:
+                    break
+                if message is None:
+                    continue
+                if isinstance(message, (bytes, bytearray, memoryview)):
+                    continue                  # зрителю нечего слать двоичным
+                try:
+                    payload = json.loads(message)
+                except (TypeError, ValueError):
+                    continue
+                if not isinstance(payload, dict):
+                    continue
+                kind = payload.get("type")
+                if kind == "start":
+                    # Подтверждение на телефоне спросит сама система Android,
+                    # и обойти это нечем — см. docs/phone-tz/03-screen.md.
+                    ok = _agent_send({"type": "screen-start"})
+                    _viewer_put(viewer, json.dumps({
+                        "type": "asked", "ok": ok,
+                        "error": "" if ok else "Телефон не на связи.",
+                    }))
+                elif kind == "stop":
+                    _agent_send({"type": "screen-stop"})
+                elif kind == "key":
+                    viewer["need_key"] = True
+                    _agent_send({"type": "screen-key"})
+                elif kind == "ping":
+                    _viewer_put(viewer, json.dumps({"type": "pong"}))
+        finally:
+            stop.set()
+            with viewers_lock:
+                viewers.pop(viewer_id, None)
+                empty = not viewers
+            # Зрителей не осталось — телефону незачем кодировать в пустоту:
+            # это батарея и мобильный трафик. Захват при этом НЕ выключаем,
+            # иначе Android спросил бы подтверждение заново при возврате.
+            if empty:
+                _agent_send({"type": "screen-pause"})
+            try:
+                ws.close()
+            except Exception:
+                pass
+
+    @sock.route("/ws/phone", bp=phone_bp)
+    def phone_ws(ws):
+        # Гейт как у консоли: пароль кабинета плюс суточный пароль. Правило
+        # хозяина «гости не управляют устройствами» действует и здесь.
+        if not session.get("authenticated") or not session.get("console_authenticated"):
+            ws.close()
+            return
+        handle_viewer(ws)
+
+    @phone_bp.get("/phone")
+    @login_required
+    def phone_page():
+        # Суточный пароль спрашивает сама страница (карточка в стиле сайта),
+        # как это делает /netbird: отдельного экрана-гейта на сайте нет.
+        html = template("phone.html")
+        return (html.replace("{{CONSOLE_OK}}", "1" if session.get("console_authenticated") else "0")
+                    .replace("__ICONLINKS__", icon_links))
 
     @phone_bp.get("/api/phone/agent")
     @login_required
@@ -449,5 +706,7 @@ def create_phone_blueprint(
 
     # Тестам нужен разговор с агентом без сети, а странице отладки — реестр.
     phone_bp.handle_agent = handle_agent
+    phone_bp.handle_viewer = handle_viewer
+    phone_bp.screen_snapshot = _screen_snapshot
     phone_bp.agent_snapshot = _snapshot
     return phone_bp

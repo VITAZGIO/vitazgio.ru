@@ -1,0 +1,329 @@
+    <!DOCTYPE html>
+    <html lang="ru">
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <meta name="robots" content="noindex, nofollow">
+      <title>Экран телефона · vitazgio.ru</title>
+      __ICONLINKS__
+      <style>
+        /* Акцент один на всю страницу и живёт переменной: цвета кнопок и
+           рамок считаются от него через color-mix, а не прописаны числами —
+           как и везде на сайте. */
+        :root { --ac: #69e8ff; }
+        * { box-sizing: border-box; }
+        body { margin: 0; min-height: 100svh; color: #e9fbff; font-family: "Cascadia Code", Consolas, monospace;
+               background: radial-gradient(circle at top left, #16283f, #0d1321 55%); }
+        [hidden] { display: none !important; }
+        a { color: inherit; }
+        .wrap { max-width: 1320px; margin: 0 auto; padding: clamp(18px, 3vw, 40px); }
+        .head { display: flex; align-items: center; gap: 18px; margin-bottom: 20px; }
+        .back { width: 44px; height: 44px; flex: none; display: grid; place-items: center;
+                color: var(--ac); text-decoration: none; border-radius: 50%;
+                border: 1px solid color-mix(in srgb, var(--ac) 35%, transparent);
+                background: color-mix(in srgb, var(--ac) 8%, transparent); transition: all .18s; }
+        .back:hover { color: #fff; background: color-mix(in srgb, var(--ac) 20%, transparent); }
+        .back svg { width: 20px; height: 20px; display: block; }
+        h1 { margin: 0; font-size: clamp(1.5rem, 3.4vw, 2.1rem); letter-spacing: -.02em; }
+        .sub { margin: 3px 0 0; color: #8b93a6; font-size: .82rem; }
+
+        .stage { position: relative; display: grid; place-items: center; min-height: 46svh;
+                 border: 1px solid color-mix(in srgb, var(--ac) 22%, transparent);
+                 background: #070b14; overflow: hidden; }
+        /* Холст держит свои пропорции сам: телефон вертикальный, и
+           растягивать его на всю ширину было бы нечестно к картинке. */
+        canvas { max-width: 100%; max-height: 78svh; display: block; }
+        .idle { padding: 40px 20px; color: #8b93a6; font-size: .84rem; text-align: center; line-height: 1.7; }
+
+        .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 14px; }
+        .btn { padding: 9px 14px; color: var(--ac); font: 700 .74rem "Cascadia Code", Consolas, monospace;
+               text-transform: uppercase; letter-spacing: .04em; cursor: pointer;
+               border: 1px solid color-mix(in srgb, var(--ac) 35%, transparent);
+               background: color-mix(in srgb, var(--ac) 7%, transparent); }
+        .btn:hover:not([disabled]) { color: #fff; background: color-mix(in srgb, var(--ac) 22%, transparent); }
+        .btn[disabled] { color: #4a5060; cursor: not-allowed;
+                         border-color: rgba(100,100,110,.2); background: rgba(60,65,75,.06); }
+        .state { margin-left: auto; color: #8b93a6; font-size: .78rem; }
+        .state b { color: #63f5ad; font-weight: 700; }
+        .state b.off { color: #ff6b81; }
+
+        .ui-toasts { position: fixed; z-index: 70; left: 50%; bottom: 22px; transform: translateX(-50%);
+                     display: flex; flex-direction: column; gap: 8px; align-items: center; pointer-events: none; }
+        .ui-toast { padding: 10px 15px; color: #eef2fb; font-size: .78rem; max-width: min(420px, 86vw); text-align: center;
+                    border: 1px solid rgba(255,255,255,.12); background: #10162a;
+                    box-shadow: 0 10px 30px rgba(0,0,0,.45); transition: opacity .25s; }
+        .ui-toast.err { color: #ffb3b3; border-color: rgba(255,107,129,.4); }
+        .ui-toast.ok { border-color: rgba(99,245,173,.4); }
+
+        .ui-scrim { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center;
+                    padding: 20px; background: rgba(3,6,13,.82); backdrop-filter: blur(10px); }
+        .ui-modal { width: min(380px, 100%); padding: 22px; color: #eef2fb;
+                    border: 1px solid color-mix(in srgb, var(--ac) 30%, transparent);
+                    background: linear-gradient(145deg, rgba(16,30,47,.98), rgba(20,16,37,.98));
+                    box-shadow: 0 32px 100px rgba(0,0,0,.65); }
+        .ui-modal h2 { margin: 0 0 14px; font-size: 1.05rem; }
+        .ui-modal p { margin: 0 0 14px; font-size: .82rem; line-height: 1.55; color: #dbe2f5; }
+        .ui-modal input { width: 100%; height: 42px; padding: 0 12px; margin: 0 0 12px; color: #f4fbff;
+                          border: 1px solid rgba(255,255,255,.14); background: rgba(8,12,22,.85);
+                          font-family: inherit; }
+        .ui-modal input:focus { border-color: var(--ac); outline: none; }
+        .ui-err { margin: 0; color: #ffb3b3; font-size: .78rem; min-height: 1.1em; }
+      </style>
+    </head>
+    <body>
+      <div class="wrap">
+        <header class="head">
+          <a class="back" href="/netbird" aria-label="Назад">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M15 5l-7 7 7 7" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </a>
+          <div>
+            <h1>Экран телефона</h1>
+            <p class="sub">MOBILA · картинка идёт тем же соединением, что и агент</p>
+          </div>
+        </header>
+
+        <div class="stage">
+          <canvas id="screen" hidden></canvas>
+          <p class="idle" id="idle">Картинки пока нет.<br>Нажми «Показать экран» и подтверди запрос на телефоне.</p>
+        </div>
+
+        <div class="bar">
+          <button class="btn" id="go" type="button">Показать экран</button>
+          <button class="btn" id="halt" type="button" disabled>Остановить</button>
+          <button class="btn" id="full" type="button" disabled>Во весь экран</button>
+          <span class="state">телефон: <b id="agent-state" class="off">нет связи</b> · <span id="fps">—</span></span>
+        </div>
+      </div>
+
+      <script>
+      (() => {
+        const consoleOk = "{{CONSOLE_OK}}" === "1";
+
+        const uiToasts = document.createElement("div");
+        uiToasts.className = "ui-toasts";
+        document.body.appendChild(uiToasts);
+        const uiToast = (text, kind) => {
+          const t = document.createElement("div");
+          t.className = "ui-toast" + (kind ? " " + kind : "");
+          t.textContent = text;
+          uiToasts.appendChild(t);
+          setTimeout(() => { t.style.opacity = "0"; setTimeout(() => t.remove(), 260); }, 2600);
+        };
+
+        /* Суточный пароль консоли — своей карточкой, не системным prompt(),
+           как и на /netbird. Правило хозяина «гости не управляют
+           устройствами» действует и на экран телефона. */
+        const askConsole = () => new Promise((resolve) => {
+          const scrim = document.createElement("div");
+          scrim.className = "ui-scrim";
+          scrim.innerHTML = '<div class="ui-modal"><h2>Пароль консоли</h2>'
+            + '<p>Экран телефона закрыт тем же суточным паролем, что и консоль.</p>'
+            + '<input type="password" autocomplete="off"><p class="ui-err"></p>'
+            + '<button class="btn" type="button">Войти</button></div>';
+          document.body.appendChild(scrim);
+          const input = scrim.querySelector("input");
+          const err = scrim.querySelector(".ui-err");
+          const send = async () => {
+            err.textContent = "";
+            try {
+              const response = await fetch("/api/console/login", {
+                method: "POST", credentials: "same-origin",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ password: input.value }),
+              });
+              if (!response.ok) {
+                const data = await response.json().catch(() => ({}));
+                err.textContent = data.error || "Не вышло войти.";
+                return;
+              }
+            } catch {
+              err.textContent = "Сервер не ответил.";
+              return;
+            }
+            scrim.remove();
+            resolve(true);
+          };
+          scrim.querySelector("button").addEventListener("click", send);
+          input.addEventListener("keydown", (event) => { if (event.key === "Enter") send(); });
+          requestAnimationFrame(() => input.focus());
+        });
+
+        const canvas = document.getElementById("screen");
+        const idle = document.getElementById("idle");
+        const goBtn = document.getElementById("go");
+        const haltBtn = document.getElementById("halt");
+        const fullBtn = document.getElementById("full");
+        const agentState = document.getElementById("agent-state");
+        const fpsBox = document.getElementById("fps");
+        const paint = canvas.getContext("2d");
+
+        let socket = null;
+        let decoder = null;
+        let frames = 0;
+        let lastCount = performance.now();
+
+        /* Строку кодека берём из самих SPS, а не из слов телефона: в
+           параметрах лежат профиль, ограничения и уровень ровно теми
+           байтами, которых ждёт WebCodecs (avc1.PPCCLL). */
+        const codecFromConfig = (bytes) => {
+          for (let i = 0; i + 4 < bytes.length; i++) {
+            const start3 = bytes[i] === 0 && bytes[i + 1] === 0 && bytes[i + 2] === 1;
+            const start4 = bytes[i] === 0 && bytes[i + 1] === 0 && bytes[i + 2] === 0 && bytes[i + 3] === 1;
+            if (!start3 && !start4) continue;
+            const head = i + (start4 ? 4 : 3);
+            if ((bytes[head] & 0x1f) !== 7) continue;       // не SPS
+            const hex = [bytes[head + 1], bytes[head + 2], bytes[head + 3]]
+              .map((b) => b.toString(16).padStart(2, "0")).join("");
+            return "avc1." + hex;
+          }
+          return "avc1.42E01E";                             // разумный запасной
+        };
+
+        const drawFrame = (frame) => {
+          if (canvas.width !== frame.displayWidth || canvas.height !== frame.displayHeight) {
+            canvas.width = frame.displayWidth;
+            canvas.height = frame.displayHeight;
+          }
+          paint.drawImage(frame, 0, 0);
+          frame.close();
+          canvas.hidden = false;
+          idle.hidden = true;
+          fullBtn.disabled = false;
+          frames += 1;
+        };
+
+        const startDecoder = (config) => {
+          stopDecoder();
+          if (!("VideoDecoder" in window)) {
+            uiToast("Браузер не умеет WebCodecs — картинку показать нечем.", "err");
+            return;
+          }
+          decoder = new VideoDecoder({
+            output: drawFrame,
+            error: (e) => {
+              uiToast("Декодер споткнулся: " + e.message, "err");
+              stopDecoder();
+              ask("key");
+            },
+          });
+          // description не передаём намеренно: телефон шлёт Annex-B (как его
+          // отдаёт MediaCodec), а WebCodecs ждёт AVCC ровно тогда, когда
+          // description задан. optimizeForLatency — ради того, чтобы кадр
+          // показывался сразу, а не копился в буфере.
+          decoder.configure({
+            codec: codecFromConfig(config),
+            optimizeForLatency: true,
+          });
+          decoder.decode(new EncodedVideoChunk({
+            type: "key", timestamp: 0, data: config,
+          }));
+        };
+
+        const stopDecoder = () => {
+          if (!decoder) return;
+          try { decoder.close(); } catch {}
+          decoder = null;
+        };
+
+        const showIdle = () => {
+          stopDecoder();
+          canvas.hidden = true;
+          idle.hidden = false;
+          fullBtn.disabled = true;
+        };
+
+        const ask = (type) => {
+          if (socket && socket.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify({ type }));
+          }
+        };
+
+        const onBinary = (buffer) => {
+          const bytes = new Uint8Array(buffer);
+          if (bytes.length < 9) return;
+          const kind = bytes[0];
+          const view = new DataView(buffer);
+          // Метка времени — микросекунды с начала трансляции, 8 байт
+          // big-endian. Читаем как два числа по 32 бита: в кадрах WebCodecs
+          // ждёт обычное число, а не BigInt.
+          const stamp = view.getUint32(1) * 4294967296 + view.getUint32(5);
+          const payload = bytes.subarray(9);
+          if (kind === 1) {
+            startDecoder(payload);
+            return;
+          }
+          if (!decoder || decoder.state !== "configured") return;
+          try {
+            decoder.decode(new EncodedVideoChunk({
+              type: kind === 2 ? "key" : "delta",
+              timestamp: stamp,
+              data: payload,
+            }));
+          } catch {
+            // Разностный кадр без опорного — не беда: просим опорный и ждём.
+            stopDecoder();
+            ask("key");
+          }
+        };
+
+        const onState = (data) => {
+          const alive = Boolean(data.agent);
+          agentState.textContent = alive ? "на связи" : "нет связи";
+          agentState.classList.toggle("off", !alive);
+          goBtn.disabled = !alive || Boolean(data.running);
+          haltBtn.disabled = !data.running;
+          if (!data.running) showIdle();
+          if (data.error) uiToast(data.error, "err");
+        };
+
+        const connect = () => {
+          const scheme = location.protocol === "https:" ? "wss" : "ws";
+          socket = new WebSocket(`${scheme}://${location.host}/ws/phone`);
+          socket.binaryType = "arraybuffer";
+          socket.addEventListener("message", (event) => {
+            if (typeof event.data !== "string") { onBinary(event.data); return; }
+            let data;
+            try { data = JSON.parse(event.data); } catch { return; }
+            if (data.type === "state") onState(data);
+            else if (data.type === "asked" && !data.ok) uiToast(data.error || "Телефон не ответил.", "err");
+            else if (data.type === "asked") uiToast("Жду подтверждения на телефоне…");
+          });
+          socket.addEventListener("close", () => {
+            agentState.textContent = "нет связи";
+            agentState.classList.add("off");
+            goBtn.disabled = true;
+            haltBtn.disabled = true;
+            showIdle();
+            // Сайт мог перезапуститься деплоем — возвращаемся сами, а не
+            // просим человека перезагрузить вкладку.
+            setTimeout(connect, 2000);
+          });
+        };
+
+        goBtn.addEventListener("click", () => {
+          ask("start");
+          uiToast("Подтверди захват на телефоне — Android спросит обязательно.");
+        });
+        haltBtn.addEventListener("click", () => ask("stop"));
+        fullBtn.addEventListener("click", () => {
+          if (canvas.requestFullscreen) canvas.requestFullscreen().catch(() => {});
+        });
+
+        setInterval(() => {
+          const now = performance.now();
+          const seconds = (now - lastCount) / 1000;
+          fpsBox.textContent = frames ? `${Math.round(frames / seconds)} кадр/с` : "—";
+          frames = 0;
+          lastCount = now;
+        }, 2000);
+
+        (async () => {
+          if (!consoleOk) await askConsole();
+          connect();
+        })();
+      })();
+      </script>
+    </body>
+    </html>

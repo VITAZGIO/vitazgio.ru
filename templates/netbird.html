@@ -59,6 +59,9 @@
         .connect-btn:hover, .connect-btn:focus-visible { color: #fff; background: rgba(255,120,47,.22); outline: none; }
         .connect-btn.btn-offline { color: #4a5060; border-color: rgba(100,100,110,.2); background: rgba(60,65,75,.06); cursor: not-allowed; pointer-events: none; }
         .connect-btn-empty { display: block; }
+        /* «ЭКРАН» — ссылка, а не кнопка: у неё нет своих отступов текста и
+           подчёркивание нужно снять руками. */
+        a.connect-btn { display: inline-block; text-align: center; text-decoration: none; }
         /* Файлы по SFTP. Кнопка живая только там, где есть SSH-сервер; для
            остальных это «СКОРО» — заглушка без обработчика. */
         .smb-btn { display: block; padding: 6px 10px; color: #69e8ff; font: 700 .7rem "Cascadia Code", Consolas, monospace; letter-spacing: .04em; text-transform: uppercase; text-align: center; text-decoration: none; border: 1px solid rgba(45,226,255,.3); background: rgba(45,226,255,.07); cursor: pointer; }
@@ -1264,7 +1267,10 @@
             watchKeyboard(sendResize);
           };
 
-          document.querySelectorAll(".connect-btn").forEach((button) => {
+          // «ЭКРАН» у телефона — обычная ссылка на /phone, без логина и
+          // модалок: спрашивать там нечего. Поэтому она исключена, иначе
+          // тычок открывал бы карточку SSH-логина вместо перехода.
+          document.querySelectorAll(".connect-btn:not(.screen-btn)").forEach((button) => {
             button.addEventListener("click", () => {
               pendingDevice = { ip: button.dataset.ip, name: button.dataset.name, type: button.dataset.type || "ssh" };
               if (consoleAuthenticated) {

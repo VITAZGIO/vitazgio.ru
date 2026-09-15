@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
@@ -21,6 +22,7 @@ import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
+import okio.ByteString
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
@@ -37,8 +39,19 @@ class AgentService : Service() {
         const val ACTION_START = "ru.vitazgio.agent.START"
         const val ACTION_STOP = "ru.vitazgio.agent.STOP"
 
+        /** Человек подтвердил захват экрана — activity передаёт согласие сюда. */
+        const val ACTION_SCREEN_GRANT = "ru.vitazgio.agent.SCREEN_GRANT"
+        const val ACTION_SCREEN_STOP = "ru.vitazgio.agent.SCREEN_STOP"
+        const val EXTRA_RESULT_CODE = "result_code"
+        const val EXTRA_RESULT_DATA = "result_data"
+
         private const val CHANNEL = "vg-agent"
         private const val NOTIFICATION_ID = 7
+        // Просьба показать экран приходит с сайта, а подтвердить её можно
+        // только руками на телефоне. Отдельный канал и погромче: это не
+        // вывеска службы, а вопрос, на который ждут ответа.
+        private const val ASK_CHANNEL = "vg-screen-ask"
+        private const val ASK_NOTIFICATION_ID = 8
 
         // Своё ping/pong поверх протокольного: сервер ждёт весточку не реже
         // раза в минуту, а промежуточные прокси любят резать «молчащие»
@@ -66,6 +79,8 @@ class AgentService : Service() {
     private var backoff = BACKOFF_START_MS
     private var stopping = false
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
+
+    private var caster: ScreenCaster? = null
 
     private val reconnectTask = Runnable { connect() }
     private val heartbeatTask = object : Runnable {
@@ -98,6 +113,14 @@ class AgentService : Service() {
         if (intent?.action == ACTION_STOP) {
             shutdown()
             return START_NOT_STICKY
+        }
+        if (intent?.action == ACTION_SCREEN_GRANT) {
+            grantScreen(intent)
+            return START_STICKY
+        }
+        if (intent?.action == ACTION_SCREEN_STOP) {
+            caster?.stop()
+            return START_STICKY
         }
 
         startForeground(NOTIFICATION_ID, notification(AgentState.status))
@@ -188,6 +211,17 @@ class AgentService : Service() {
                     // Сервер сам проверяет, живы ли мы. Ответ обязателен:
                     // молчание дольше минуты он считает смертью.
                     "ping" -> webSocket.send(JSONObject().put("type", "pong").toString())
+
+                    // Экран. Команд ровно пять и все узкие: «выполни строку»
+                    // в протоколе нет и не будет.
+                    "screen-start" -> askForScreen()
+                    "screen-stop" -> caster?.stop()
+                    "screen-pause" -> caster?.pause()
+                    "screen-resume" -> caster?.resume()
+                    "screen-key" -> caster?.requestKeyFrame()
+
+                    // Неизвестный тип игнорируем, а не падаем и не толкуем
+                    // наугад — сервер на той стороне делает ровно так же.
                 }
             }
 
@@ -208,6 +242,115 @@ class AgentService : Service() {
                 scheduleReconnect()
             }
         })
+    }
+
+    // ---- Экран --------------------------------------------------------------
+
+    private fun ensureCaster(): ScreenCaster {
+        val existing = caster
+        if (existing != null) return existing
+        val fresh = ScreenCaster(
+            context = this,
+            send = { frame -> sendFrame(frame) },
+            state = { running, paused, width, height, error ->
+                sendJson(JSONObject()
+                    .put("type", "screen-state")
+                    .put("running", running)
+                    .put("paused", paused)
+                    .put("width", width)
+                    .put("height", height)
+                    .put("error", error))
+                setStatus(if (running) "на связи · экран идёт" else "на связи")
+                if (!running) hideAsk()
+            },
+            log = { text -> log(text) },
+        )
+        caster = fresh
+        return fresh
+    }
+
+    private fun sendFrame(frame: ByteArray) {
+        val open = socket ?: return
+        // Двоичным сообщением, а не строкой: кадр — это байты H.264, и
+        // любое текстовое кодирование раздуло бы его на треть.
+        open.send(ByteString.of(frame, 0, frame.size))
+    }
+
+    private fun sendJson(payload: JSONObject) {
+        socket?.send(payload.toString())
+    }
+
+    /** Сайт попросил экран. Согласие даёт только человек и только на самом
+     *  телефоне — обойти это нечем (Android 14 спрашивает каждую сессию). */
+    private fun askForScreen() {
+        if (caster?.isRunning == true) {
+            caster?.resume()
+            return
+        }
+        val screen = MainActivity.live
+        if (screen != null) {
+            log("прошу подтверждение захвата на экране")
+            screen.runOnUiThread { screen.askProjection() }
+            return
+        }
+        // Приложение не на переднем плане — запустить окно из фона Android
+        // не даст. Поэтому кладём уведомление: тычок по нему откроет
+        // оболочку и спросит согласие.
+        log("телефон не в руках — положил уведомление с просьбой")
+        showAsk()
+    }
+
+    private fun grantScreen(intent: Intent) {
+        val code = intent.getIntExtra(EXTRA_RESULT_CODE, 0)
+        @Suppress("DEPRECATION")
+        val data: Intent? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            intent.getParcelableExtra(EXTRA_RESULT_DATA, Intent::class.java)
+        } else {
+            intent.getParcelableExtra(EXTRA_RESULT_DATA)
+        }
+        hideAsk()
+        if (data == null) {
+            log("согласия на захват нет")
+            return
+        }
+        // С Android 14 служба обязана СНАЧАЛА стать foreground-службой с
+        // типом mediaProjection и только потом брать саму проекцию.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            try {
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification(AgentState.status),
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION,
+                )
+            } catch (e: Exception) {
+                log("не вышло объявить службу захватом экрана: ${e.message}")
+            }
+        }
+        ensureCaster().start(code, data)
+    }
+
+    private fun showAsk() {
+        val open = PendingIntent.getActivity(
+            this,
+            1,
+            Intent(this, MainActivity::class.java)
+                .setAction(MainActivity.ACTION_ASK_SCREEN)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        val ask = Notification.Builder(this, ASK_CHANNEL)
+            .setContentTitle("Сайт просит показать экран")
+            .setContentText("Нажми, чтобы подтвердить захват")
+            .setSmallIcon(R.drawable.ic_agent)
+            .setContentIntent(open)
+            .setAutoCancel(true)
+            .build()
+        getSystemService(NotificationManager::class.java)?.notify(ASK_NOTIFICATION_ID, ask)
+    }
+
+    private fun hideAsk() {
+        getSystemService(NotificationManager::class.java)?.cancel(ASK_NOTIFICATION_ID)
     }
 
     private fun scheduleReconnect() {
@@ -264,6 +407,9 @@ class AgentService : Service() {
             }
         }
         networkCallback = null
+        caster?.stop()
+        caster = null
+        hideAsk()
         socket?.close(1000, "остановлен")
         socket = null
         AgentState.running = false
@@ -316,6 +462,15 @@ class AgentService : Service() {
             NotificationManager.IMPORTANCE_LOW,
         )
         getSystemService(NotificationManager::class.java)?.createNotificationChannel(channel)
+
+        val ask = NotificationChannel(
+            ASK_CHANNEL,
+            "Просьба показать экран",
+            // Погромче вывески службы: это вопрос, на который ждут ответа,
+            // и незамеченным он быть не должен.
+            NotificationManager.IMPORTANCE_HIGH,
+        )
+        getSystemService(NotificationManager::class.java)?.createNotificationChannel(ask)
     }
 
     private fun notification(text: String): Notification {

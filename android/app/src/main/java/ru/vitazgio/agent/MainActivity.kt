@@ -7,6 +7,7 @@ import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -51,6 +52,17 @@ class MainActivity : AppCompatActivity(), WebBridge.Host {
     companion object {
         private const val SITE = "https://vitazgio.ru"
         private const val START_PATH = "/cabinet"
+
+        /** Открыть оболочку и сразу спросить согласие на захват экрана —
+         *  по тычку в уведомление, когда телефон лежал в кармане. */
+        const val ACTION_ASK_SCREEN = "ru.vitazgio.agent.ASK_SCREEN"
+
+        /** Живое окно оболочки, если оно сейчас есть. Системный запрос на
+         *  захват показывает только activity, а просьба приходит в службу —
+         *  без этой ссылки ей некого попросить. Обнуляется в onDestroy,
+         *  поэтому утечки окна тут нет. */
+        @Volatile
+        var live: MainActivity? = null
     }
 
     private lateinit var views: ActivityMainBinding
@@ -67,6 +79,7 @@ class MainActivity : AppCompatActivity(), WebBridge.Host {
     private lateinit var mediaPermission: ActivityResultLauncher<Array<String>>
     private var popup: Dialog? = null
     private var failed = false
+    private lateinit var projectionAsk: ActivityResultLauncher<Intent>
 
     private val strip = object : Runnable {
         override fun run() {
@@ -94,6 +107,23 @@ class MainActivity : AppCompatActivity(), WebBridge.Host {
             pendingPermission = null
             if (request == null) return@registerForActivityResult
             if (granted.values.all { it }) request.grant(request.resources) else request.deny()
+        }
+
+        // Системный запрос «дать доступ к экрану». Подтверждение обязательно
+        // на каждую сессию — Android 14 не разрешает его запомнить никаким
+        // законным способом, и обходить это мы не будем.
+        projectionAsk = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            val data = result.data
+            if (result.resultCode != RESULT_OK || data == null) {
+                AgentLog.add(this, "захват экрана не разрешили")
+                return@registerForActivityResult
+            }
+            startService(
+                Intent(this, AgentService::class.java)
+                    .setAction(AgentService.ACTION_SCREEN_GRANT)
+                    .putExtra(AgentService.EXTRA_RESULT_CODE, result.resultCode)
+                    .putExtra(AgentService.EXTRA_RESULT_DATA, data)
+            )
         }
 
         setupWeb(views.web)
@@ -125,6 +155,8 @@ class MainActivity : AppCompatActivity(), WebBridge.Host {
             views.web.restoreState(savedInstanceState)
         }
 
+        if (intent?.action == ACTION_ASK_SCREEN) askProjection()
+
         if (AgentPrefs.enabled(this) && AgentPrefs.token(this).isNotBlank()) {
             AgentService.start(this)
         }
@@ -136,9 +168,36 @@ class MainActivity : AppCompatActivity(), WebBridge.Host {
         views.web.saveState(outState)
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        // Тычок в уведомление «сайт просит экран» приходит сюда, когда окно
+        // уже открыто: onCreate второй раз не позовут.
+        if (intent.action == ACTION_ASK_SCREEN) askProjection()
+    }
+
     override fun onResume() {
         super.onResume()
+        live = this
         ui.post(strip)
+    }
+
+    override fun onStop() {
+        if (live === this) live = null
+        super.onStop()
+    }
+
+    /** Показать системный запрос на захват экрана. */
+    fun askProjection() {
+        val manager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as? MediaProjectionManager
+        if (manager == null) {
+            Toast.makeText(this, "Захват экрана недоступен", Toast.LENGTH_LONG).show()
+            return
+        }
+        try {
+            projectionAsk.launch(manager.createScreenCaptureIntent())
+        } catch (e: Exception) {
+            Toast.makeText(this, "Не вышло спросить про экран: ${e.message}", Toast.LENGTH_LONG).show()
+        }
     }
 
     override fun onPause() {
@@ -150,6 +209,7 @@ class MainActivity : AppCompatActivity(), WebBridge.Host {
     }
 
     override fun onDestroy() {
+        if (live === this) live = null
         popup?.dismiss()
         views.web.destroy()
         super.onDestroy()
@@ -397,6 +457,14 @@ class MainActivity : AppCompatActivity(), WebBridge.Host {
             askNotifications()
             AgentService.start(this)
         }
+    }
+
+    override fun startScreen() {
+        ui.post { askProjection() }
+    }
+
+    override fun stopScreen() {
+        startService(Intent(this, AgentService::class.java).setAction(AgentService.ACTION_SCREEN_STOP))
     }
 
     override fun note(text: String) {

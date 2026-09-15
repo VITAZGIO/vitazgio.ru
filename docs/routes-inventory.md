@@ -13,10 +13,10 @@ Baseline before blueprint split:
 
 Текущее состояние (проверяется одной строкой, а не на глаз):
 
-- Роутов сейчас: `161`. Считать так — поднять приложение и посмотреть
+- Роутов сейчас: `163`. Считать так — поднять приложение и посмотреть
   `[r for r in app.url_map.iter_rules() if r.endpoint != "static"]`.
   Число включает вебсокеты (`@sock.route` тоже попадает в `url_map`).
-  Уникальных адресов при этом `142`: один и тот же URL под GET и POST —
+  Уникальных адресов при этом `144`: один и тот же URL под GET и POST —
   два правила в `url_map`, но одна строка в таблицах ниже встречается
   дважды (по строке на метод), поэтому сходится.
 - 2026-09-11: +7 в разделе «files/sftp» — файловый менеджер по SFTP.
@@ -28,6 +28,8 @@ Baseline before blueprint split:
 - 2026-09-15: +5 — новый раздел «phone/agent» (ТЗ 1 ретранслятора):
   `/ws/agent`, `/api/phone/agent`, `/app`, `/api/app/version`,
   `/api/app/pull`.
+- 2026-09-15: +2 в раздел «phone/agent» (ТЗ 3, экран телефона): страница
+  `/phone` и вебсокет зрителя `/ws/phone`.
 - 2026-09-15: +3 в раздел «phone/agent» (ТЗ 2, оболочка-браузер):
   `/api/phone/token` (выдать личный токен устройству), `/api/phone/tokens`
   (список) и `/api/phone/token/<token_id>` (отозвать).
@@ -287,14 +289,19 @@ Guards column includes route decorators such as `login_required`, `debtor_requir
 
 ## phone/agent
 
-Ретранслятор телефона, ступень 1 (`blueprints/phone.py`). Телефон не может
+Ретранслятор телефона, ступени 1-3 (`blueprints/phone.py`). Телефон не может
 принимать входящие (CGNAT у оператора), поэтому приходит сам вебсокетом и
 держит его открытым; реестр живых агентов лежит в памяти процесса и он же
 красит строку MOBILA на `/netbird` — ICMP-пинг до телефона не дойдёт никогда.
+Экран (`/phone` + `/ws/phone`) — тот же приём, что у guacamole в
+`blueprints/remote.py`: сайт стоит мостом между двумя исходящими
+соединениями и перекладывает кадры, сам их не разбирая.
 
 | URL | Decorator | Function | Guards |
 | --- | --- | --- | --- |
-| `/ws/agent` | `@sock.route("/ws/agent")` | `agent_ws` | `PHONE_AGENT_TOKEN` в первом сообщении `hello` |
+| `/ws/agent` | `@sock.route("/ws/agent")` | `agent_ws` | `PHONE_AGENT_TOKEN` либо личный токен устройства в первом сообщении `hello` |
+| `/ws/phone` | `@sock.route("/ws/phone")` | `phone_ws` | вход в кабинет + пароль консоли (проверка внутри функции) |
+| `/phone` | `@phone_bp.get("/phone")` | `phone_page` | `login_required` + пароль консоли спрашивает сама страница |
 | `/api/phone/agent` | `@phone_bp.get("/api/phone/agent")` | `phone_agent_api` | `login_required` |
 | `/api/phone/token` | `@phone_bp.post("/api/phone/token")` | `phone_token_issue` | `login_required` |
 | `/api/phone/tokens` | `@phone_bp.get("/api/phone/tokens")` | `phone_tokens_api` | `login_required` |
