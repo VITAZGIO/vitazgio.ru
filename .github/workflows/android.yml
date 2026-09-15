@@ -29,11 +29,17 @@ jobs:
           java-version: "17"
           cache: gradle
 
+      # packages: "" обязательно. По умолчанию экшен ставит пакет `tools`,
+      # которого в SDK больше нет вовсе, и падает на нём раньше, чем дело
+      # доходит до сборки (проверено: первый же запуск так и лёг). Нам от
+      # него нужно только принятие лицензий, остальное ставим сами.
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: ""
+
       # Образ раннера уже несёт Android SDK, но набор платформ в нём меняется
       # от обновления к обновлению. Ставим нужное явно — иначе сборка однажды
       # упала бы с «platform android-35 not found» без единой правки у нас.
-      - uses: android-actions/setup-android@v3
-
       - name: Install SDK parts
         run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
 
