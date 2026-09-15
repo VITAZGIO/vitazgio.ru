@@ -55,6 +55,15 @@ FRAME_KEY = 2                # опорный кадр
 FRAME_DELTA = 3              # разностный
 FRAME_HEADER = 9
 
+# Файлы телефона (ступень 4) ходят тем же двоичным каналом, что и кадры
+# экрана, поэтому номеру запроса предшествует байт типа: иначе кусок файла
+# было бы не отличить от кадра видео. После него — 4 байта номера запроса
+# (big-endian), дальше сами байты файла.
+FRAME_FILE = 4
+FILE_HEADER = 5
+FS_TIMEOUT = 25              # столько ждём ответ телефона на операцию
+FS_CHUNK_QUEUE = 64          # кусков файла в памяти сервера на один запрос
+
 # Очередь кадров на зрителя. Медленный зритель не должен тормозить телефон:
 # очередь переполнилась — выбрасываем накопленное и просим новый опорный
 # кадр, иначе кадры копились бы в памяти сервера, а картинка всё равно
@@ -284,6 +293,164 @@ def create_phone_blueprint(
                 viewer["need_key"] = False
             _viewer_put(viewer, data)
 
+    # ---- Файлы телефона: запрос-ответ поверх того же сокета ---------------
+    # Страница /files и её API не переписываются (см. docs/phone-tz/04-files.md):
+    # под ними меняется только транспорт. Здесь — низ этого транспорта: номера
+    # запросов, ожидание ответов и приём кусков файла. Сам бэкенд, который
+    # выглядит для files.py как SFTP-клиент, живёт в blueprints/files.py.
+
+    fs_lock = threading.Lock()
+    fs_calls = {}              # id -> {"reply": Event, "data": dict, "chunks": Queue}
+    fs_next = {"id": 1}
+
+    class PhoneFsError(Exception):
+        """Телефон ответил отказом. Код нужен странице: она уже умеет
+        показывать «нет места»/«нет прав»/«не найдено» карточкой."""
+
+        def __init__(self, text, code=""):
+            super().__init__(text)
+            self.code = code
+
+    class PhoneFs:
+        """То немногое, что нужно файловому бэкенду от сокета агента."""
+
+        error = PhoneFsError
+
+        @property
+        def online(self):
+            with agents_lock:
+                return bool(agents) and live_agent["ws"] is not None
+
+        def begin(self, op, **args):
+            """Начать операцию. Возвращает номер запроса — по нему придут и
+            ответ, и куски файла."""
+            if live_agent["ws"] is None:
+                raise PhoneFsError("Телефон не на связи.", "offline")
+            with fs_lock:
+                call_id = fs_next["id"]
+                fs_next["id"] = (call_id + 1) % 0x7FFFFFFF or 1
+                fs_calls[call_id] = {
+                    "reply": threading.Event(),
+                    "data": None,
+                    "chunks": queue.Queue(maxsize=FS_CHUNK_QUEUE),
+                }
+            if not _agent_send({"type": "fs", "id": call_id, "op": op, **args}):
+                self.finish(call_id)
+                raise PhoneFsError("Телефон не на связи.", "offline")
+            return call_id
+
+        def wait(self, call_id, timeout=FS_TIMEOUT):
+            """Дождаться ответа на операцию."""
+            with fs_lock:
+                call = fs_calls.get(call_id)
+            if call is None:
+                raise PhoneFsError("Запрос потерялся.", "lost")
+            if not call["reply"].wait(timeout):
+                self.finish(call_id)
+                raise PhoneFsError("Телефон не ответил вовремя.", "timeout")
+            data = call["data"] or {}
+            call["reply"].clear()
+            if not data.get("ok", False):
+                raise PhoneFsError(str(data.get("error") or "Телефон отказал."),
+                                   str(data.get("code") or ""))
+            return data
+
+        def call(self, op, **args):
+            """Операция без потока данных: список, создать, переименовать…"""
+            call_id = self.begin(op, **args)
+            try:
+                return self.wait(call_id)
+            finally:
+                self.finish(call_id)
+
+        def chunk(self, call_id, timeout=FS_TIMEOUT):
+            """Следующий кусок файла или None, когда файл кончился."""
+            with fs_lock:
+                call = fs_calls.get(call_id)
+            if call is None:
+                raise PhoneFsError("Передача оборвалась.", "lost")
+            try:
+                item = call["chunks"].get(timeout=timeout)
+            except queue.Empty:
+                raise PhoneFsError("Телефон замолчал посреди файла.", "timeout")
+            if isinstance(item, PhoneFsError):
+                raise item
+            return item
+
+        def send_chunk(self, call_id, data):
+            """Кусок файла телефону. Двоичным, с тем же номером запроса."""
+            ws = live_agent["ws"]
+            if ws is None:
+                raise PhoneFsError("Телефон не на связи.", "offline")
+            head = bytes([FRAME_FILE]) + call_id.to_bytes(4, "big")
+            try:
+                with agent_send_lock:
+                    ws.send(head + data)
+            except Exception:
+                raise PhoneFsError("Соединение с телефоном оборвалось.", "offline")
+
+        def tell(self, call_id, op, **args):
+            """Досказать что-то по уже начатой операции (конец записи, отмена)."""
+            _agent_send({"type": "fs", "id": call_id, "op": op, **args})
+
+        def finish(self, call_id):
+            with fs_lock:
+                fs_calls.pop(call_id, None)
+
+    phone_fs = PhoneFs()
+
+    def _fs_reply(payload):
+        call_id = payload.get("id")
+        with fs_lock:
+            call = fs_calls.get(call_id)
+        if call is None:
+            return
+        if payload.get("eof"):
+            # Файл кончился: None в очереди — сигнал читателю остановиться.
+            try:
+                call["chunks"].put_nowait(None)
+            except queue.Full:
+                pass
+            if payload.get("ok", True):
+                return
+        call["data"] = payload
+        call["reply"].set()
+        if not payload.get("ok", True):
+            # Отказ посреди чтения: читатель висит на очереди, и ждать ему
+            # больше нечего — кладём саму ошибку.
+            try:
+                call["chunks"].put_nowait(
+                    PhoneFsError(str(payload.get("error") or "Телефон отказал."),
+                                 str(payload.get("code") or "")))
+            except queue.Full:
+                pass
+
+    def _fs_frame(data):
+        call_id = int.from_bytes(data[1:5], "big")
+        with fs_lock:
+            call = fs_calls.get(call_id)
+        if call is None:
+            return
+        chunk = data[FILE_HEADER:]
+        try:
+            call["chunks"].put(chunk, timeout=FS_TIMEOUT)
+        except queue.Full:
+            pass
+
+    def _fs_drop_all(reason):
+        """Агент пропал — все ждущие операции обязаны оборваться, а не висеть
+        до таймаута: страница покажет ошибку сразу."""
+        with fs_lock:
+            calls = list(fs_calls.values())
+            fs_calls.clear()
+        for call in calls:
+            call["data"] = {"ok": False, "error": reason, "code": "offline"}
+            call["reply"].set()
+            try:
+                call["chunks"].put_nowait(PhoneFsError(reason, "offline"))
+            except queue.Full:
+                pass
+
     def handle_agent(ws, peer=""):
         """Весь разговор с телефоном. Вынесено из роута отдельной функцией:
         так её зовёт тест с фальшивым сокетом, не поднимая сети."""
@@ -364,7 +531,14 @@ def create_phone_blueprint(
                 # Двоичное — это кадр экрана. Разбирать его незачем: сайт
                 # только мост, картинку собирает браузер зрителя.
                 if isinstance(message, (bytes, bytearray, memoryview)):
-                    _screen_frame(bytes(message))
+                    raw = bytes(message)
+                    # Первый байт говорит, что это: кадр экрана или кусок
+                    # файла. Без него одно от другого не отличить — канал
+                    # у них общий.
+                    if raw[:1] == bytes([FRAME_FILE]):
+                        _fs_frame(raw)
+                    else:
+                        _screen_frame(raw)
                     continue
 
                 try:
@@ -380,6 +554,8 @@ def create_phone_blueprint(
                             ws.send(json.dumps({"type": "pong", "t": payload.get("t")}))
                     except Exception:
                         break
+                elif kind == "fs-reply":
+                    _fs_reply(payload)
                 elif kind == "screen-state":
                     with screen_lock:
                         screen["running"] = bool(payload.get("running"))
@@ -400,6 +576,7 @@ def create_phone_blueprint(
                 agents.pop(conn_id, None)
             if live_agent["ws"] is ws:
                 live_agent["ws"] = None
+            _fs_drop_all("Телефон отключился.")
             with screen_lock:
                 screen.update(running=False, paused=False, config=None, error="")
             _viewers_tell({"type": "state", **_screen_snapshot()})
@@ -705,6 +882,7 @@ def create_phone_blueprint(
         return jsonify(payload)
 
     # Тестам нужен разговор с агентом без сети, а странице отладки — реестр.
+    phone_bp.fs = phone_fs
     phone_bp.handle_agent = handle_agent
     phone_bp.handle_viewer = handle_viewer
     phone_bp.screen_snapshot = _screen_snapshot

@@ -25,6 +25,7 @@ from datetime import datetime
 
 import paramiko
 from flask import Blueprint, Response, jsonify, request, session
+from types import SimpleNamespace
 
 SFTP_IDLE_SECONDS = 15 * 60      # столько живёт соединение без единого запроса
 SFTP_CHUNK = 256 * 1024          # кусок чтения/записи: компромисс память/скорость
@@ -32,8 +33,24 @@ SFTP_RECURSIVE_MAX = 5000        # потолок на рекурсивное у
 TO_DROP_JOB_TTL = 5 * 60         # доделанная передача видна ещё столько — успеть долистать список
 
 
+# Коды отказов от телефона. Страница уже умеет показывать текст карточкой —
+# ей нужна человеческая формулировка, а не «code: enospc».
+_AGENT_ERRORS = {
+    "denied": "Нет доступа. Разреши приложению «доступ ко всем файлам» в настройках телефона.",
+    "not-found": "Не найдено.",
+    "exists": "Уже существует.",
+    "not-empty": "Папка не пуста.",
+    "no-space": "На телефоне нет места.",
+    "offline": "Телефон не на связи.",
+    "timeout": "Телефон не ответил вовремя.",
+}
+
+
 def _error_text(exc):
     """Человеческая формулировка вместо «[Errno 13] Permission denied»."""
+    code = getattr(exc, "code", None)
+    if code and code in _AGENT_ERRORS:
+        return _AGENT_ERRORS[code]
     errno = getattr(exc, "errno", None)
     if errno == 13:
         return "Нет доступа."
@@ -44,6 +61,180 @@ def _error_text(exc):
     if errno == 39 or "not empty" in str(exc).lower():
         return "Папка не пуста."
     return str(exc) or "Ошибка SFTP."
+
+
+class AgentBackend:
+    """Файлы телефона под той же страницей /files, что и файлы по SFTP.
+
+    Страница, её вёрстка и её API не переписаны ни строкой: под ними поменян
+    только транспорт. Поэтому бэкенд повторяет ту часть `paramiko.SFTPClient`,
+    которой код выше реально пользуется, — и это и есть «общий интерфейс»
+    двух бэкендов:
+
+        normalize · listdir_attr · stat · open(read/write) · mkdir ·
+        rename · remove · rmdir
+
+    Ниже вместо SSH — команды агенту в его же вебсокет (`blueprints/phone.py`,
+    слой `PhoneFs`). Так бесплатно достаётся всё, что странице уже умеет:
+    zip папки целиком, перенос в дроп кнопкой VG, прогресс загрузки,
+    переиспользование соединения без повторного пароля.
+    """
+
+    # Столько байт просим у телефона за раз. Меньше — лишние круги по сети,
+    # больше — телефон дольше держит кусок в памяти.
+    CHUNK = 256 * 1024
+
+    def __init__(self, fs, home="/sdcard"):
+        self.fs = fs
+        self.home = home
+
+    # ---- то, что зовёт код страницы ------------------------------------
+
+    def normalize(self, path):
+        if path in (".", "", None):
+            reply = self.fs.call("home")
+            return str(reply.get("path") or self.home)
+        return posixpath.normpath(path)
+
+    def listdir_attr(self, path):
+        reply = self.fs.call("list", path=path)
+        rows = []
+        for row in reply.get("entries", []):
+            is_dir = bool(row.get("dir"))
+            rows.append(SimpleNamespace(
+                filename=str(row.get("name") or ""),
+                # Режим собираем сами: код выше разбирает его через
+                # stat-модуль, как и у настоящего SFTP.
+                st_mode=(statmod.S_IFDIR | 0o755) if is_dir else (statmod.S_IFREG | 0o644),
+                st_size=int(row.get("size") or 0),
+                st_mtime=int(row.get("mtime") or 0),
+            ))
+        return rows
+
+    def stat(self, path):
+        reply = self.fs.call("stat", path=path)
+        is_dir = bool(reply.get("dir"))
+        return SimpleNamespace(
+            st_mode=(statmod.S_IFDIR | 0o755) if is_dir else (statmod.S_IFREG | 0o644),
+            st_size=int(reply.get("size") or 0),
+            st_mtime=int(reply.get("mtime") or 0),
+        )
+
+    def open(self, path, mode="rb"):
+        if "w" in mode:
+            return _AgentWrite(self.fs, path)
+        return _AgentRead(self.fs, path, self.CHUNK)
+
+    def mkdir(self, path):
+        self.fs.call("mkdir", path=path)
+
+    def rename(self, old, new):
+        self.fs.call("rename", path=old, to=new)
+
+    def remove(self, path):
+        self.fs.call("remove", path=path)
+
+    def rmdir(self, path):
+        self.fs.call("rmdir", path=path)
+
+    def close(self):
+        pass                      # сокет агента живёт сам по себе
+
+
+class _AgentRead:
+    """Чтение файла кусками. Целиком в память не тянем ни на телефоне, ни
+    здесь: с той стороны бывают фильмы на несколько гигабайт."""
+
+    def __init__(self, fs, path, chunk):
+        self.fs = fs
+        self.call_id = fs.begin("read", path=path, chunk=chunk)
+        try:
+            fs.wait(self.call_id)
+        except Exception:
+            fs.finish(self.call_id)
+            raise
+        self.buffer = b""
+        self.done = False
+
+    def read(self, size=-1):
+        if size is None or size < 0:
+            parts = []
+            while True:
+                piece = self.read(1 << 20)
+                if not piece:
+                    return b"".join(parts)
+                parts.append(piece)
+        while not self.done and len(self.buffer) < size:
+            chunk = self.fs.chunk(self.call_id)
+            if chunk is None:
+                self.done = True
+                break
+            self.buffer += chunk
+        out, self.buffer = self.buffer[:size], self.buffer[size:]
+        return out
+
+    def prefetch(self, *args, **kwargs):
+        pass                      # у paramiko это ускорение, здесь не нужно
+
+    def set_pipelined(self, *args, **kwargs):
+        pass
+
+    def close(self):
+        if not self.done:
+            # Страница закрыла вкладку посреди скачивания — телефону надо
+            # сказать, чтобы перестал читать, иначе он дочитает гигабайт в
+            # никуда.
+            self.fs.tell(self.call_id, "cancel")
+        self.fs.finish(self.call_id)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+
+
+class _AgentWrite:
+    """Запись файла кусками — тем же номером запроса, двоичными кадрами."""
+
+    def __init__(self, fs, path):
+        self.fs = fs
+        self.call_id = fs.begin("write", path=path)
+        try:
+            fs.wait(self.call_id)
+        except Exception:
+            fs.finish(self.call_id)
+            raise
+        self.closed = False
+
+    def write(self, data):
+        if not data:
+            return
+        self.fs.send_chunk(self.call_id, bytes(data))
+
+    def set_pipelined(self, *args, **kwargs):
+        pass                      # у paramiko это ускорение записи, здесь не нужно
+
+    def prefetch(self, *args, **kwargs):
+        pass
+
+    def close(self):
+        if self.closed:
+            return
+        self.closed = True
+        try:
+            self.fs.tell(self.call_id, "write-end")
+            # Ждём подтверждения: без него «загружено» на странице означало
+            # бы только «отправлено», а файл на телефоне мог не закрыться.
+            self.fs.wait(self.call_id)
+        finally:
+            self.fs.finish(self.call_id)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
 
 
 def create_files_blueprint(
@@ -60,8 +251,15 @@ def create_files_blueprint(
     drop_used,
     drop_quota,
     drop_download_id,
+    phone_fs=None,
+    phone_ip=None,
 ):
     files_bp = Blueprint("files", __name__)
+
+    def _is_phone(ip):
+        """Телефон ходит не по SSH: под той же страницей у него свой
+        транспорт — команды агенту в его же сокет."""
+        return bool(phone_ip) and ip == phone_ip and phone_fs is not None
 
     # token -> {"client", "sftp", "ip", "user", "used", "io_lock"}
     live = {}
@@ -76,8 +274,11 @@ def create_files_blueprint(
 
     def _shut(entry):
         for name in ("sftp", "client"):
+            target = entry.get(name)
+            if target is None:
+                continue          # у агентского бэкенда ssh-клиента нет вовсе
             try:
-                entry[name].close()
+                target.close()
             except Exception:
                 pass
 
@@ -444,11 +645,38 @@ def create_files_blueprint(
 
     # ---- Страница -----------------------------------------------------------
 
+    def _agent_entry():
+        """Живое «соединение» с телефоном. Пароля тут нет и быть не может:
+        SSH на телефоне нет, а гейт — суточный пароль консоли, как и у
+        остальных машин."""
+        backend = AgentBackend(phone_fs)
+        home = backend.normalize(".")
+        _drop_current()
+        token = secrets.token_urlsafe(18)
+        with live_lock:
+            live[token] = {"client": None, "sftp": backend, "ip": phone_ip,
+                           "user": "агент", "home": home, "used": time.time(),
+                           # Тот же лок, что у SFTP: фоновый перенос кнопкой
+                           # VG живёт своим потоком параллельно запросам
+                           # страницы, и мешать их в одном канале нельзя.
+                           "io_lock": threading.Lock()}
+        session["sftp_token"] = token
+        return live[token]
+
     @files_bp.get("/files/<ip>")
     @login_required
     def files_page(ip):
         if ip not in sftp_enabled_ips:
             return "Для этой машины файлы недоступны.", 404
+        # Телефону логин спрашивать не у кого, поэтому соединение поднимаем
+        # прямо здесь — страница сама увидит его через /api/files/session и
+        # пропустит карточку логина (тот же путь, что и у кнопки «Файлы» в
+        # оверлее RDP). Суточный пароль при этом обязателен, как и везде.
+        if _is_phone(ip) and session.get("console_authenticated") and phone_fs.online:
+            try:
+                _agent_entry()
+            except Exception:
+                pass              # не поднялось — страница спросит как обычно
         html = template("files.html")
         return (html.replace("{{IP}}", ip)
                     .replace("{{NAME}}", _device_name(ip))
@@ -469,6 +697,20 @@ def create_files_blueprint(
         password = payload.get("password")
         if ip not in sftp_enabled_ips:
             return jsonify(error="Неизвестная машина."), 400
+
+        if _is_phone(ip):
+            # Телефон: ни логина, ни пароля — SSH там нет. Что вбито в поля
+            # карточки, значения не имеет, и придумывать туда пароль не надо.
+            if not phone_fs.online:
+                return jsonify(error="Телефон не на связи."), 502
+            try:
+                entry = _agent_entry()
+                with entry["io_lock"]:
+                    rows = _entries(entry["sftp"], entry["home"])
+            except Exception as e:
+                return jsonify(error=f"Телефон не ответил: {e}"), 502
+            return jsonify(path=entry["home"], user=entry["user"], entries=rows)
+
         if not isinstance(username, str) or not isinstance(password, str) or not username or not password:
             return jsonify(error="Нужны логин и пароль."), 400
 
@@ -721,10 +963,14 @@ def create_files_blueprint(
                         else:
                             try:
                                 sftp.rmdir(path)
-                            except OSError as e:
+                            except Exception as e:
                                 # Папка с содержимым — не молчим и не сносим втихую,
                                 # а спрашиваем у человека отдельной карточкой.
-                                if getattr(e, "errno", None) in (39, 66) or "not empty" in str(e).lower():
+                                # Телефон говорит об этом своим кодом, SSH —
+                                # номером ошибки; для страницы это одно и то же.
+                                if (getattr(e, "errno", None) in (39, 66)
+                                        or getattr(e, "code", "") == "not-empty"
+                                        or "not empty" in str(e).lower()):
                                     return jsonify(error="Папка не пуста.", needs_recursive=True), 409
                                 raise
                     else:

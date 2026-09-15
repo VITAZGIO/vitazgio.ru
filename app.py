@@ -131,8 +131,11 @@ PING_LATENCY_RE = re.compile(r"time[=<]\s*([\d.]+)\s*ms", re.IGNORECASE)
 netbird_status = {device["ip"]: {"online": False, "latency_ms": None, "last_seen": None} for device in NETBIRD_DEVICES}
 netbird_status_lock = threading.Lock()
 ssh_enabled_ips = {device["ip"] for device in NETBIRD_DEVICES if device.get("ssh_enabled")}
+# Кому на /netbird показывать файлы. Телефон сюда попадает не через SSH
+# (его там нет), а своим транспортом — командами агенту в тот же сокет.
 sftp_enabled_ips = {device["ip"] for device in NETBIRD_DEVICES
-                    if device.get("ssh_enabled") or device.get("sftp_enabled")}
+                    if device.get("ssh_enabled") or device.get("sftp_enabled")
+                    or device.get("agent_enabled")}
 
 SSH_GATE_PASSWORD_PREFIX = os.environ.get("SSH_GATE_PASSWORD_PREFIX")
 # Пароль телефонного агента: одна строка в .env, её же вбивают в приложении.
@@ -4699,6 +4702,22 @@ app.register_blueprint(create_ai_blueprint(
     sse=_sse,
 ))
 
+# Телефонный blueprint регистрируется раньше файлового: файловому нужен его
+# транспорт (команды агенту), а не наоборот.
+phone_bp = create_phone_blueprint(
+    sock=sock,
+    template=_template,
+    icon_links=ICON_LINKS,
+    login_required=login_required,
+    agent_token=PHONE_AGENT_TOKEN,
+    agent_ip=PHONE_AGENT_IP,
+    publish_status=_phone_publish_status,
+    apk_dir=PHONE_APK_DIR,
+    apk_repo=PHONE_APK_REPO,
+    tokens_path=PHONE_TOKENS_PATH,
+)
+app.register_blueprint(phone_bp)
+
 app.register_blueprint(create_files_blueprint(
     template=_template,
     icon_links=ICON_LINKS,
@@ -4712,6 +4731,8 @@ app.register_blueprint(create_files_blueprint(
     drop_used=_drop_used,
     drop_quota=DROP_QUOTA,
     drop_download_id=DROP_DOWNLOAD_ID,
+    phone_fs=phone_bp.fs,
+    phone_ip=PHONE_AGENT_IP,
 ))
 
 app.register_blueprint(create_remote_blueprint(
@@ -4760,19 +4781,6 @@ app.register_blueprint(create_remote_blueprint(
     guac_handshake_vnc=lambda *args, **kwargs: _guac_handshake_vnc(*args, **kwargs),
     wol_relay=lambda *args, **kwargs: _wol_relay(*args, **kwargs),
     wol_broadcasts=WOL_BROADCASTS,
-))
-
-app.register_blueprint(create_phone_blueprint(
-    sock=sock,
-    template=_template,
-    icon_links=ICON_LINKS,
-    login_required=login_required,
-    agent_token=PHONE_AGENT_TOKEN,
-    agent_ip=PHONE_AGENT_IP,
-    publish_status=_phone_publish_status,
-    apk_dir=PHONE_APK_DIR,
-    apk_repo=PHONE_APK_REPO,
-    tokens_path=PHONE_TOKENS_PATH,
 ))
 
 app.register_blueprint(create_pwa_blueprint(

@@ -131,8 +131,13 @@ def test_page_closed_for_guest(client):
 
 
 def test_page_unknown_machine(auth_client):
-    """Телефон и винды без SSH в список не входят — страницы для них нет."""
-    assert auth_client.get("/files/100.104.86.103").status_code == 404
+    """Машины не из списка — страницы нет вовсе.
+
+    Телефон (100.104.86.103) из этой проверки ушёл со ступенью 4: у него
+    своя дорога под той же страницей — команды агенту вместо SSH, — и файлы
+    ему теперь показываются (см. tests/test_phone_files.py)."""
+    assert auth_client.get("/files/10.0.0.1").status_code == 404
+    assert auth_client.get("/files/не-адрес").status_code == 404
 
 
 def test_connect_needs_console_password(auth_client, remote_root):

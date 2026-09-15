@@ -16,12 +16,15 @@ import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.IBinder
+import android.net.Uri
 import android.os.PowerManager
+import android.provider.Settings
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
+import okio.ByteString
 import okio.ByteString.Companion.toByteString
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
@@ -52,6 +55,7 @@ class AgentService : Service() {
         // вывеска службы, а вопрос, на который ждут ответа.
         private const val ASK_CHANNEL = "vg-screen-ask"
         private const val ASK_NOTIFICATION_ID = 8
+        private const val FILES_NOTIFICATION_ID = 9
 
         // Своё ping/pong поверх протокольного: сервер ждёт весточку не реже
         // раза в минуту, а промежуточные прокси любят резать «молчащие»
@@ -81,6 +85,7 @@ class AgentService : Service() {
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
 
     private var caster: ScreenCaster? = null
+    private var files: FileAgent? = null
 
     private val reconnectTask = Runnable { connect() }
     private val heartbeatTask = object : Runnable {
@@ -220,9 +225,18 @@ class AgentService : Service() {
                     "screen-resume" -> caster?.resume()
                     "screen-key" -> caster?.requestKeyFrame()
 
+                    // Файлы телефона под готовой страницей /files сайта.
+                    "fs" -> ensureFiles().handle(webSocket, JSONObject(text))
+
                     // Неизвестный тип игнорируем, а не падаем и не толкуем
                     // наугад — сервер на той стороне делает ровно так же.
                 }
+            }
+
+            override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
+                // Двоичное от сайта бывает только одного рода: кусок файла,
+                // который он в нас пишет.
+                ensureFiles().handleFrame(bytes)
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
@@ -266,6 +280,18 @@ class AgentService : Service() {
             log = { text -> log(text) },
         )
         caster = fresh
+        return fresh
+    }
+
+    private fun ensureFiles(): FileAgent {
+        val existing = files
+        if (existing != null) return existing
+        val fresh = FileAgent(
+            context = this,
+            log = { text -> log(text) },
+            askAccess = { showFilesAsk() },
+        )
+        files = fresh
         return fresh
     }
 
@@ -330,6 +356,30 @@ class AgentService : Service() {
             }
         }
         ensureCaster().start(code, data)
+    }
+
+    /** Уведомление «разреши доступ к файлам»: открывает тот самый экран
+     *  настроек, где это разрешение и выдаётся — один раз и навсегда. */
+    private fun showFilesAsk() {
+        val settings = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                Uri.parse("package:$packageName"))
+        } else {
+            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                Uri.parse("package:$packageName"))
+        }.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val open = PendingIntent.getActivity(
+            this, 2, settings,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        val ask = Notification.Builder(this, ASK_CHANNEL)
+            .setContentTitle("Нужен доступ к файлам")
+            .setContentText("Нажми и разреши «доступ ко всем файлам»")
+            .setSmallIcon(R.drawable.ic_agent)
+            .setContentIntent(open)
+            .setAutoCancel(true)
+            .build()
+        getSystemService(NotificationManager::class.java)?.notify(FILES_NOTIFICATION_ID, ask)
     }
 
     private fun showAsk() {
@@ -411,6 +461,8 @@ class AgentService : Service() {
         networkCallback = null
         caster?.stop()
         caster = null
+        files?.shut()
+        files = null
         hideAsk()
         socket?.close(1000, "остановлен")
         socket = null
