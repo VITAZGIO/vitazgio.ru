@@ -213,14 +213,15 @@ def phone_files(app_module):
 
 
 @pytest.fixture
-def phone_client(app_module, phone_files):
-    """Хозяин, вошедший и в кабинет, и в консоль: тот же гейт, что у SFTP."""
-    from tests.conftest import TEST_PASSWORD
-    c = app_module.app.test_client()
-    c.post("/api/login", json={"password": TEST_PASSWORD})
-    with c.session_transaction() as session:
+def phone_client(auth_client, phone_files):
+    """Хозяин, вошедший и в кабинет, и в консоль: тот же гейт, что у SFTP.
+
+    Берём готовый `auth_client` из conftest, а не импортируем оттуда пароль:
+    `tests` — не пакет, и такой импорт живёт только пока корень репозитория
+    случайно оказался в sys.path (у себя работал, в CI — нет)."""
+    with auth_client.session_transaction() as session:
         session["console_authenticated"] = True
-    return c
+    return auth_client
 
 
 def test_phone_now_has_a_files_page(phone_client):
@@ -321,11 +322,9 @@ def test_phone_gone_mid_work_is_an_honest_error(phone_client, phone_files, app_m
     assert "телефон" in resp.get_json()["error"].lower()
 
 
-def test_files_page_still_refuses_without_console_password(app_module, phone_files):
+def test_files_page_still_refuses_without_console_password(auth_client, phone_files):
     """Гейт тот же, что у остальных машин: одного входа в кабинет мало."""
-    from tests.conftest import TEST_PASSWORD
-    c = app_module.app.test_client()
-    c.post("/api/login", json={"password": TEST_PASSWORD})
+    c = auth_client                      # вошёл в кабинет, но не в консоль
     c.get(f"/files/{PHONE_IP}")
     # Соединение без суточного пароля не поднимается, значит страница
     # спросит его сама, как и всегда.
