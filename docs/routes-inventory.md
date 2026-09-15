@@ -296,7 +296,7 @@ Guards column includes route decorators such as `login_required`, `debtor_requir
 | --- | --- | --- | --- |
 | `/ws/agent` | `@sock.route("/ws/agent")` | `agent_ws` | `PHONE_AGENT_TOKEN` в первом сообщении `hello` |
 | `/api/phone/agent` | `@phone_bp.get("/api/phone/agent")` | `phone_agent_api` | `login_required` |
-| `/api/phone/token` | `@phone_bp.get("/api/phone/token")` | `phone_token_issue` | `login_required` |
+| `/api/phone/token` | `@phone_bp.post("/api/phone/token")` | `phone_token_issue` | `login_required` |
 | `/api/phone/tokens` | `@phone_bp.get("/api/phone/tokens")` | `phone_tokens_api` | `login_required` |
 | `/api/phone/token/<token_id>` | `@phone_bp.delete("/api/phone/token/<token_id>")` | `phone_token_revoke` | `login_required` |
 | `/app` | `@phone_bp.get("/app")` | `app_apk` | `login_required` |

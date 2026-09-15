@@ -206,13 +206,13 @@ def test_agent_token_opens_the_version_check(client):
 # ---- Токены устройств (ступень 2: оболочка-браузер) -------------------------
 
 def test_token_issue_is_behind_the_door(client):
-    assert client.get("/api/phone/token").status_code in (302, 401, 403)
+    assert client.post("/api/phone/token").status_code in (302, 401, 403)
     assert client.get("/api/phone/tokens").status_code in (302, 401, 403)
     assert client.delete("/api/phone/token/whatever").status_code in (302, 401, 403)
 
 
 def test_issued_token_opens_the_socket_and_revoked_one_does_not(phone_bp, auth_client, app_module):
-    issued = auth_client.get("/api/phone/token?label=Tecno").get_json()
+    issued = auth_client.post("/api/phone/token", json={"label": "Tecno"}).get_json()
     assert issued["token"] and issued["id"]
 
     # Секрет ушёл ровно один раз: в списке его нет, на диске — только хэш.
@@ -246,7 +246,7 @@ def test_issued_token_opens_the_socket_and_revoked_one_does_not(phone_bp, auth_c
 
 
 def test_shared_env_token_still_works_next_to_device_tokens(phone_bp, auth_client):
-    auth_client.get("/api/phone/token?label=лишний")
+    auth_client.post("/api/phone/token", json={"label": "лишний"})
     ws = FakeWs([_hello()])                      # тот самый общий из .env
     thread = _run(phone_bp, ws)
     assert _wait(lambda: phone_bp.agent_snapshot()["online"])

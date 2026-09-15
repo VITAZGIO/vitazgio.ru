@@ -981,7 +981,7 @@
             let state = {};
             try { state = JSON.parse(bridge.getStatus() || "{}"); } catch {}
             if (!state.hasToken) {
-              fetch("/api/phone/token", { credentials: "same-origin" })
+              fetch("/api/phone/token", { method: "POST", credentials: "same-origin" })
                 .then(response => response.ok ? response.json() : null)
                 .then(data => { if (data && data.token) bridge.saveToken(data.token); })
                 .catch(() => {});

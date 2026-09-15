@@ -278,10 +278,16 @@ def create_phone_blueprint(
         snapshot["configured"] = bool(agent_token)
         return jsonify(snapshot)
 
-    @phone_bp.get("/api/phone/token")
+    @phone_bp.post("/api/phone/token")
     @login_required
     def phone_token_issue():
         """Выдать этому устройству личный токен.
+
+        POST, а не GET: ручка заводит новую запись, а меняющие состояние
+        адреса на этом сайте всегда POST (как /api/files/connect или
+        /api/drop/folder). Заодно из него нельзя выстрелить чужой картинкой
+        или ссылкой — кука сессии и так `SameSite=Strict`, но складывать две
+        защиты дешевле, чем потом разбираться, какая из них не сработала.
 
         Зовёт JS-мост оболочки, когда хозяин уже вошёл в кабинет внутри
         приложения, — потому руками токен больше не вбивают. Секрет уходит
