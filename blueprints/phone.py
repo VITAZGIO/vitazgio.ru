@@ -61,6 +61,11 @@ FRAME_HEADER = 9
 # (big-endian), дальше сами байты файла.
 FRAME_FILE = 4
 FILE_HEADER = 5
+# Звук (ступень 6) — свой тип сообщений и своя метка времени. Мешать его с
+# видеокадрами в один поток незачем: рассинхрон потом лечится сдвигом звука
+# в браузере, а не перекодированием картинки.
+FRAME_AUDIO_CONFIG = 5
+FRAME_AUDIO = 6
 FS_TIMEOUT = 25              # столько ждём ответ телефона на операцию
 FS_CHUNK_QUEUE = 64          # кусков файла в памяти сервера на один запрос
 
@@ -213,6 +218,8 @@ def create_phone_blueprint(
         "running": False,      # телефон реально отдаёт кадры
         "paused": False,       # захват жив, но зрителей нет и кодировать некуда
         "config": None,        # последние SPS/PPS: без них поздний зритель слеп
+        "audio_config": None,  # то же самое для звука
+        "audio": False,        # идёт ли звук
         "width": 0,
         "height": 0,
         "error": "",
@@ -239,6 +246,7 @@ def create_phone_blueprint(
         with screen_lock:
             state = dict(screen)
         state.pop("config", None)
+        state.pop("audio_config", None)
         with agents_lock:
             state["agent"] = bool(agents)
         with viewers_lock:
@@ -284,6 +292,11 @@ def create_phone_blueprint(
         if kind == FRAME_CONFIG:
             with screen_lock:
                 screen["config"] = bytes(data)
+        elif kind == FRAME_AUDIO_CONFIG:
+            # Параметры звукового кодека нужны тому, кто подключится позже,
+            # ровно так же, как SPS/PPS у картинки.
+            with screen_lock:
+                screen["audio_config"] = bytes(data)
         with viewers_lock:
             targets = list(viewers.values())
         for viewer in targets:
@@ -554,6 +567,13 @@ def create_phone_blueprint(
                             ws.send(json.dumps({"type": "pong", "t": payload.get("t")}))
                     except Exception:
                         break
+                elif kind == "audio-state":
+                    with screen_lock:
+                        screen["audio"] = bool(payload.get("running"))
+                        if not screen["audio"]:
+                            screen["audio_config"] = None
+                    _viewers_tell({"type": "audio", "running": bool(payload.get("running")),
+                                   "error": str(payload.get("error") or "")[:200]})
                 elif kind == "touch-reply":
                     _viewers_tell(payload)
                 elif kind == "fs-reply":
@@ -570,6 +590,8 @@ def create_phone_blueprint(
                             # описывают ничего, следующий зритель должен
                             # дождаться новых, а не завести декодер зря.
                             screen["config"] = None
+                            screen["audio_config"] = None
+                            screen["audio"] = False
                     _viewers_tell({"type": "state", **_screen_snapshot()})
                 # Неизвестный тип сообщения не роняет разговор и не толкуется
                 # наугад — то же правило, что у агента на той стороне.
@@ -580,7 +602,8 @@ def create_phone_blueprint(
                 live_agent["ws"] = None
             _fs_drop_all("Телефон отключился.")
             with screen_lock:
-                screen.update(running=False, paused=False, config=None, error="")
+                screen.update(running=False, paused=False, config=None, error="",
+                              audio=False, audio_config=None)
             _viewers_tell({"type": "state", **_screen_snapshot()})
             _log(f"агент отключился: {entry['name']}")
             _publish()
@@ -635,6 +658,10 @@ def create_phone_blueprint(
                 # пока телефон не соберётся послать опорный сам.
                 if config:
                     _viewer_put(viewer, config)
+                with screen_lock:
+                    audio_config = screen["audio_config"]
+                if audio_config:
+                    _viewer_put(viewer, audio_config)
                 viewer["need_key"] = True
                 if first:
                     _agent_send({"type": "screen-resume"})
@@ -671,6 +698,10 @@ def create_phone_blueprint(
                 elif kind == "key":
                     viewer["need_key"] = True
                     _agent_send({"type": "screen-key"})
+                elif kind == "audio":
+                    # Звук по умолчанию выключен: внезапно заоравший динамик
+                    # на ПК — так себе сюрприз. Включает его человек.
+                    _agent_send({"type": "audio-start" if payload.get("on") else "audio-stop"})
                 elif kind == "touch":
                     # Управление пальцем (ступень 5). Сайт ничего тут не
                     # решает — только передаёт: что можно нажимать, решает

@@ -46,6 +46,8 @@
         .tick { display: flex; align-items: center; gap: 6px; color: #8b93a6; font-size: .76rem;
                 text-transform: uppercase; letter-spacing: .04em; cursor: pointer; }
         .tick input { accent-color: var(--ac); width: 15px; height: 15px; }
+        .vol { width: 110px; accent-color: var(--ac); }
+        .vol[disabled] { opacity: .35; }
         /* Пока управление включено, курсор над картинкой — прицел, а не
            стрелка: видно, что клик уйдёт в телефон. */
         canvas.ruling { cursor: crosshair; }
@@ -100,6 +102,9 @@
           <button class="btn" id="halt" type="button" disabled>Остановить</button>
           <button class="btn" id="full" type="button" disabled>Во весь экран</button>
           <label class="tick"><input type="checkbox" id="rule"> управление</label>
+          <label class="tick"><input type="checkbox" id="sound"> звук</label>
+          <input class="vol" id="vol" type="range" min="0" max="100" value="70" disabled
+                 aria-label="Громкость">
           <span class="state">телефон: <b id="agent-state" class="off">нет связи</b> · <span id="fps">—</span></span>
         </div>
 
@@ -251,9 +256,12 @@
         };
 
         const ask = (type) => {
-          if (socket && socket.readyState === WebSocket.OPEN) {
-            socket.send(JSON.stringify({ type }));
+          if (!socket || socket.readyState !== WebSocket.OPEN) return;
+          if (type === "audio-on" || type === "audio-off") {
+            socket.send(JSON.stringify({ type: "audio", on: type === "audio-on" }));
+            return;
           }
+          socket.send(JSON.stringify({ type }));
         };
 
         const onBinary = (buffer) => {
@@ -268,6 +276,21 @@
           const payload = bytes.subarray(9);
           if (kind === 1) {
             startDecoder(payload);
+            return;
+          }
+          if (kind === 5) {
+            startAudio(payload);
+            return;
+          }
+          if (kind === 6) {
+            if (!audioDec || audioDec.state !== "configured" || !audioOn()) return;
+            try {
+              audioDec.decode(new EncodedAudioChunk({
+                type: "key", timestamp: stamp, data: payload,
+              }));
+            } catch {
+              stopAudioDecoder();
+            }
             return;
           }
           if (!decoder || decoder.state !== "configured") return;
@@ -290,7 +313,7 @@
           agentState.classList.toggle("off", !alive);
           goBtn.disabled = !alive || Boolean(data.running);
           haltBtn.disabled = !data.running;
-          if (!data.running) showIdle();
+          if (!data.running) { showIdle(); stopAudioDecoder(); }
           if (data.error) uiToast(data.error, "err");
         };
 
@@ -303,6 +326,10 @@
             let data;
             try { data = JSON.parse(event.data); } catch { return; }
             if (data.type === "state") onState(data);
+            else if (data.type === "audio") {
+              if (data.error) uiToast(data.error, "err");
+              if (!data.running) stopAudioDecoder();
+            }
             else if (data.type === "touch-reply" && !data.ok) uiToast(data.error || "Нажатие не прошло.", "err");
             else if (data.type === "asked" && !data.ok) uiToast(data.error || "Телефон не ответил.", "err");
             else if (data.type === "asked") uiToast("Жду подтверждения на телефоне…");
@@ -318,6 +345,98 @@
             setTimeout(connect, 2000);
           });
         };
+
+        /* ---- Звук (ступень 6) -----------------------------------------------
+           Отдельным типом сообщений и со своей меткой времени: мешать звук
+           с видеокадрами в один поток незачем. По умолчанию выключен —
+           внезапно заоравший динамик на ПК так себе сюрприз. Рассинхрон
+           лечится сдвигом звука (audioShift), а не перекодированием видео.
+
+           Захватывается только звук приложений, которые не пометили себя как
+           «не записывать»: у ютуба и музыкальных сервисов звука не будет, и
+           это ограничение самого Android, а не поломка. */
+        const soundBox = document.getElementById("sound");
+        const volBox = document.getElementById("vol");
+        let audioCtx = null;
+        let audioGain = null;
+        let audioDec = null;
+        let audioAt = 0;          // когда играть следующий кусок
+        const audioShift = 0.12;  // запас: без него куски рвутся на дрожании сети
+
+        const audioOn = () => Boolean(audioCtx) && soundBox.checked;
+
+        const startAudio = (config) => {
+          if (!soundBox.checked) return;
+          if (!("AudioDecoder" in window)) {
+            uiToast("Браузер не умеет WebCodecs для звука.", "err");
+            return;
+          }
+          stopAudioDecoder();
+          audioDec = new AudioDecoder({
+            output: (data) => playChunk(data),
+            error: () => stopAudioDecoder(),
+          });
+          // description для AAC обязателен и приходит от телефона первым
+          // куском (AudioSpecificConfig) — без него декодер не заведётся.
+          audioDec.configure({
+            codec: "mp4a.40.2",
+            sampleRate: 44100,
+            numberOfChannels: 1,
+            description: config,
+          });
+        };
+
+        const stopAudioDecoder = () => {
+          if (!audioDec) return;
+          try { audioDec.close(); } catch {}
+          audioDec = null;
+          audioAt = 0;
+        };
+
+        const playChunk = (data) => {
+          if (!audioCtx) { data.close(); return; }
+          const frames = data.numberOfFrames;
+          const buffer = audioCtx.createBuffer(1, frames, data.sampleRate);
+          const plane = new Float32Array(frames);
+          try {
+            data.copyTo(plane, { planeIndex: 0, format: "f32-planar" });
+          } catch {
+            data.close();
+            return;
+          }
+          data.close();
+          buffer.copyToChannel(plane, 0);
+          const source = audioCtx.createBufferSource();
+          source.buffer = buffer;
+          source.connect(audioGain);
+          const now = audioCtx.currentTime;
+          // Играем встык: следующий кусок ставим ровно за предыдущим, а
+          // отставшие (сеть моргнула) подтягиваем к текущему времени.
+          if (audioAt < now + audioShift) audioAt = now + audioShift;
+          source.start(audioAt);
+          audioAt += buffer.duration;
+        };
+
+        soundBox.addEventListener("change", async () => {
+          volBox.disabled = !soundBox.checked;
+          if (soundBox.checked) {
+            // AudioContext заводится только по действию человека — таково
+            // правило браузеров, и оно тут кстати.
+            audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+            if (audioCtx.state === "suspended") await audioCtx.resume();
+            audioGain = audioGain || audioCtx.createGain();
+            audioGain.connect(audioCtx.destination);
+            audioGain.gain.value = volBox.value / 100;
+            ask("audio-on");
+          } else {
+            stopAudioDecoder();
+            ask("audio-off");
+          }
+        });
+
+        volBox.addEventListener("input", () => {
+          if (audioGain) audioGain.gain.value = volBox.value / 100;
+        });
 
         /* ---- Управление пальцем (ступень 5) --------------------------------
            По умолчанию выключено намеренно: случайный клик по картинке не

@@ -14,6 +14,10 @@
          этот тип, иначе система не отдаст проекцию вовсе. Согласие человека
          при этом всё равно спрашивается каждый раз — отключить это нечем. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+    <!-- Звук телефона (ступень 6). Это не микрофон: захватывается системный
+         звук через ту же проекцию, но Android считает это записью, поэтому
+         и разрешение, и тип службы нужны те же. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
@@ -88,7 +92,7 @@
         <service
             android:name=".AgentService"
             android:exported="false"
-            android:foregroundServiceType="specialUse|mediaProjection">
+            android:foregroundServiceType="specialUse|mediaProjection|microphone">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Постоянное исходящее соединение с личным сайтом владельца телефона: телефон не может принимать входящие (CGNAT у оператора), поэтому держит открытый сокет сам." />

@@ -80,6 +80,10 @@ class ScreenCaster(
 
     val isRunning: Boolean get() = running
 
+    /** Та же сессия захвата, которой живёт картинка: звук берётся ею же, и
+     *  отдельного согласия человека для него не требуется. */
+    fun session(): MediaProjection? = projection
+
     /** Начать трансляцию по согласию, которое человек уже дал системе. */
     @Synchronized
     fun start(resultCode: Int, data: Intent) {

@@ -473,3 +473,75 @@ def test_page_has_control_switched_off_by_default(auth_client):
     assert 'id="rule"' in page
     assert 'id="rule" checked' not in page
     assert "let ruling = false" in page
+
+
+# ---- Звук телефона (ступень 6) ----------------------------------------------
+
+def test_sound_is_off_until_asked(phone_bp):
+    """Внезапно заоравший динамик на ПК — так себе сюрприз, поэтому звук
+    включает человек, и сайт просит его у телефона только тогда."""
+    agent = FakeWs([_hello()])
+    agent_thread = _run(phone_bp, agent)
+    assert _wait(lambda: phone_bp.agent_snapshot()["online"])
+
+    viewer = FakeWs()
+    viewer_thread = _viewer(phone_bp, viewer)
+    assert _wait(lambda: phone_bp.screen_snapshot()["viewers"] == 1)
+    assert "audio-start" not in agent.types(), "сам по себе звук не включается"
+
+    viewer.push({"type": "audio", "on": True})
+    assert _wait(lambda: "audio-start" in agent.types())
+    viewer.push({"type": "audio", "on": False})
+    assert _wait(lambda: "audio-stop" in agent.types())
+
+    viewer.close()
+    viewer_thread.join(3)
+    agent.close()
+    agent_thread.join(3)
+
+
+def test_audio_config_reaches_a_late_listener(phone_bp):
+    """Параметры звукового кодека нужны опоздавшему так же, как SPS/PPS."""
+    agent = FakeWs([_hello()])
+    agent_thread = _run(phone_bp, agent)
+    assert _wait(lambda: phone_bp.agent_snapshot()["online"])
+    agent.push({"type": "screen-state", "running": True, "width": 720, "height": 1600})
+    assert _wait(lambda: phone_bp.screen_snapshot()["running"])
+    agent.inbox.put(_frame(1, b"sps-pps"))
+    agent.inbox.put(_frame(5, b"audio-config"))
+    time.sleep(0.2)
+
+    late = FakeWs()
+    late_thread = _viewer(phone_bp, late)
+    assert _received(late, 1), "картинке нужны её параметры"
+    assert _received(late, 5), "звуку нужны свои"
+
+    late.close()
+    late_thread.join(3)
+    agent.close()
+    agent_thread.join(3)
+
+
+def test_audio_frames_reach_the_listener(phone_bp):
+    agent = FakeWs([_hello()])
+    agent_thread = _run(phone_bp, agent)
+    assert _wait(lambda: phone_bp.agent_snapshot()["online"])
+    viewer = FakeWs()
+    viewer_thread = _viewer(phone_bp, viewer)
+    assert _wait(lambda: phone_bp.screen_snapshot()["viewers"] == 1)
+
+    agent.inbox.put(_frame(6, b"aac", 4000))
+    assert _received(viewer, 6), "куски звука обязаны доходить"
+    # У звука своя метка времени — по ней потом и правится рассинхрон.
+    assert _received(viewer, 6)[1:9] == (4000).to_bytes(8, "big")
+
+    viewer.close()
+    viewer_thread.join(3)
+    agent.close()
+    agent_thread.join(3)
+
+
+def test_page_has_sound_off_by_default(auth_client):
+    page = auth_client.get("/phone").get_data(as_text=True)
+    assert 'id="sound"' in page
+    assert 'id="sound" checked' not in page

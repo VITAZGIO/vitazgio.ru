@@ -7,6 +7,8 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.Manifest
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.net.ConnectivityManager
 import android.net.Network
@@ -23,6 +25,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
+import androidx.core.content.ContextCompat
 import okhttp3.WebSocketListener
 import okio.ByteString
 import okio.ByteString.Companion.toByteString
@@ -86,6 +89,7 @@ class AgentService : Service() {
 
     private var caster: ScreenCaster? = null
     private var files: FileAgent? = null
+    private var audio: AudioCaster? = null
 
     private val reconnectTask = Runnable { connect() }
     private val heartbeatTask = object : Runnable {
@@ -220,7 +224,12 @@ class AgentService : Service() {
                     // Экран. Команд ровно пять и все узкие: «выполни строку»
                     // в протоколе нет и не будет.
                     "screen-start" -> askForScreen()
-                    "screen-stop" -> caster?.stop()
+                    "screen-stop" -> {
+                        // Без живого захвата звука всё равно не будет —
+                        // гасим его сразу, а не оставляем висеть.
+                        audio?.stop()
+                        caster?.stop()
+                    }
                     "screen-pause" -> caster?.pause()
                     "screen-resume" -> caster?.resume()
                     "screen-key" -> caster?.requestKeyFrame()
@@ -231,6 +240,10 @@ class AgentService : Service() {
                     // Управление пальцем с ПК. Работает, только если человек
                     // сам включил службу спец-возможностей на телефоне.
                     "touch" -> handleTouch(webSocket, JSONObject(text))
+
+                    // Звук телефона — тем же захватом, что и картинка.
+                    "audio-start" -> startAudio(webSocket)
+                    "audio-stop" -> audio?.stop()
 
                     // Неизвестный тип игнорируем, а не падаем и не толкуем
                     // наугад — сервер на той стороне делает ровно так же.
@@ -320,6 +333,62 @@ class AgentService : Service() {
                 .put("error", "Телефон не принял нажатие.")
                 .toString())
         }
+    }
+
+    /** Звук требует разрешения на запись: Android считает захват системного
+     *  звука записью, хотя микрофон тут ни при чём. Спросить его может только
+     *  окно, поэтому без живой оболочки честно отвечаем отказом. */
+    private fun startAudio(socket: WebSocket) {
+        val granted = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED
+        if (!granted) {
+            val screen = MainActivity.live
+            if (screen != null) {
+                screen.runOnUiThread { screen.askMicrophone() }
+                socket.send(JSONObject()
+                    .put("type", "audio-state").put("running", false)
+                    .put("error", "Разреши запись звука на телефоне и нажми ещё раз.").toString())
+            } else {
+                socket.send(JSONObject()
+                    .put("type", "audio-state").put("running", false)
+                    .put("error", "Нужно разрешение на запись звука — открой приложение на телефоне.")
+                    .toString())
+            }
+            return
+        }
+        // С Android 14 служба обязана объявить и тип microphone, пока идёт
+        // захват звука, иначе система его оборвёт.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            try {
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification(AgentState.status),
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION or
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE,
+                )
+            } catch (e: Exception) {
+                log("не вышло объявить службу записью звука: ${e.message}")
+            }
+        }
+        ensureAudio().start(caster?.session())
+    }
+
+    private fun ensureAudio(): AudioCaster {
+        val existing = audio
+        if (existing != null) return existing
+        val fresh = AudioCaster(
+            send = { frame -> sendFrame(frame) },
+            state = { running, error ->
+                sendJson(JSONObject()
+                    .put("type", "audio-state")
+                    .put("running", running)
+                    .put("error", error))
+            },
+            log = { text -> log(text) },
+        )
+        audio = fresh
+        return fresh
     }
 
     private fun ensureFiles(): FileAgent {
@@ -498,6 +567,8 @@ class AgentService : Service() {
             }
         }
         networkCallback = null
+        audio?.stop()
+        audio = null
         caster?.stop()
         caster = null
         files?.shut()

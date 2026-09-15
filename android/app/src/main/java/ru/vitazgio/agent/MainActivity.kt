@@ -459,6 +459,14 @@ class MainActivity : AppCompatActivity(), WebBridge.Host {
         }
     }
 
+    /** Разрешение на запись звука: системный захват звука Android считает
+     *  записью, хотя микрофон тут ни при чём. */
+    fun askMicrophone() {
+        val granted = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+        if (granted == PackageManager.PERMISSION_GRANTED) return
+        requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 3)
+    }
+
     override fun startScreen() {
         ui.post { askProjection() }
     }
