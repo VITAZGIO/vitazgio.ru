@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">VG Агент</string>
+    <string name="server_hint">Адрес сайта (https://vitazgio.ru)</string>
+    <string name="token_hint">Токен агента</string>
+    <string name="start">Подключиться</string>
+    <string name="stop">Остановить</string>
+    <string name="copy_log">Скопировать журнал</string>
+    <string name="log_title">Журнал</string>
+    <string name="channel_name">Соединение с сайтом</string>
+</resources>

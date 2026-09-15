@@ -39,6 +39,7 @@ from blueprints.home import create_home_blueprint
 from blueprints.login_log import create_login_log_blueprint
 from blueprints.music import create_music_blueprint
 from blueprints.notebook import create_notebook_blueprint
+from blueprints.phone import create_phone_blueprint
 from blueprints.pwa import ICON_LINKS, create_pwa_blueprint
 from blueprints.remote import create_remote_blueprint
 
@@ -113,8 +114,16 @@ NETBIRD_DEVICES = [
     {"ip": "100.104.208.57", "name": "proxmox_vps", "ssh_enabled": True},
     {"ip": "100.104.160.121", "name": "windows10V", "rdp_enabled": True, "sftp_enabled": True},
     {"ip": "100.104.111.39", "name": "ubuntuvitaz1", "ssh_enabled": True},
-    {"ip": "100.104.86.103", "name": "MOBILA", "vnc_enabled": True},
+    # Телефон: VNC снят намеренно — туда он не работает и работать не может
+    # (нет сервера на той стороне, и пинг до телефона тоже не дойдёт).
+    # Вместо этого телефон сам приходит вебсокетом, см. blueprints/phone.py.
+    {"ip": "100.104.86.103", "name": "MOBILA", "agent_enabled": True},
 ]
+# Телефон из круга пинга исключён: у оператора CGNAT, ICMP до него не дойдёт
+# никогда, и «офлайн» от пинга затирал бы честный статус из реестра агентов
+# (blueprints/phone.py пишет его сам через _phone_publish_status).
+PHONE_AGENT_IP = "100.104.86.103"
+PING_SKIP_IPS = {PHONE_AGENT_IP}
 PING_INTERVAL_SECONDS = 10
 PING_TIMEOUT_SECONDS = 1
 PING_LATENCY_RE = re.compile(r"time[=<]\s*([\d.]+)\s*ms", re.IGNORECASE)
@@ -126,6 +135,12 @@ sftp_enabled_ips = {device["ip"] for device in NETBIRD_DEVICES
                     if device.get("ssh_enabled") or device.get("sftp_enabled")}
 
 SSH_GATE_PASSWORD_PREFIX = os.environ.get("SSH_GATE_PASSWORD_PREFIX")
+# Пароль телефонного агента: одна строка в .env, её же вбивают в приложении.
+# Не задан — вебсокет /ws/agent никого не пускает, страница просто показывает
+# MOBILA офлайн. В репозиторий токен не попадает: репозиторий публичный.
+PHONE_AGENT_TOKEN = os.environ.get("PHONE_AGENT_TOKEN")
+# Репозиторий со сборками приложения: оттуда /api/app/pull тянет свежий APK.
+PHONE_APK_REPO = os.environ.get("PHONE_APK_REPO", "VITAZGIO/vitazgio.ru")
 # Свой пароль вкладки «Долги», не связан с ежедневным паролем консоли —
 # задаётся один раз в .env и не меняется день ото дня.
 DEBTS_PASSWORD = os.environ.get("DEBTS_PASSWORD")
@@ -674,6 +689,13 @@ DEVICE_GRACE_SECONDS = 60
 trusted_devices: dict = {}
 devices_lock = threading.Lock()
 os.makedirs(DATA_DIR, exist_ok=True)
+
+# Сборки телефонного приложения. Лежат в данных, а не в образе: собирает их
+# облачный раннер и кладёт в релиз, а раздаёт сайт из Амстердама — общего
+# диска у них нет, поэтому APK приезжает сюда отдельно (/api/app/pull) и
+# переживает пересборку контейнера, как дроп и фонотека.
+PHONE_APK_DIR = os.path.join(DATA_DIR, "apk")
+os.makedirs(PHONE_APK_DIR, exist_ok=True)
 
 # ---- Музыка ----------------------------------------------------------------
 # Файлы лежат под своими именами в data/music — так их можно просто закинуть
@@ -1408,6 +1430,8 @@ def ping_once(ip):
 def netbird_ping_loop():
     while True:
         for device in NETBIRD_DEVICES:
+            if device["ip"] in PING_SKIP_IPS:
+                continue
             online, latency_ms = ping_once(device["ip"])
             with netbird_status_lock:
                 # last_seen — момент последнего успешного пинга; пока устройство
@@ -1422,6 +1446,23 @@ def netbird_ping_loop():
 
 
 threading.Thread(target=netbird_ping_loop, daemon=True).start()
+
+
+def _phone_publish_status(online, last_seen):
+    """Статус MOBILA пишет не пинг, а реестр агентов из blueprints/phone.py.
+
+    Формат тот же, что у остальных машин, — страница /netbird и её
+    `/api/netbird/status` ничего про телефон знать не обязаны. Задержки нет:
+    у вебсокета её никто не мерит, и строка покажет просто «онлайн»."""
+    with netbird_status_lock:
+        previous = netbird_status.get(PHONE_AGENT_IP, {})
+        netbird_status[PHONE_AGENT_IP] = {
+            "online": bool(online),
+            "latency_ms": None,
+            # Пока телефон офлайн, показываем момент последней связи —
+            # ровно как у машин, до которых не дошёл пинг.
+            "last_seen": last_seen or previous.get("last_seen"),
+        }
 
 
 # ---- Рекорды аркады --------------------------------------------------------
@@ -4715,6 +4756,16 @@ app.register_blueprint(create_remote_blueprint(
     guac_handshake_vnc=lambda *args, **kwargs: _guac_handshake_vnc(*args, **kwargs),
     wol_relay=lambda *args, **kwargs: _wol_relay(*args, **kwargs),
     wol_broadcasts=WOL_BROADCASTS,
+))
+
+app.register_blueprint(create_phone_blueprint(
+    sock=sock,
+    login_required=login_required,
+    agent_token=PHONE_AGENT_TOKEN,
+    agent_ip=PHONE_AGENT_IP,
+    publish_status=_phone_publish_status,
+    apk_dir=PHONE_APK_DIR,
+    apk_repo=PHONE_APK_REPO,
 ))
 
 app.register_blueprint(create_pwa_blueprint(

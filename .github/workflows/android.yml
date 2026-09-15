@@ -1,0 +1,79 @@
+name: Android agent
+
+# Сборка телефонного приложения (android/). К сайту отношения не имеет и
+# рядом с ним не собирается: правки в android/ не гоняют пересборку сайта,
+# правки сайта не гоняют сборку APK — у них общий только репозиторий.
+on:
+  push:
+    branches:
+      - main
+      - "claude/**"
+    paths:
+      - "android/**"
+      - ".github/workflows/android.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write        # нужно, чтобы положить APK в релиз
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      # Образ раннера уже несёт Android SDK, но набор платформ в нём меняется
+      # от обновления к обновлению. Ставим нужное явно — иначе сборка однажды
+      # упала бы с «platform android-35 not found» без единой правки у нас.
+      - uses: android-actions/setup-android@v3
+
+      - name: Install SDK parts
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Build debug APK
+        working-directory: android
+        # Подпись отладочная и намеренно: приложение ставится на один свой
+        # телефон, магазина в этой истории нет.
+        run: ./gradlew --no-daemon assembleDebug
+
+      - name: Name the APK by version
+        id: apk
+        run: |
+          set -e
+          code=$(grep -oE 'versionCode[[:space:]]*=[[:space:]]*[0-9]+' \
+                 android/app/build.gradle.kts | grep -oE '[0-9]+' | head -1)
+          if [ -z "$code" ]; then
+            echo "не нашёл versionCode в android/app/build.gradle.kts"
+            exit 1
+          fi
+          # Имя со сборочным номером — по нему сайт (/api/app/version) решает,
+          # есть ли что обновлять: число в имени и есть версия.
+          cp android/app/build/outputs/apk/debug/app-debug.apk "vg-agent-$code.apk"
+          echo "name=vg-agent-$code.apk" >> "$GITHUB_OUTPUT"
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vg-agent-${{ steps.apk.outputs.code }}
+          path: ${{ steps.apk.outputs.name }}
+
+      # Релиз делаем только из main: с веток они плодились бы на каждый пуш, а
+      # сайт тянет сборку именно из последнего релиза (/api/app/pull).
+      - name: Publish release
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: android-v${{ steps.apk.outputs.code }}
+          name: Агент ${{ steps.apk.outputs.code }}
+          body: |
+            Отладочная сборка телефонного агента (ступень 1: только соединение).
+            На сайте: кнопка «подтянуть» (`POST /api/app/pull`), затем `/app`.
+          files: ${{ steps.apk.outputs.name }}
+          fail_on_unmatched_files: true

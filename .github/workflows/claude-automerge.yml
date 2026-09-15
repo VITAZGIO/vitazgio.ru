@@ -35,6 +35,37 @@ jobs:
   tests:
     uses: ./.github/workflows/tests.yml
 
+  # Тронул ли пуш хоть что-то, кроме android/. Если нет — сливаем в main, но
+  # деплой не зовём: телефонное приложение к образу сайта отношения не имеет,
+  # а лишняя пересборка на VPS — это минуты простоя на ровном месте.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      site: ${{ steps.look.outputs.site }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: look
+        run: |
+          set -e
+          before="${{ github.event.before }}"
+          # Новая ветка (before — сплошные нули) или предыдущего коммита уже
+          # нет в репозитории: разбираться не в чем, считаем правку сайтовой.
+          zeros="0000000000000000000000000000000000000000"
+          if [ -z "$before" ] || [ "$before" = "$zeros" ] || ! git cat-file -e "$before^{commit}" 2>/dev/null; then
+            echo "site=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          changed=$(git diff --name-only "$before" "$GITHUB_SHA")
+          echo "$changed"
+          if echo "$changed" | grep -qvE '^android/'; then
+            echo "site=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "site=false" >> "$GITHUB_OUTPUT"
+          fi
+
   merge:
     needs: tests
     # Чистый git (clone/merge/push) — дому и Амстердаму не нужен, поэтому
@@ -75,7 +106,9 @@ jobs:
           cd "${RUNNER_TEMP:-/tmp}"
           rm -rf "$work"
 
-  # Ровно те же шаги, что и при обычном пуше в main.
+  # Ровно те же шаги, что и при обычном пуше в main. Пуш, тронувший только
+  # android/, сюда не доходит — пересобирать сайт незачем.
   deploy:
-    needs: merge
+    needs: [merge, changes]
+    if: ${{ needs.changes.outputs.site == 'true' }}
     uses: ./.github/workflows/deploy.yml

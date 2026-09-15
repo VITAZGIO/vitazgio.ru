@@ -135,6 +135,9 @@ def app_module(tmp_path_factory, fake_openrouter):
         # Без приставки суточный пароль консоли не работает вовсе («консоль
         # не настроена»), а на нём висят и терминал, и файлы по SFTP.
         "SSH_GATE_PASSWORD_PREFIX": "test-console-",
+        # Токен телефонного агента: без него /ws/agent не пускает никого,
+        # и тесты реестра проверяли бы только отказ.
+        "PHONE_AGENT_TOKEN": "test-agent-token",
         "OPENROUTER_KEY": "test-key",
         "OPENROUTER_URL": f"http://{host}:{port}/api/v1/chat/completions",
         "OPENROUTER_MODEL": "test/fake-model",

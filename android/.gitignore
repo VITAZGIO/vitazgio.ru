@@ -1,0 +1,9 @@
+# Сборочный мусор и локальные пути — в репозиторий не попадают.
+.gradle/
+build/
+local.properties
+*.apk
+*.keystore
+*.jks
+.idea/
+captures/

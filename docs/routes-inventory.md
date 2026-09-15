@@ -13,15 +13,25 @@ Baseline before blueprint split:
 
 Текущее состояние (проверяется одной строкой, а не на глаз):
 
-- Роутов сейчас: `143`. Считать так — поднять приложение и посмотреть
+- Роутов сейчас: `158`. Считать так — поднять приложение и посмотреть
   `[r for r in app.url_map.iter_rules() if r.endpoint != "static"]`.
   Число включает вебсокеты (`@sock.route` тоже попадает в `url_map`).
+  Уникальных адресов при этом `139`: один и тот же URL под GET и POST —
+  два правила в `url_map`, но одна строка в таблицах ниже встречается
+  дважды (по строке на метод), поэтому сходится.
 - 2026-09-11: +7 в разделе «files/sftp» — файловый менеджер по SFTP.
 - 2026-09-11: +1 туда же — скачивание папки zip-архивом.
 - 2026-09-11: +1 туда же — `/api/files/session` (в таблице раньше был
   пропущен, хотя в коде уже существовал).
 - 2026-09-11: +2 туда же — `/api/files/to-drop` (POST, запускает перенос)
   и `/api/files/to-drop/<job_id>` (GET, прогресс) для кнопки VG.
+- 2026-09-15: +5 — новый раздел «phone/agent» (ТЗ 1 ретранслятора):
+  `/ws/agent`, `/api/phone/agent`, `/app`, `/api/app/version`,
+  `/api/app/pull`.
+- 2026-09-15: +1 — `/servers/unlock` (в коде был давно, в таблице
+  «servers/themes/home» его пропустили). Заодно пересчитано число в шапке:
+  стояло `143`, а в коде на тот момент было `153` — таблицы всё это время
+  были полными, отставала только цифра.
 
 Guards column includes route decorators such as `login_required`, `debtor_required`,
 `music_editor_required`, plus existing domain guards where useful.
@@ -203,6 +213,7 @@ Guards column includes route decorators such as `login_required`, `debtor_requir
 | --- | --- | --- | --- |
 | `/` | `@app.route("/")` | `home` | - |
 | `/servers` | `@app.get("/servers")` | `servers_page` | - |
+| `/servers/unlock` | `@home_bp.post("/servers/unlock")` | `servers_unlock` | пароль страницы (`SERVERS_PASSWORD`) |
 | `/themes` | `@app.get("/themes")` | `themes_page` | `login_required` |
 | `/api/arcade/scores` | `@app.get("/api/arcade/scores")` | `arcade_scores_api` | - |
 | `/api/arcade/scores` | `@app.post("/api/arcade/scores")` | `arcade_score_add` | - |
@@ -270,3 +281,18 @@ Guards column includes route decorators such as `login_required`, `debtor_requir
 | `/api/files/op` | `@files_bp.post("/api/files/op")` | `files_op` | `login_required` + живое соединение |
 | `/api/files/to-drop` | `@files_bp.post("/api/files/to-drop")` | `files_to_drop` | `login_required` + живое соединение |
 | `/api/files/to-drop/<job_id>` | `@files_bp.get("/api/files/to-drop/<job_id>")` | `files_to_drop_status` | `login_required` |
+
+## phone/agent
+
+Ретранслятор телефона, ступень 1 (`blueprints/phone.py`). Телефон не может
+принимать входящие (CGNAT у оператора), поэтому приходит сам вебсокетом и
+держит его открытым; реестр живых агентов лежит в памяти процесса и он же
+красит строку MOBILA на `/netbird` — ICMP-пинг до телефона не дойдёт никогда.
+
+| URL | Decorator | Function | Guards |
+| --- | --- | --- | --- |
+| `/ws/agent` | `@sock.route("/ws/agent")` | `agent_ws` | `PHONE_AGENT_TOKEN` в первом сообщении `hello` |
+| `/api/phone/agent` | `@phone_bp.get("/api/phone/agent")` | `phone_agent_api` | `login_required` |
+| `/app` | `@phone_bp.get("/app")` | `app_apk` | `login_required` |
+| `/api/app/version` | `@phone_bp.get("/api/app/version")` | `app_version_api` | `login_required` ИЛИ заголовок `X-Agent-Token` |
+| `/api/app/pull` | `@phone_bp.post("/api/app/pull")` | `app_pull_api` | `login_required` |
