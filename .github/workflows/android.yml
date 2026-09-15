@@ -70,16 +70,25 @@ jobs:
           name: vg-agent-${{ steps.apk.outputs.code }}
           path: ${{ steps.apk.outputs.name }}
 
-      # Релиз делаем только из main: с веток они плодились бы на каждый пуш, а
-      # сайт тянет сборку именно из последнего релиза (/api/app/pull).
+      # Релиз делаем с ЛЮБОЙ ветки, и это не небрежность. Сперва условие
+      # стояло «только main», и релизов не появилось ни одного: в main
+      # пушит автослияние токеном Actions, а пуш, сделанный самим Actions,
+      # новых запусков намеренно не порождает (об этом же написано в
+      # deploy.yml). То есть на main этот workflow не запускается никогда.
+      # Ветки claude/** всё равно уезжают в main сами, так что «сборка с
+      # ветки» и «сборка main» тут одно и то же.
+      #
+      # Тег — по versionCode, поэтому пересборка того же номера обновляет
+      # тот же релиз, а не плодит новые. Сайт тянет сборку именно из
+      # последнего релиза (/api/app/pull).
       - name: Publish release
-        if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: android-v${{ steps.apk.outputs.code }}
           name: Агент ${{ steps.apk.outputs.code }}
           body: |
-            Отладочная сборка телефонного агента (ступень 1: только соединение).
-            На сайте: кнопка «подтянуть» (`POST /api/app/pull`), затем `/app`.
+            Отладочная сборка телефонного агента: оболочка-браузер с сайтом
+            внутри плюс постоянное соединение с /ws/agent.
+            На сайте: `POST /api/app/pull` (подтянуть на VPS), затем `/app`.
           files: ${{ steps.apk.outputs.name }}
           fail_on_unmatched_files: true
