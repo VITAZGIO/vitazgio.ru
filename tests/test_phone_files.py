@@ -259,6 +259,13 @@ def test_download_streams_the_file(phone_client, phone_files):
     assert resp.data == (phone_files.root / "DCIM" / "снимок.jpg").read_bytes()
     # Тип обязан остаться октетами: gzip иначе собрал бы поток в буфер.
     assert resp.headers["Content-Type"].startswith("application/octet-stream")
+    # Имя файла с кириллицей — только процентами: заголовки уходят в
+    # latin-1, и сырое русское имя роняет отдачу на кодировании (поймано
+    # живым прогоном; у архива папки этот урок был усвоен, у скачивания —
+    # нет). Проверяем сам заголовок, а не только содержимое.
+    disposition = resp.headers["Content-Disposition"]
+    assert disposition.isascii(), disposition
+    assert "%" in disposition, "русское имя обязано уехать percent-encoded"
 
 
 def test_upload_arrives_in_chunks(phone_client, phone_files):

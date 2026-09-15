@@ -828,12 +828,18 @@ def create_files_blueprint(
                         pass
 
         name = posixpath.basename(path) or "file"
-        quoted = name.encode("utf-8", "ignore").decode("latin-1", "ignore")
+        # Заголовки уходят в latin-1, поэтому имя с кириллицей нельзя ставить
+        # в них как есть: сервер падает на кодировании, и скачивание рвётся
+        # без единого понятного слова (поймано живым прогоном на файле
+        # «снимок.jpg»). filename* по RFC 5987 обязан быть percent-encoded,
+        # а простой filename оставляем запасным — для старых браузеров.
+        plain = name.encode("ascii", "ignore").decode("ascii") or "file"
+        quoted = urllib.parse.quote(name, safe="")
         # application/octet-stream не входит в GZIP_TYPES, поэтому after_request
         # его не тронет — поток уедет как есть, без сбора в буфер.
         return Response(stream(), mimetype="application/octet-stream", headers={
             "Content-Length": str(size),
-            "Content-Disposition": f"attachment; filename=\"{quoted}\"; filename*=UTF-8''{name}",
+            "Content-Disposition": f"attachment; filename=\"{plain}\"; filename*=UTF-8''{quoted}",
             "Cache-Control": "private, no-store",
         })
 
