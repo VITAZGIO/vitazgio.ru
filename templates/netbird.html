@@ -249,6 +249,7 @@
           <div class="rdp-header-actions">
             <button id="rdp-toolbar-toggle" class="term-close" type="button" hidden>☰</button>
             <button id="rdp-touch-toggle" class="term-close" type="button" hidden>Touchpad</button>
+            <button id="rdp-full" class="term-close" type="button" title="Во весь экран">⛶</button>
             <button id="rdp-close" class="term-close" type="button">Закрыть</button>
           </div>
         </div>
@@ -560,6 +561,7 @@
           const rdpTitleEl = document.getElementById("rdp-title");
           const rdpDisplay = document.getElementById("rdp-display");
           const rdpCloseBtn = document.getElementById("rdp-close");
+          const rdpFullBtn = document.getElementById("rdp-full");
           let rdpClient = null;
           let rdpKeyboard = null;
           let toolbarAbort = null;
@@ -680,7 +682,17 @@
             requestAnimationFrame(() => rdpLoginUsername.focus());
           };
 
+          // Fullscreen — на весь оверлей (заголовок, картинка, тулбар разом),
+          // не только на картинку: как в видео на Youtube, только своя
+          // кнопка вместо системной (плеер её сам не даёт). Прячет ещё и
+          // адресную строку браузера, не только раздвигает окно.
+          rdpFullBtn.addEventListener("click", () => {
+            if (document.fullscreenElement) { document.exitFullscreen().catch(() => {}); return; }
+            if (rdpOverlay.requestFullscreen) rdpOverlay.requestFullscreen().catch(() => {});
+          });
+
           const closeRdp = () => {
+            if (document.fullscreenElement === rdpOverlay) document.exitFullscreen().catch(() => {});
             rdpOverlay.hidden = true;
             rdpOverlay.style.height = "";
             rdpOverlay.style.top = "";

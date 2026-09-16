@@ -90,6 +90,31 @@ class TouchService : AccessibilityService() {
         }
     }
 
+    /** Зажать и повести пальцем — как выделяют текст на самом телефоне.
+     *  Один Path не умеет паузу сам по себе: держим «точку» на месте
+     *  holdMs (это и есть долгое нажатие, которым Android входит в режим
+     *  выделения), потом continueStroke() ведёт ТЕМ ЖЕ пальцем, без
+     *  отрыва, до конечной точки за dragMs. Раздельно (long, потом swipe)
+     *  не работает — это будут два разных касания, и выделение снимется
+     *  между ними. */
+    fun select(x: Double, y: Double, x2: Double, y2: Double, holdMs: Long, dragMs: Long): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return false
+        val startX = px(x, width())
+        val startY = px(y, height())
+        val hold = holdMs.coerceIn(300L, 2000L)
+        val drag = dragMs.coerceIn(80L, 2000L)
+        val dot = Path().apply { moveTo(startX, startY) }
+        val move = Path().apply { moveTo(startX, startY); lineTo(px(x2, width()), px(y2, height())) }
+        val first = GestureDescription.StrokeDescription(dot, 0, hold, true)
+        val second = first.continueStroke(move, hold, drag, false)
+        return try {
+            dispatchGesture(GestureDescription.Builder().addStroke(second).build(), null, null)
+        } catch (e: Exception) {
+            AgentLog.add(this, "жест выделения не прошёл: ${e.message}")
+            false
+        }
+    }
+
     /** «Назад», «Домой», «Недавние» — это не жесты, а системные действия:
      *  тыкать в их места на экране было бы гаданием. */
     fun key(name: String): Boolean {

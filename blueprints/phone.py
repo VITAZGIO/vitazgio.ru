@@ -726,6 +726,11 @@ def create_phone_blueprint(
                         "x2": float(payload.get("x2") or 0),
                         "y2": float(payload.get("y2") or 0),
                         "ms": int(payload.get("ms") or 0),
+                        # Второй штрих зажатия-с-протяжкой (выделение текста,
+                        # action "select"): ms — сколько держали на месте,
+                        # ms2 — сколько потом длилась протяжка. У остальных
+                        # действий не используется, просто едет нулём.
+                        "ms2": int(payload.get("ms2") or 0),
                         "name": str(payload.get("name") or "")[:16],
                         "text": str(payload.get("text") or "")[:500],
                     })

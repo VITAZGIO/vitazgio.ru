@@ -493,6 +493,21 @@ def test_touch_travels_to_the_phone(phone_bp):
         if isinstance(m, str) and json.loads(m).get("type") == "touch"
     ))
 
+    # Зажатие-с-протяжкой (выделение текста) — два тайминга, не один: ms
+    # держат на месте, ms2 — сама протяжка после. Раздельным long+swipe это
+    # на телефоне не сделать (см. TouchService.kt.select) — два разных
+    # касания, а не одно, и выделение снимется между ними.
+    viewer.push({"type": "touch", "action": "select",
+                 "x": 0.2, "y": 0.4, "x2": 0.2, "y2": 0.6, "ms": 500, "ms2": 200})
+    assert _wait(lambda: any(
+        json.loads(m).get("action") == "select" for m in agent.sent
+        if isinstance(m, str) and json.loads(m).get("type") == "touch"
+    ))
+    select_msg = [json.loads(m) for m in agent.sent
+                  if isinstance(m, str) and json.loads(m).get("type") == "touch"
+                  and json.loads(m).get("action") == "select"][0]
+    assert select_msg["ms"] == 500 and select_msg["ms2"] == 200
+
     viewer.close()
     viewer_thread.join(3)
     agent.close()

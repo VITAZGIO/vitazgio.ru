@@ -339,6 +339,16 @@ class AgentService : Service() {
                 payload.optDouble("y2", 0.0),
                 payload.optLong("ms", 0L),
             )
+            // Зажали и повели пальцем — выделение текста, как на самом
+            // телефоне. ms — сколько держали на месте, ms2 — сама протяжка.
+            "select" -> touch.select(
+                payload.optDouble("x", 0.0),
+                payload.optDouble("y", 0.0),
+                payload.optDouble("x2", 0.0),
+                payload.optDouble("y2", 0.0),
+                payload.optLong("ms", 0L),
+                payload.optLong("ms2", 0L),
+            )
             "key" -> touch.key(payload.optString("name"))
             "text" -> touch.type(payload.optString("text"))
             "backspace" -> touch.backspace()

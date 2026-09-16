@@ -49,8 +49,34 @@
         .vol { width: 110px; accent-color: var(--ac); }
         .vol[disabled] { opacity: .35; }
         /* Пока управление включено, курсор над картинкой — прицел, а не
-           стрелка: видно, что клик уйдёт в телефон. */
-        canvas.ruling { cursor: crosshair; }
+           стрелка: видно, что клик уйдёт в телефон. Свой маленький крестик
+           картинкой, не системный cursor:crosshair — тот на многих
+           системах рисуется огромным на весь экран. */
+        canvas.ruling {
+          cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18"><path d="M9 1.5v5M9 11.5v5M1.5 9h5M11.5 9h5" stroke="%2369e8ff" stroke-width="1.6" stroke-linecap="round"/></svg>') 9 9, crosshair;
+        }
+
+        /* Во весь экран (кнопка "Во весь экран" на /phone, requestFullscreen
+           у #stage целиком, не только у canvas — иначе оверлейные кнопки
+           поверх картинки показать было бы нечем: Fullscreen API рисует
+           только то, что лежит ВНУТРИ элемента, ушедшего в fullscreen). */
+        .stage.is-full { background: #000; border: none; }
+        .stage.is-full canvas { max-width: 100vw; max-height: 100svh; width: auto; height: 100svh; }
+        /* Колонка "Назад/Домой/Недавние" — замена нижней панели кнопок,
+           которая в fullscreen не видна (она вне #stage). Показываем только
+           на узких/тач-экранах: на ПК из fullscreen выходят по Esc и жмут
+           обычную панель под картинкой. */
+        .nav-col { display: none; position: absolute; right: 0; top: 50%; z-index: 6;
+                   transform: translateY(-50%); flex-direction: column;
+                   background: color-mix(in srgb, #0d1321 82%, transparent);
+                   border-radius: 22px 0 0 22px; overflow: hidden;
+                   box-shadow: -6px 0 20px rgba(0,0,0,.5); }
+        .stage.is-full-mobile .nav-col:not([hidden]) { display: flex; }
+        .nav-col button { width: 50px; height: 50px; display: grid; place-items: center;
+                          color: #dfe8ff; font-size: 1.2rem; border: none; padding: 0;
+                          background: transparent; border-bottom: 1px solid rgba(255,255,255,.1); }
+        .nav-col button:last-child { border-bottom: none; }
+        .nav-col button:active { background: color-mix(in srgb, var(--ac) 28%, transparent); }
         .state { margin-left: auto; color: #8b93a6; font-size: .78rem; }
         .state b { color: #63f5ad; font-weight: 700; }
         .state b.off { color: #ff6b81; }
@@ -92,9 +118,19 @@
           </div>
         </header>
 
-        <div class="stage">
+        <div class="stage" id="stage">
           <canvas id="screen" hidden></canvas>
           <p class="idle" id="idle">Картинки пока нет.<br>Нажми «Показать экран» и подтверди запрос на телефоне.</p>
+          <!-- Во весь экран на телефоне снизу панель с "Назад/Домой/Недавние"
+               не видна (она вне .stage, а Fullscreen API показывает только
+               содержимое самого fullscreen-элемента) — эта колонка её
+               подменяет, пока и управление включено, и мы в полноэкранном
+               режиме на узком экране (см. setRuling/fullscreenchange). -->
+          <div class="nav-col" id="navCol" hidden>
+            <button type="button" data-key="back" aria-label="Назад">←</button>
+            <button type="button" data-key="home" aria-label="Домой">⌂</button>
+            <button type="button" data-key="recents" aria-label="Недавние">▤</button>
+          </div>
         </div>
 
         <div class="bar">
@@ -172,8 +208,10 @@
           requestAnimationFrame(() => input.focus());
         });
 
+        const stageEl = document.getElementById("stage");
         const canvas = document.getElementById("screen");
         const idle = document.getElementById("idle");
+        const navCol = document.getElementById("navCol");
         const goBtn = document.getElementById("go");
         const haltBtn = document.getElementById("halt");
         const fullBtn = document.getElementById("full");
@@ -487,13 +525,36 @@
         let ruling = false;
         let press = null;
 
+        // Телефон/тач-экран — свои: там нет клавиши Esc, чтобы просто выйти
+        // из fullscreen и дотянуться до обычной панели под картинкой, ей на
+        // замену и нужна колонка navCol. На ПК её незачем показывать —
+        // выходят по Esc и жмут panel как обычно.
+        const isMobileView = () => window.innerWidth <= 900 || navigator.maxTouchPoints > 0
+          || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
         const setRuling = (on) => {
           ruling = on;
           keysBar.hidden = !on;
+          navCol.hidden = !(on && stageEl.classList.contains("is-full-mobile"));
           canvas.classList.toggle("ruling", on);
+          // Иначе следующий же пробел или Enter активируют не телефон, а ТУ
+          // же самую галочку/кнопку на сайте, за которой осталась фокусировка
+          // клавиатуры (например, погасит управление, которое сам и включил).
+          if (on && document.activeElement && document.activeElement.blur) {
+            try { document.activeElement.blur(); } catch {}
+          }
           uiToast(on ? "Управление включено" : "Управление выключено", on ? "ok" : "");
         };
         ruleBox.addEventListener("change", () => setRuling(ruleBox.checked));
+
+        document.addEventListener("fullscreenchange", () => {
+          const full = document.fullscreenElement === stageEl;
+          stageEl.classList.toggle("is-full", full);
+          stageEl.classList.toggle("is-full-mobile", full && isMobileView());
+          navCol.hidden = !(ruling && stageEl.classList.contains("is-full-mobile"));
+          if (full) fullBtn.textContent = "Свернуть";
+          else fullBtn.textContent = "Во весь экран";
+        });
 
         const spot = (event) => {
           const box = canvas.getBoundingClientRect();
@@ -514,9 +575,19 @@
           if (!ruling) return;
           const at = spot(event);
           if (!at) return;
-          press = { ...at, at: performance.now() };
+          press = { ...at, at: performance.now(), movedAt: null };
           canvas.setPointerCapture(event.pointerId);
           event.preventDefault();
+        });
+
+        // Момент, когда палец реально сдвинулся с места (не дрогнул), а не
+        // конечная точка при отпускании — по нему отличаем «зажать и вести»
+        // (выделение текста, как на самом телефоне) от быстрого свайпа.
+        canvas.addEventListener("pointermove", (event) => {
+          if (!ruling || !press || press.movedAt) return;
+          const at = spot(event);
+          if (!at) return;
+          if (Math.hypot(at.x - press.x, at.y - press.y) > 0.015) press.movedAt = performance.now();
         });
 
         canvas.addEventListener("pointerup", (event) => {
@@ -524,9 +595,18 @@
           const at = spot(event);
           const held = performance.now() - press.at;
           const moved = at ? Math.hypot(at.x - press.x, at.y - press.y) : 0;
-          // Что это было, решаем по следу: увело в сторону — свайп,
-          // задержали на месте — долгое нажатие, иначе обычный тычок.
-          if (at && moved > 0.03) {
+          const heldBeforeMove = press.movedAt ? press.movedAt - press.at : held;
+          // Что это было, решаем по следу: постояли на месте и ПОТОМ повели
+          // пальцем в сторону — зажатие с протяжкой (выделение текста, как на
+          // самом телефоне; TouchService.kt держит стоячий штрих на heldMs,
+          // потом тем же «пальцем» без отрыва ведёт до конца). Увело сразу,
+          // без паузы, — обычный свайп. Никуда не увело — долгое нажатие
+          // или тычок.
+          if (at && moved > 0.03 && heldBeforeMove > 420) {
+            touch({ action: "select", x: press.x, y: press.y, x2: at.x, y2: at.y,
+                    ms: Math.round(Math.min(1200, Math.max(420, heldBeforeMove))),
+                    ms2: Math.round(Math.min(1200, Math.max(90, held - heldBeforeMove))) });
+          } else if (at && moved > 0.03) {
             touch({ action: "swipe", x: press.x, y: press.y, x2: at.x, y2: at.y,
                     ms: Math.round(Math.min(600, Math.max(120, held))) });
           } else if (held > 500) {
@@ -554,22 +634,29 @@
                   x2: at.x, y2: Math.min(0.95, Math.max(0.05, at.y + step)), ms: 180 });
         }, { passive: false });
 
-        keysBar.addEventListener("click", (event) => {
+        const keyClick = (event) => {
           const button = event.target.closest("[data-key]");
           if (!button) return;
           touch({ action: "key", name: button.dataset.key });
-        });
+        };
+        keysBar.addEventListener("click", keyClick);
+        navCol.addEventListener("click", keyClick);
 
         document.addEventListener("keydown", (event) => {
           if (!ruling) return;
           if (event.target && /^(INPUT|TEXTAREA)$/.test(event.target.tagName)) return;
           if (event.key === "Escape") { touch({ action: "key", name: "back" }); return; }
           if (event.key === "Backspace") { touch({ action: "backspace" }); event.preventDefault(); return; }
-          if (event.key === "Enter") { touch({ action: "text", text: "\n" }); return; }
+          if (event.key === "Enter") { touch({ action: "text", text: "\n" }); event.preventDefault(); return; }
           // Печатаем только настоящие символы: сочетания с Ctrl/Alt — это
           // команды браузера, им на телефоне делать нечего.
           if (event.key.length === 1 && !event.ctrlKey && !event.altKey && !event.metaKey) {
             touch({ action: "text", text: event.key });
+            // Без этого пробел на сфокусированной кнопке/галочке сайта (а не
+            // на телефоне) браузер трактует как её нажатие — гасла та же
+            // самая галочка «управление», которую сам и включил, посреди
+            // набора текста. Enter выше — по той же причине.
+            event.preventDefault();
           }
         });
 
@@ -579,7 +666,8 @@
         });
         haltBtn.addEventListener("click", () => ask("stop"));
         fullBtn.addEventListener("click", () => {
-          if (canvas.requestFullscreen) canvas.requestFullscreen().catch(() => {});
+          if (document.fullscreenElement) { document.exitFullscreen().catch(() => {}); return; }
+          if (stageEl.requestFullscreen) stageEl.requestFullscreen().catch(() => {});
         });
 
         setInterval(() => {
