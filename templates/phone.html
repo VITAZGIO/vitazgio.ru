@@ -194,6 +194,11 @@
 
         let socket = null;
         let decoder = null;
+        // SPS/PPS сами по себе — не кадр, decode() их отдельно не проглотит
+        // (ровно это и роняло декодер — см. историю правки 2026-09-16):
+        // приклеиваем к байтам первого настоящего опорного кадра и скармливаем
+        // одним куском, как Annex-B и ждёт.
+        let pendingSps = null;
         let frames = 0;
         let lastCount = performance.now();
 
@@ -251,9 +256,11 @@
             codec: codecFromConfig(config),
             optimizeForLatency: true,
           });
-          decoder.decode(new EncodedVideoChunk({
-            type: "key", timestamp: 0, data: config,
-          }));
+          // Сам config decode() не зовём: SPS/PPS без единого куска картинки —
+          // не валидный кадр, декодер на нём падает (был баг — decodeErr рос
+          // ровно один раз и дальше декодер молча стоял мёртвым). Ждём
+          // первый настоящий опорный кадр в onBinary и клеим байты к нему.
+          pendingSps = config;
         };
 
         const stopDecoder = () => {
@@ -314,11 +321,21 @@
             return;
           }
           if (!decoder || decoder.state !== "configured") return;
+          let data = payload;
+          if (kind === 2 && pendingSps) {
+            // Первый опорный после свежего config — единственное место,
+            // где SPS/PPS вообще можно скормить декодеру: приклеиваем
+            // байты перед картинкой одним Annex-B куском.
+            data = new Uint8Array(pendingSps.length + payload.length);
+            data.set(pendingSps, 0);
+            data.set(payload, pendingSps.length);
+            pendingSps = null;
+          }
           try {
             decoder.decode(new EncodedVideoChunk({
               type: kind === 2 ? "key" : "delta",
               timestamp: stamp,
-              data: payload,
+              data,
             }));
           } catch (e) {
             // Разностный кадр без опорного — не беда: просим опорный и ждём.

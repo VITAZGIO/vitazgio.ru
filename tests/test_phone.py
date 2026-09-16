@@ -378,6 +378,39 @@ def test_late_viewer_gets_config_and_a_fresh_keyframe(phone_bp):
     agent_thread.join(3)
 
 
+def test_key_request_resends_cached_config_mid_stream(phone_bp):
+    """Браузер просит опорный кадр не только при подключении — ещё и когда
+    его собственный декодер споткнулся посреди уже идущей трансляции (см.
+    templates/phone.html). Без свежего SPS/PPS в этот момент он себя не
+    соберёт: одного «телефон, дай опорный» мало, сервер обязан прислать
+    кэшированный config зрителю заново сам."""
+    agent = FakeWs([_hello()])
+    agent_thread = _run(phone_bp, agent)
+    assert _wait(lambda: phone_bp.agent_snapshot()["online"])
+    agent.push({"type": "screen-state", "running": True, "width": 720, "height": 1600})
+    assert _wait(lambda: phone_bp.screen_snapshot()["running"])
+    agent.inbox.put(_frame(1, b"sps-pps"))
+
+    viewer = FakeWs()
+    viewer_thread = _viewer(phone_bp, viewer)
+    assert _received(viewer, 1), "зритель обязан получить параметры кодека"
+
+    def _config_count():
+        return sum(1 for item in viewer.sent
+                    if isinstance(item, (bytes, bytearray)) and item[:1] == bytes([1]))
+
+    assert _wait(lambda: _config_count() == 1)
+
+    viewer.push({"type": "key"})
+    assert _wait(lambda: "screen-key" in agent.types())
+    assert _wait(lambda: _config_count() == 2), "config обязан прийти второй раз"
+
+    viewer.close()
+    viewer_thread.join(3)
+    agent.close()
+    agent_thread.join(3)
+
+
 def test_viewer_without_agent_is_told_the_truth(phone_bp):
     assert phone_bp.agent_snapshot()["online"] is False
     viewer = FakeWs()

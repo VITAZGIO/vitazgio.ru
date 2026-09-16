@@ -696,6 +696,17 @@ def create_phone_blueprint(
                 elif kind == "stop":
                     _agent_send({"type": "screen-stop"})
                 elif kind == "key":
+                    # Не только просим у телефона опорный кадр, но и сами
+                    # досылаем зрителю кэшированный config: декодер в браузере
+                    # просит опорный именно потому, что у него что-то
+                    # сломалось (см. templates/phone.html), а без свежего
+                    # SPS/PPS он себя не соберёт заново — без этой строки
+                    # экран замирал бы навсегда после первой же ошибки
+                    # декодирования посреди трансляции, не только в начале.
+                    with screen_lock:
+                        config = screen["config"]
+                    if config:
+                        _viewer_put(viewer, config)
                     viewer["need_key"] = True
                     _agent_send({"type": "screen-key"})
                 elif kind == "audio":
