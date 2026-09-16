@@ -10,6 +10,7 @@ mesh-сети, ни второго набора секретов — тольк�
 дольше SFTP_IDLE_SECONDS закрывается сам.
 """
 
+import hmac
 import mimetypes
 import os
 import posixpath
@@ -253,6 +254,8 @@ def create_files_blueprint(
     drop_download_id,
     phone_fs=None,
     phone_ip=None,
+    phone_files_user=None,
+    phone_files_password=None,
 ):
     files_bp = Blueprint("files", __name__)
 
@@ -260,6 +263,24 @@ def create_files_blueprint(
         """Телефон ходит не по SSH: под той же страницей у него свой
         транспорт — команды агенту в его же сокет."""
         return bool(phone_ip) and ip == phone_ip and phone_fs is not None
+
+    def _phone_login_ok(username, password):
+        """Проверить пару логин/пароль перед файлами телефона.
+
+        SSH на телефоне нет, сверять их не с чем — это просто своя пара
+        секретов из `.env`, отдельная от токена агента (тот пускает сам
+        ТЕЛЕФОН на сайт, этот — ЧЕЛОВЕКА к файлам телефона). Не заданы на
+        сервере — отказ всем, а не пропуск: закрыто по умолчанию."""
+        if not phone_files_user or not phone_files_password:
+            return False
+        if not isinstance(username, str) or not isinstance(password, str):
+            return False
+        # Байтами, не строками: compare_digest на кириллице падает TypeError
+        # вместо честного «не подошло», если её вдруг вписали в .env.
+        return (
+            hmac.compare_digest(username.encode("utf-8"), str(phone_files_user).encode("utf-8"))
+            and hmac.compare_digest(password.encode("utf-8"), str(phone_files_password).encode("utf-8"))
+        )
 
     # token -> {"client", "sftp", "ip", "user", "used", "io_lock"}
     live = {}
@@ -646,9 +667,9 @@ def create_files_blueprint(
     # ---- Страница -----------------------------------------------------------
 
     def _agent_entry():
-        """Живое «соединение» с телефоном. Пароля тут нет и быть не может:
-        SSH на телефоне нет, а гейт — суточный пароль консоли, как и у
-        остальных машин."""
+        """Живое «соединение» с телефоном — сам разговор с агентом. Проверка
+        пары логин/пароль (`_phone_login_ok`) стоит ДО этого вызова, в
+        `/api/files/connect`; сюда попадают, только когда она уже пройдена."""
         backend = AgentBackend(phone_fs)
         home = backend.normalize(".")
         _drop_current()
@@ -668,19 +689,14 @@ def create_files_blueprint(
     def files_page(ip):
         if ip not in sftp_enabled_ips:
             return "Для этой машины файлы недоступны.", 404
-        # Телефону логин спрашивать не у кого, поэтому соединение поднимаем
-        # прямо здесь — страница сама увидит его через /api/files/session и
-        # пропустит карточку логина (тот же путь, что и у кнопки «Файлы» в
-        # оверлее RDP). Суточный пароль при этом обязателен, как и везде.
-        if _is_phone(ip) and session.get("console_authenticated") and phone_fs.online:
-            try:
-                _agent_entry()
-            except Exception:
-                pass              # не поднялось — страница спросит как обычно
+        # Телефон соединение сам не поднимает: у него свой логин/пароль из
+        # .env (`_phone_login_ok`), их вводят карточкой, как SSH у обычных
+        # машин — просто сверяются они не с самим телефоном, а с сервером.
         html = template("files.html")
         return (html.replace("{{IP}}", ip)
                     .replace("{{NAME}}", _device_name(ip))
                     .replace("{{NEED_CONSOLE}}", "" if session.get("console_authenticated") else "1")
+                    .replace("{{IS_PHONE}}", "1" if _is_phone(ip) else "")
                     .replace("__ICONLINKS__", icon_links))
 
     # ---- Соединение ---------------------------------------------------------
@@ -699,8 +715,12 @@ def create_files_blueprint(
             return jsonify(error="Неизвестная машина."), 400
 
         if _is_phone(ip):
-            # Телефон: ни логина, ни пароля — SSH там нет. Что вбито в поля
-            # карточки, значения не имеет, и придумывать туда пароль не надо.
+            # SSH на телефоне нет — сверяем не с самим устройством, а со
+            # своей парой логин/пароль из .env (`PHONE_FILES_USER` /
+            # `PHONE_FILES_PASSWORD`). Отдельно от токена агента: тот пускает
+            # ТЕЛЕФОН на сайт, этот — ЧЕЛОВЕКА к его файлам.
+            if not _phone_login_ok(username, password):
+                return jsonify(error="Логин или пароль не подошли."), 401
             if not phone_fs.online:
                 return jsonify(error="Телефон не на связи."), 502
             try:

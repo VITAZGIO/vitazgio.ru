@@ -138,6 +138,9 @@ def app_module(tmp_path_factory, fake_openrouter):
         # Токен телефонного агента: без него /ws/agent не пускает никого,
         # и тесты реестра проверяли бы только отказ.
         "PHONE_AGENT_TOKEN": "test-agent-token",
+        # Отдельный гейт перед файлами телефона (не SSH — его там нет).
+        "PHONE_FILES_USER": "test-phone-user",
+        "PHONE_FILES_PASSWORD": "test-phone-password",
         "OPENROUTER_KEY": "test-key",
         "OPENROUTER_URL": f"http://{host}:{port}/api/v1/chat/completions",
         "OPENROUTER_MODEL": "test/fake-model",

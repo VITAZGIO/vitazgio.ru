@@ -22,6 +22,8 @@ import pytest
 
 PHONE_IP = "100.104.86.103"
 AGENT_TOKEN = "test-agent-token"
+FILES_USER = "test-phone-user"
+FILES_PASSWORD = "test-phone-password"
 
 FRAME_FILE = 4
 
@@ -214,13 +216,20 @@ def phone_files(app_module):
 
 @pytest.fixture
 def phone_client(auth_client, phone_files):
-    """Хозяин, вошедший и в кабинет, и в консоль: тот же гейт, что у SFTP.
+    """Хозяин, вошедший и в кабинет, и в консоль, и в файлы телефона:
+    соединение больше не поднимается само — прогоняем ту же карточку
+    логина, что видит страница (`/api/files/connect`), своей парой
+    секретов из .env (см. `tests/conftest.py`), а не токеном агента.
 
     Берём готовый `auth_client` из conftest, а не импортируем оттуда пароль:
     `tests` — не пакет, и такой импорт живёт только пока корень репозитория
     случайно оказался в sys.path (у себя работал, в CI — нет)."""
     with auth_client.session_transaction() as session:
         session["console_authenticated"] = True
+    resp = auth_client.post("/api/files/connect", json={
+        "ip": PHONE_IP, "username": FILES_USER, "password": FILES_PASSWORD,
+    })
+    assert resp.status_code == 200, resp.data
     return auth_client
 
 
@@ -231,10 +240,31 @@ def test_phone_now_has_a_files_page(phone_client):
     assert "MOBILA" in resp.get_data(as_text=True)
 
 
-def test_page_opens_without_asking_for_a_password(phone_client):
-    """SSH на телефоне нет — спрашивать логин не у кого, и страница его не
-    спросит: соединение поднято сервером, /api/files/session его видит."""
-    phone_client.get(f"/files/{PHONE_IP}")
+def test_page_no_longer_connects_by_itself(auth_client, phone_files):
+    """Открыть страницу мало: соединение больше не поднимается тихо, даже
+    с верным суточным паролем консоли — нужна отдельная пара логин/пароль
+    файлов телефона (см. test_wrong_phone_password_is_refused ниже)."""
+    with auth_client.session_transaction() as session:
+        session["console_authenticated"] = True
+    auth_client.get(f"/files/{PHONE_IP}")
+    data = auth_client.get("/api/files/session").get_json()
+    assert data["connected"] is False
+
+
+def test_wrong_phone_password_is_refused(auth_client, phone_files):
+    """Пароль от .env, не суточный пароль консоли и не что попало."""
+    with auth_client.session_transaction() as session:
+        session["console_authenticated"] = True
+    resp = auth_client.post("/api/files/connect", json={
+        "ip": PHONE_IP, "username": FILES_USER, "password": "не то",
+    })
+    assert resp.status_code == 401
+    assert auth_client.get("/api/files/session").get_json()["connected"] is False
+
+
+def test_right_phone_password_connects(phone_client):
+    """`phone_client` уже прошёл этот вход в своей фикстуре — здесь просто
+    проверяем, что сессия его действительно запомнила."""
     data = phone_client.get("/api/files/session").get_json()
     assert data["connected"] is True
     assert data["ip"] == PHONE_IP
