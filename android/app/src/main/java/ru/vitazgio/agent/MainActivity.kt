@@ -81,13 +81,6 @@ class MainActivity : AppCompatActivity(), WebBridge.Host {
     private var failed = false
     private lateinit var projectionAsk: ActivityResultLauncher<Intent>
 
-    private val strip = object : Runnable {
-        override fun run() {
-            views.strip.text = stripText()
-            ui.postDelayed(this, 1000)
-        }
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         views = ActivityMainBinding.inflate(layoutInflater)
@@ -129,14 +122,6 @@ class MainActivity : AppCompatActivity(), WebBridge.Host {
         setupWeb(views.web)
         views.web.addJavascriptInterface(WebBridge(this), WebBridge.NAME)
         views.retry.setOnClickListener { reload() }
-
-        // Полоска состояния — единственное, что оболочка рисует поверх сайта.
-        // Долгий тычок открывает служебный экран с журналом: без него
-        // разбирать ночные обрывы было бы не по чему.
-        views.strip.setOnLongClickListener {
-            startActivity(Intent(this, AgentActivity::class.java))
-            true
-        }
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
@@ -182,7 +167,6 @@ class MainActivity : AppCompatActivity(), WebBridge.Host {
     override fun onResume() {
         super.onResume()
         live = this
-        ui.post(strip)
     }
 
     override fun onStop() {
@@ -205,7 +189,6 @@ class MainActivity : AppCompatActivity(), WebBridge.Host {
     }
 
     override fun onPause() {
-        ui.removeCallbacks(strip)
         // Без flush() сессия слетала бы при каждом убийстве процесса: куки
         // остаются в памяти WebView и на диск сами не ложатся.
         CookieManager.getInstance().flush()
@@ -430,17 +413,6 @@ class MainActivity : AppCompatActivity(), WebBridge.Host {
         views.offline.visibility = if (why == null) View.GONE else View.VISIBLE
         if (why != null) views.offlineWhy.text = why
         if (why == null) failed = false
-    }
-
-    private fun stripText(): String {
-        val status = AgentState.status
-        val since = AgentState.connectedSince
-        return if (since > 0) {
-            val minutes = (System.currentTimeMillis() - since) / 60000
-            "агент: $status · $minutes мин"
-        } else {
-            "агент: $status"
-        }
     }
 
     // ---- WebBridge.Host -----------------------------------------------------

@@ -29,6 +29,7 @@ from flask_sock import Sock
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from blueprints.ai import create_ai_blueprint
+from blueprints.apps import create_apps_blueprint
 from blueprints.backup_sebastian import create_backup_sebastian_blueprint
 from blueprints.debts import create_debts_blueprint
 from blueprints.devices import create_devices_blueprint
@@ -4781,6 +4782,12 @@ app.register_blueprint(create_remote_blueprint(
     guac_handshake_vnc=lambda *args, **kwargs: _guac_handshake_vnc(*args, **kwargs),
     wol_relay=lambda *args, **kwargs: _wol_relay(*args, **kwargs),
     wol_broadcasts=WOL_BROADCASTS,
+))
+
+app.register_blueprint(create_apps_blueprint(
+    template=_template,
+    icon_links=ICON_LINKS,
+    login_required=login_required,
 ))
 
 app.register_blueprint(create_pwa_blueprint(

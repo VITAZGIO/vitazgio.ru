@@ -1,0 +1,312 @@
+
+    <!DOCTYPE html>
+    <html lang="ru">
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <meta name="robots" content="noindex, nofollow">
+      <title>Приложения · vitazgio.ru</title>
+      __ICONLINKS__
+      <style>
+        :root { --ac: #f97316; }
+        * { box-sizing: border-box; }
+        body { margin: 0; min-height: 100svh; color: #e9fbff; font-family: "Cascadia Code", Consolas, monospace; background: radial-gradient(circle at top left, #192a44, #0d1321 55%); }
+        [hidden] { display: none !important; }
+        a { color: inherit; }
+        .wrap { max-width: 760px; margin: 0 auto; padding: clamp(24px, 4vw, 54px); }
+        .head { display: flex; align-items: center; gap: 18px; margin-bottom: 26px; }
+        .back { width: 44px; height: 44px; flex: none; display: grid; place-items: center;
+          color: var(--ac); text-decoration: none; border: 1px solid color-mix(in srgb, var(--ac) 35%, transparent); border-radius: 50%;
+          background: color-mix(in srgb, var(--ac) 8%, transparent); transition: all .18s; }
+        .back:hover { color: #fff; border-color: var(--ac); background: color-mix(in srgb, var(--ac) 20%, transparent); }
+        .back svg { width: 20px; height: 20px; display: block; }
+        .head-ic { width: 52px; height: 52px; flex: none; display: grid; place-items: center; }
+        .head-ic svg { width: 100%; height: 100%; }
+        h1 { margin: 0; font-size: clamp(1.7rem, 3.6vw, 2.4rem); font-weight: 700; letter-spacing: -.02em;
+             color: #eaf6ff; text-shadow: 0 0 22px color-mix(in srgb, var(--ac) 35%, transparent); }
+        .sub { margin: 3px 0 0; color: #8b93a6; font-size: .84rem; }
+
+        .panel { border: 1px solid color-mix(in srgb, var(--ac) 22%, transparent); background: rgba(16,24,40,.55); margin-bottom: 18px; }
+        .panel h2 { margin: 0; padding: 16px 18px 2px; font-size: .74rem; color: var(--ac); text-transform: uppercase; letter-spacing: .08em; }
+        .panel-body { padding: 12px 18px 18px; }
+        .panel-note { margin: 0 0 14px; color: #6b7385; font-size: .78rem; line-height: 1.5; }
+        .empty { padding: 6px 0 4px; color: #6b7385; font-size: .82rem; }
+
+        .phone-row { display: flex; align-items: center; gap: 12px; padding: 6px 0 14px; flex-wrap: wrap; }
+        .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; background: #4a5060; box-shadow: 0 0 0 3px rgba(74,80,96,.2); }
+        .dot.on { background: #63f5ad; box-shadow: 0 0 0 3px rgba(99,245,173,.22); }
+        .phone-name { font-weight: 700; color: #eaf6ff; }
+        .phone-status { color: #8b93a6; font-size: .82rem; }
+        .phone-status.on { color: #63f5ad; }
+
+        .ver-row { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 0 0 14px; color: #8b93a6; font-size: .8rem; }
+        .ver-row b { color: #c4cad5; }
+        .ver-row .stale { color: #ffb37a; }
+
+        .bar { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 4px; }
+        .btn { padding: 9px 14px; color: var(--ac); font: 700 .74rem "Cascadia Code", Consolas, monospace;
+               text-transform: uppercase; letter-spacing: .04em; text-decoration: none; cursor: pointer;
+               border: 1px solid color-mix(in srgb, var(--ac) 35%, transparent);
+               background: color-mix(in srgb, var(--ac) 7%, transparent); display: inline-block; }
+        .btn:hover:not([disabled]) { color: #fff; background: color-mix(in srgb, var(--ac) 22%, transparent); }
+        .btn[disabled] { color: #4a5060; cursor: not-allowed; border-color: rgba(100,100,110,.2); background: rgba(60,65,75,.06); }
+
+        .log-list { list-style: none; margin: 14px 0 0; padding: 10px 0 0; border-top: 1px solid rgba(255,255,255,.07);
+                    max-height: 220px; overflow-y: auto; }
+        .log-row { display: flex; gap: 10px; padding: 4px 0; font-size: .78rem; }
+        .log-when { flex: none; color: #6b7385; white-space: nowrap; }
+        .log-text { color: #c4cad5; overflow-wrap: break-word; }
+
+        .tok-list { list-style: none; margin: 0; padding: 10px 0 0; border-top: 1px solid rgba(255,255,255,.07); }
+        .tok { min-height: 42px; display: flex; align-items: center; gap: 12px; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,.06); }
+        .tok:last-child { border-bottom: 0; }
+        .tok-name { flex: 1; min-width: 0; overflow: hidden; color: #c4cad5; font-size: .84rem; text-overflow: ellipsis; white-space: nowrap; }
+        .tok-when { color: #6b7385; font-size: .76rem; white-space: nowrap; }
+        .tok-drop { padding: 6px 10px; color: #ff8a9c; font-size: .74rem; border: 1px solid rgba(255,107,129,.35); background: transparent; cursor: pointer; }
+        .tok-drop:hover { color: #fff; background: rgba(255,107,129,.16); }
+
+        .win-icon { width: 36px; height: 36px; flex: none; opacity: .55; }
+        .win-empty { display: flex; align-items: center; gap: 14px; color: #6b7385; font-size: .82rem; }
+
+        .ui-toasts { position: fixed; z-index: 70; left: 50%; bottom: 22px; transform: translateX(-50%);
+                     display: flex; flex-direction: column; gap: 8px; align-items: center; pointer-events: none; }
+        .ui-toast { padding: 10px 15px; color: #eef2fb; font-size: .78rem; max-width: min(420px, 86vw); text-align: center;
+                    border: 1px solid rgba(255,255,255,.12); background: #10162a;
+                    box-shadow: 0 10px 30px rgba(0,0,0,.45); transition: opacity .25s; }
+        .ui-toast.err { color: #ffb3b3; border-color: rgba(255,107,129,.4); }
+        .ui-toast.ok { border-color: rgba(99,245,173,.4); }
+
+        @media (max-width: 560px) {
+          .wrap { padding-inline: 16px; }
+        }
+      </style>
+    </head>
+    <body>
+      <main class="wrap">
+        <header class="head">
+          <a class="back" href="/cabinet" title="В кабинет" aria-label="В кабинет">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M19 12H5m0 0 6-6m-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </a>
+          <span class="head-ic">
+            <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
+              <rect x="6" y="6" width="15" height="15" rx="3.5" stroke="#f97316" stroke-width="2.6"/>
+              <rect x="27" y="6" width="15" height="15" rx="3.5" stroke="#ffb37a" stroke-width="2.6"/>
+              <rect x="6" y="27" width="15" height="15" rx="3.5" stroke="#ffb37a" stroke-width="2.6"/>
+              <rect x="27" y="27" width="15" height="15" rx="3.5" fill="#f97316" fill-opacity=".22" stroke="#f97316" stroke-width="2.6"/>
+            </svg>
+          </span>
+          <div>
+            <h1>Приложения</h1>
+            <p class="sub">программы на других устройствах — телефон, а следом и Windows</p>
+          </div>
+        </header>
+
+        <section class="panel">
+          <h2>Телефон</h2>
+          <div class="panel-body">
+            <div class="phone-row">
+              <span class="dot" id="phone-dot"></span>
+              <span class="phone-name">MOBILA</span>
+              <span class="phone-status" id="phone-status">проверяю…</span>
+            </div>
+            <div class="ver-row" id="phone-ver"></div>
+            <div class="bar">
+              <button class="btn" id="pull-btn" type="button">Подтянуть свежую сборку</button>
+              <a class="btn" id="apk-btn" href="/app">Скачать APK</a>
+              <a class="btn" href="/phone">Экран телефона</a>
+            </div>
+            <ul class="log-list" id="phone-log"><li class="log-row"><span class="log-text">Загружаю…</span></li></ul>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>Токены телефона</h2>
+          <div class="panel-body">
+            <p class="panel-note">Выдаются сами, когда хозяин заходит в кабинет из
+              приложения-оболочки. Отозвать можно поштучно — общий пароль
+              менять не придётся.</p>
+            <ul class="tok-list" id="tok-list"><li class="empty">Загружаю…</li></ul>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>Windows</h2>
+          <div class="panel-body">
+            <div class="win-empty">
+              <svg class="win-icon" viewBox="0 0 48 48" fill="none" aria-hidden="true">
+                <path d="M6 10 21 8v14H6V10Z" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/>
+                <path d="M23 7.7 42 5v17H23V7.7Z" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/>
+                <path d="M6 24h15v14L6 36V24Z" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/>
+                <path d="M23 24h19v17l-19-2.7V24Z" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/>
+              </svg>
+              <p class="empty" style="margin:0">Пока ни одной программы — раздел зарезервирован под будущие Windows-инструменты.</p>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <script>
+      (() => {
+        const uiToasts = document.createElement("div");
+        uiToasts.className = "ui-toasts";
+        document.body.appendChild(uiToasts);
+        const uiToast = (text, kind) => {
+          const t = document.createElement("div");
+          t.className = "ui-toast" + (kind ? " " + kind : "");
+          t.textContent = text;
+          uiToasts.appendChild(t);
+          setTimeout(() => { t.style.opacity = "0"; setTimeout(() => t.remove(), 260); }, 2600);
+        };
+
+        const escHtml = (text) => String(text).replace(/[&<>"']/g, (ch) => (
+          { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]
+        ));
+
+        // Единицы склоняются по-русски (1 минута, 2 минуты, 5 минут) — та же
+        // функция, что и на /netbird, здесь просто своя копия: страницы не
+        // делят между собой общий JS-файл.
+        const plural = (n, one, few, many) => {
+          const mod10 = n % 10, mod100 = n % 100;
+          if (mod10 === 1 && mod100 !== 11) return one;
+          if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return few;
+          return many;
+        };
+        const formatAgo = (ts) => {
+          if (!ts) return "нет данных";
+          const diff = Math.max(0, Math.round(Date.now() / 1000 - ts));
+          if (diff < 60) return "только что";
+          const mins = Math.round(diff / 60);
+          if (mins < 60) return `${mins} ${plural(mins, "минуту", "минуты", "минут")} назад`;
+          const hours = Math.round(diff / 3600);
+          if (hours < 24) return `${hours} ${plural(hours, "час", "часа", "часов")} назад`;
+          const days = Math.round(diff / 86400);
+          return `${days} ${plural(days, "день", "дня", "дней")} назад`;
+        };
+
+        // ---- Телефон: статус, версии, журнал ------------------------------
+        const dotEl = document.getElementById("phone-dot");
+        const statusEl = document.getElementById("phone-status");
+        const verEl = document.getElementById("phone-ver");
+        const logEl = document.getElementById("phone-log");
+
+        const drawPhone = async () => {
+          let snapshot;
+          try {
+            const response = await fetch("/api/phone/agent", { credentials: "same-origin" });
+            if (!response.ok) return;
+            snapshot = await response.json();
+          } catch {
+            return;
+          }
+          dotEl.classList.toggle("on", Boolean(snapshot.online));
+          statusEl.classList.toggle("on", Boolean(snapshot.online));
+          statusEl.textContent = snapshot.online ? "на связи" : "нет связи · " + formatAgo(snapshot.last_seen);
+
+          let versionRow = "";
+          try {
+            const verResp = await fetch("/api/app/version", { credentials: "same-origin" });
+            if (verResp.ok) {
+              const ver = await verResp.json();
+              const onPhone = (snapshot.agents && snapshot.agents[0] && snapshot.agents[0].version) || null;
+              versionRow = "Сборка на сайте: <b>" + (ver.version || "нет") + "</b>";
+              if (onPhone) {
+                const behind = ver.version && onPhone < ver.version;
+                versionRow += " · на телефоне: <b class=\"" + (behind ? "stale" : "") + "\">" + onPhone
+                  + (behind ? " — есть свежее" : "") + "</b>";
+              }
+            }
+          } catch {}
+          verEl.innerHTML = versionRow;
+
+          const events = snapshot.events || [];
+          if (!events.length) {
+            logEl.innerHTML = '<li class="log-row"><span class="log-text">Пока пусто.</span></li>';
+          } else {
+            logEl.innerHTML = events.slice(0, 30).map((row) => (
+              '<li class="log-row"><span class="log-when">' + formatAgo(row.at) + '</span>'
+              + '<span class="log-text">' + escHtml(row.text) + '</span></li>'
+            )).join("");
+          }
+        };
+        drawPhone();
+        setInterval(drawPhone, 10000);
+
+        const pullBtn = document.getElementById("pull-btn");
+        pullBtn.addEventListener("click", async () => {
+          pullBtn.disabled = true;
+          const origText = pullBtn.textContent;
+          pullBtn.textContent = "Тяну…";
+          try {
+            const response = await fetch("/api/app/pull", { method: "POST", credentials: "same-origin" });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.error || "не вышло");
+            uiToast("Подтянута сборка " + (data.version || "?"), "ok");
+            drawPhone();
+          } catch (e) {
+            uiToast(e.message || "Не вышло подтянуть сборку.", "err");
+          } finally {
+            pullBtn.disabled = false;
+            pullBtn.textContent = origText;
+          }
+        });
+
+        // ---- Токены: выдаются приложением-оболочкой сами, отзываются -----
+        // отсюда поштучно. Подтверждение — не системный confirm(), а сама
+        // кнопка: первый тычок превращает её в «Точно?», второй в течение
+        // четырёх секунд отзывает.
+        const tokBox = document.getElementById("tok-list");
+        const drawTokens = async () => {
+          let rows = [];
+          try {
+            const response = await fetch("/api/phone/tokens", { credentials: "same-origin" });
+            if (!response.ok) return;
+            rows = (await response.json()).tokens || [];
+          } catch {
+            return;
+          }
+          if (!rows.length) {
+            tokBox.innerHTML = '<li class="empty">Пока ни одного — открой сайт в приложении и зайди в кабинет.</li>';
+            return;
+          }
+          tokBox.innerHTML = rows.map((row) => (
+            '<li class="tok" data-id="' + escHtml(row.id) + '">' +
+            '<span class="tok-name">' + escHtml(row.label) + '</span>' +
+            '<span class="tok-when">' + (row.last_used ? "на связи " + formatAgo(row.last_used) : "ещё не подключался") + '</span>' +
+            '<button class="tok-drop" type="button">Отозвать</button>' +
+            '</li>'
+          )).join("");
+        };
+        tokBox.addEventListener("click", async (event) => {
+          const button = event.target.closest(".tok-drop");
+          if (!button) return;
+          if (button.dataset.armed !== "1") {
+            button.dataset.armed = "1";
+            button.textContent = "Точно?";
+            setTimeout(() => {
+              if (button.dataset.armed !== "1") return;
+              button.dataset.armed = "";
+              button.textContent = "Отозвать";
+            }, 4000);
+            return;
+          }
+          const id = button.closest(".tok").dataset.id;
+          button.disabled = true;
+          try {
+            const response = await fetch("/api/phone/token/" + encodeURIComponent(id), {
+              method: "DELETE", credentials: "same-origin",
+            });
+            if (!response.ok) throw new Error("не вышло");
+            await drawTokens();
+          } catch {
+            button.disabled = false;
+            button.dataset.armed = "";
+            button.textContent = "Не вышло";
+          }
+        });
+        drawTokens();
+      })();
+      </script>
+    </body>
+    </html>

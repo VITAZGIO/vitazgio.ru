@@ -10,6 +10,7 @@ import android.content.Intent
 import android.Manifest
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
+import android.graphics.drawable.Icon
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
@@ -660,11 +661,25 @@ class AgentService : Service() {
             Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE,
         )
+        // Показания и кнопки переехали на сайт (кабинет → «Приложения»), но
+        // местный журнал остаётся полезен ровно тогда, когда сам сайт
+        // недоступен, — поэтому служебный экран (AgentActivity) не выброшен,
+        // а спрятан за кнопку на этом же уведомлении, не за долгий тычок
+        // по отменённой полоске.
+        val openLog = PendingIntent.getActivity(
+            this,
+            3,
+            Intent(this, AgentActivity::class.java),
+            PendingIntent.FLAG_IMMUTABLE,
+        )
         return Notification.Builder(this, CHANNEL)
             .setContentTitle(getString(R.string.app_name))
             .setContentText(text)
             .setSmallIcon(R.drawable.ic_agent)
             .setContentIntent(open)
+            .addAction(Notification.Action.Builder(
+                Icon.createWithResource(this, R.drawable.ic_agent), "Журнал", openLog,
+            ).build())
             .setOngoing(true)
             .build()
     }

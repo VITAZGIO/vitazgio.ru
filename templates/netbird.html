@@ -93,18 +93,6 @@
           .smb-btn { grid-column: 2; grid-row: 4; justify-self: end; }
         }
 
-        /* Телефонные токены: тот же «панельный» вид, что у списка машин,
-           только строк обычно одна-две, поэтому без сетки колонок. */
-        .tok-list { margin: 0; padding: 8px 18px 18px; list-style: none; border-top: 1px solid rgba(255,255,255,.07); }
-        .tok { min-height: 42px; display: flex; align-items: center; gap: 12px; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,.06); }
-        .tok:last-child { border-bottom: 0; }
-        .tok-name { flex: 1; min-width: 0; overflow: hidden; color: #c4cad5; font-size: .84rem; text-overflow: ellipsis; white-space: nowrap; }
-        .tok-when { color: #6b7385; font-size: .76rem; white-space: nowrap; }
-        .tok-drop { padding: 6px 10px; color: #ff8a9c; font-size: .74rem; border: 1px solid rgba(255,107,129,.35); background: transparent; }
-        .tok-drop:hover { color: #fff; background: rgba(255,107,129,.16); }
-        .tok-empty { padding: 10px 0; color: #6b7385; font-size: .8rem; }
-        .tok-note { margin: 2px 18px 0; color: #6b7385; font-size: .76rem; }
-
         .gate-modal { position: fixed; z-index: 100; inset: 0; display: grid; place-items: center; padding: 20px; }
         .gate-backdrop { position: absolute; inset: 0; background: rgba(3, 6, 13, .82); backdrop-filter: blur(12px); }
         .gate-panel { position: relative; width: min(380px, 100%); padding: 30px; color: #e8fbff; border: 1px solid rgba(255,120,47,.3); background: linear-gradient(145deg, rgba(16, 30, 47, .98), rgba(20, 16, 37, .98)); box-shadow: 0 32px 100px rgba(0,0,0,.65); }
@@ -194,14 +182,6 @@
         <section class="panel">
           <h2>Устройства</h2>
           <ul class="device-list">{{DEVICE_ITEMS}}</ul>
-        </section>
-
-        <section class="panel">
-          <h2>Токены телефона</h2>
-          <p class="tok-note">Выдаются сами, когда хозяин заходит в кабинет из
-            приложения-оболочки. Отозвать можно поштучно — общий пароль
-            менять не придётся.</p>
-          <ul class="tok-list" id="tok-list"><li class="tok-empty">Загружаю…</li></ul>
         </section>
       </main>
       <div id="gate-modal" class="gate-modal" hidden>
@@ -472,68 +452,6 @@
           };
           refreshStatus();
           setInterval(refreshStatus, 10000);
-
-          // Токены телефона: выдаются приложением-оболочкой сами, отзываются
-          // отсюда поштучно. Подтверждение — не системный confirm(), а сама
-          // кнопка: первый тычок превращает её в «Точно?», второй в течение
-          // четырёх секунд отзывает. Своя карточка ради одной кнопки была бы
-          // тяжелее самой задачи, а системный диалог тут запрещён.
-          const tokBox = document.getElementById("tok-list");
-          const escHtml = (text) => String(text).replace(/[&<>"']/g, (ch) => (
-            { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]
-          ));
-          const drawTokens = async () => {
-            if (!tokBox) return;
-            let rows = [];
-            try {
-              const response = await fetch("/api/phone/tokens", { credentials: "same-origin" });
-              if (!response.ok) return;
-              rows = (await response.json()).tokens || [];
-            } catch {
-              return;
-            }
-            if (!rows.length) {
-              tokBox.innerHTML = '<li class="tok-empty">Пока ни одного — открой сайт в приложении и зайди в кабинет.</li>';
-              return;
-            }
-            tokBox.innerHTML = rows.map((row) => (
-              '<li class="tok" data-id="' + escHtml(row.id) + '">' +
-              '<span class="tok-name">' + escHtml(row.label) + '</span>' +
-              '<span class="tok-when">' + (row.last_used ? "на связи " + formatLastSeen(row.last_used) : "ещё не подключался") + '</span>' +
-              '<button class="tok-drop" type="button">Отозвать</button>' +
-              '</li>'
-            )).join("");
-          };
-          if (tokBox) {
-            tokBox.addEventListener("click", async (event) => {
-              const button = event.target.closest(".tok-drop");
-              if (!button) return;
-              if (button.dataset.armed !== "1") {
-                button.dataset.armed = "1";
-                button.textContent = "Точно?";
-                setTimeout(() => {
-                  if (button.dataset.armed !== "1") return;
-                  button.dataset.armed = "";
-                  button.textContent = "Отозвать";
-                }, 4000);
-                return;
-              }
-              const id = button.closest(".tok").dataset.id;
-              button.disabled = true;
-              try {
-                const response = await fetch("/api/phone/token/" + encodeURIComponent(id), {
-                  method: "DELETE", credentials: "same-origin",
-                });
-                if (!response.ok) throw new Error("не вышло");
-                await drawTokens();
-              } catch {
-                button.disabled = false;
-                button.dataset.armed = "";
-                button.textContent = "Не вышло";
-              }
-            });
-            drawTokens();
-          }
         })();
 
         (() => {

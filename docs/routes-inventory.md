@@ -13,10 +13,10 @@ Baseline before blueprint split:
 
 Текущее состояние (проверяется одной строкой, а не на глаз):
 
-- Роутов сейчас: `163`. Считать так — поднять приложение и посмотреть
+- Роутов сейчас: `164`. Считать так — поднять приложение и посмотреть
   `[r for r in app.url_map.iter_rules() if r.endpoint != "static"]`.
   Число включает вебсокеты (`@sock.route` тоже попадает в `url_map`).
-  Уникальных адресов при этом `144`: один и тот же URL под GET и POST —
+  Уникальных адресов при этом `145`: один и тот же URL под GET и POST —
   два правила в `url_map`, но одна строка в таблицах ниже встречается
   дважды (по строке на метод), поэтому сходится.
 - 2026-09-11: +7 в разделе «files/sftp» — файловый менеджер по SFTP.
@@ -37,6 +37,11 @@ Baseline before blueprint split:
   «servers/themes/home» его пропустили). Заодно пересчитано число в шапке:
   стояло `143`, а в коде на тот момент было `153` — таблицы всё это время
   были полными, отставала только цифра.
+- 2026-09-16: +1 — новый раздел «apps» (вкладка кабинета «Приложения»,
+  бывший «Резерв 1»): `/apps`. Показания и кнопки телефонного приложения
+  переехали сюда с самого телефона (служебный экран `AgentActivity` больше
+  не главный путь к ним), а «Токены телефона» переехали сюда же с
+  `/netbird` — там их не убавилось, а тут стало ровно всё про приложения.
 
 Guards column includes route decorators such as `login_required`, `debtor_required`,
 `music_editor_required`, plus existing domain guards where useful.
@@ -309,3 +314,16 @@ Guards column includes route decorators such as `login_required`, `debtor_requir
 | `/app` | `@phone_bp.get("/app")` | `app_apk` | `login_required` |
 | `/api/app/version` | `@phone_bp.get("/api/app/version")` | `app_version_api` | `login_required` ИЛИ заголовок `X-Agent-Token` |
 | `/api/app/pull` | `@phone_bp.post("/api/app/pull")` | `app_pull_api` | `login_required` |
+
+## apps
+
+Вкладка кабинета «Приложения» (`blueprints/apps.py`) — своя страница, не
+аккордеон, как «Запомнить устройства» или «Журнал входов». Занимает бывшее
+место «Резерв 1» на `/cabinet`. Сама страница ничего не считает: данные и
+кнопки — те же API из раздела «phone/agent» выше (статус агента, версии,
+подтянуть/скачать сборку, токены устройства). Раздел «Windows» на странице
+пока пустой задел под будущие программы для компьютеров.
+
+| URL | Decorator | Function | Guards |
+| --- | --- | --- | --- |
+| `/apps` | `@apps_bp.get("/apps")` | `apps_page` | `login_required` |

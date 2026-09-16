@@ -1,73 +1,54 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Нативной разметки тут ровно два куска, всё остальное рисует сам сайт:
-     тонкая полоска состояния агента сверху и заглушка «нет связи» поверх
-     WebView. Больше нативных экранов быть не должно — иначе правка кнопки
-     означала бы пересборку APK вместо обычного деплоя.
-
-     Полоска стоит отдельной строкой, а не поверх страницы: наложением она
-     закрывала бы верх сайта (в кабинете там шапка со ссылками). -->
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<!-- Нативной разметки тут ровно один кусок — заглушка «нет связи» поверх
+     WebView. Полоска состояния агента отсюда убрана: все показания и кнопки
+     переехали на сайт (кабинет → вкладка «Приложения», /apps), их видно и
+     с телефона, и с ПК, и правки туда приезжают обычным деплоем. Служебный
+     экран с местным журналом (AgentActivity) остался — как раз на случай,
+     когда сам сайт недоступен, — но открывается уже не долгим тычком по
+     полоске, а кнопкой на уведомлении службы. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
     android:fitsSystemWindows="true"
     android:background="#0d1321">
 
-    <TextView
-        android:id="@+id/strip"
+    <WebView
+        android:id="@+id/web"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:background="#141c2e"
-        android:paddingHorizontal="10dp"
-        android:paddingVertical="2dp"
-        android:textSize="11sp"
-        android:textColor="#8b93a7"
-        android:maxLines="1"
-        android:ellipsize="end" />
+        android:layout_height="match_parent" />
 
-    <FrameLayout
+    <LinearLayout
+        android:id="@+id/offline"
         android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1">
+        android:layout_height="match_parent"
+        android:background="#0d1321"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:padding="24dp"
+        android:visibility="gone">
 
-        <WebView
-            android:id="@+id/web"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent" />
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/offline_title"
+            android:textColor="#e8fbff"
+            android:textSize="18sp"
+            android:textStyle="bold" />
 
-        <LinearLayout
-            android:id="@+id/offline"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:background="#0d1321"
+        <TextView
+            android:id="@+id/offline_why"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
             android:gravity="center"
-            android:orientation="vertical"
-            android:padding="24dp"
-            android:visibility="gone">
+            android:textColor="#8b93a7"
+            android:textSize="13sp" />
 
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="@string/offline_title"
-                android:textColor="#e8fbff"
-                android:textSize="18sp"
-                android:textStyle="bold" />
-
-            <TextView
-                android:id="@+id/offline_why"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:gravity="center"
-                android:textColor="#8b93a7"
-                android:textSize="13sp" />
-
-            <Button
-                android:id="@+id/retry"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="18dp"
-                android:text="@string/retry" />
-        </LinearLayout>
-    </FrameLayout>
-</LinearLayout>
+        <Button
+            android:id="@+id/retry"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:text="@string/retry" />
+    </LinearLayout>
+</FrameLayout>
