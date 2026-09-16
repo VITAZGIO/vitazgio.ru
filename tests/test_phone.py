@@ -383,32 +383,41 @@ def test_key_request_resends_cached_config_mid_stream(phone_bp):
     его собственный декодер споткнулся посреди уже идущей трансляции (см.
     templates/phone.html). Без свежего SPS/PPS в этот момент он себя не
     соберёт: одного «телефон, дай опорный» мало, сервер обязан прислать
-    кэшированный config зрителю заново сам."""
+    кэшированный config зрителю заново сам.
+
+    Считаем не точное число (подключение само может доставить config и
+    трансляцией, и репликой из кэша почти одновременно — безобидное
+    дублирование, не то, что здесь проверяется), а что после запроса "key"
+    счётчик СТАЛ БОЛЬШЕ, чем был до него — то есть реально пришёл ещё раз.
+    Teardown — в finally: сорвавшийся assert не должен оставлять
+    подключённого агента висеть до следующего теста (agents/viewers —
+    общее состояние на весь файл, app_module в conftest сессионный)."""
     agent = FakeWs([_hello()])
     agent_thread = _run(phone_bp, agent)
-    assert _wait(lambda: phone_bp.agent_snapshot()["online"])
-    agent.push({"type": "screen-state", "running": True, "width": 720, "height": 1600})
-    assert _wait(lambda: phone_bp.screen_snapshot()["running"])
-    agent.inbox.put(_frame(1, b"sps-pps"))
-
     viewer = FakeWs()
     viewer_thread = _viewer(phone_bp, viewer)
-    assert _received(viewer, 1), "зритель обязан получить параметры кодека"
+    try:
+        assert _wait(lambda: phone_bp.agent_snapshot()["online"])
+        agent.push({"type": "screen-state", "running": True, "width": 720, "height": 1600})
+        assert _wait(lambda: phone_bp.screen_snapshot()["running"])
+        agent.inbox.put(_frame(1, b"sps-pps"))
+        assert _received(viewer, 1), "зритель обязан получить параметры кодека"
 
-    def _config_count():
-        return sum(1 for item in viewer.sent
-                    if isinstance(item, (bytes, bytearray)) and item[:1] == bytes([1]))
+        def _config_count():
+            return sum(1 for item in viewer.sent
+                        if isinstance(item, (bytes, bytearray)) and item[:1] == bytes([1]))
 
-    assert _wait(lambda: _config_count() == 1)
+        before = _wait(lambda: _config_count() >= 1) and _config_count()
+        assert before, "config обязан прийти хотя бы раз"
 
-    viewer.push({"type": "key"})
-    assert _wait(lambda: "screen-key" in agent.types())
-    assert _wait(lambda: _config_count() == 2), "config обязан прийти второй раз"
-
-    viewer.close()
-    viewer_thread.join(3)
-    agent.close()
-    agent_thread.join(3)
+        viewer.push({"type": "key"})
+        assert _wait(lambda: "screen-key" in agent.types())
+        assert _wait(lambda: _config_count() > before), "config обязан прийти ещё раз"
+    finally:
+        viewer.close()
+        viewer_thread.join(3)
+        agent.close()
+        agent_thread.join(3)
 
 
 def test_viewer_without_agent_is_told_the_truth(phone_bp):
