@@ -105,7 +105,8 @@
           <label class="tick"><input type="checkbox" id="sound"> звук</label>
           <input class="vol" id="vol" type="range" min="0" max="100" value="70" disabled
                  aria-label="Громкость">
-          <span class="state">телефон: <b id="agent-state" class="off">нет связи</b> · <span id="fps">—</span></span>
+          <span class="state">телефон: <b id="agent-state" class="off">нет связи</b> · <span id="fps">—</span>
+            <span id="diag" style="opacity:.6"></span></span>
         </div>
 
         <!-- Кнопки телефона — не жесты: тыкать в их места на экране было бы
@@ -178,6 +179,17 @@
         const fullBtn = document.getElementById("full");
         const agentState = document.getElementById("agent-state");
         const fpsBox = document.getElementById("fps");
+        const diagBox = document.getElementById("diag");
+        // Временная диагностика (2026-09-16): что реально доходит от
+        // телефона, до любых попыток декодировать — если картинки нет, это
+        // говорит сразу, где искать: у cfg=0 виноват телефон или сеть, у
+        // cfg>0 без кадров — сам декодер/SPS. Снять после починки.
+        const diag = { cfg: 0, key: 0, delta: 0, other: 0, decodeErr: 0 };
+        const showDiag = () => {
+          diagBox.textContent = ` · cfg ${diag.cfg} key ${diag.key} delta ${diag.delta}`
+            + (diag.other ? ` other ${diag.other}` : "")
+            + (diag.decodeErr ? ` ошибок-декода ${diag.decodeErr}` : "");
+        };
         const paint = canvas.getContext("2d");
 
         let socket = null;
@@ -224,6 +236,8 @@
           decoder = new VideoDecoder({
             output: drawFrame,
             error: (e) => {
+              diag.decodeErr += 1; showDiag();
+              console.log("[vg-phone] VideoDecoder error:", e && e.message);
               uiToast("Декодер споткнулся: " + e.message, "err");
               stopDecoder();
               ask("key");
@@ -275,9 +289,15 @@
           const stamp = view.getUint32(1) * 4294967296 + view.getUint32(5);
           const payload = bytes.subarray(9);
           if (kind === 1) {
+            diag.cfg += 1; showDiag();
+            console.log("[vg-phone] config-кадр, " + payload.length + " байт:",
+              Array.from(payload.subarray(0, 24)).map((b) => b.toString(16).padStart(2, "0")).join(" "));
             startDecoder(payload);
             return;
           }
+          if (kind === 2) { diag.key += 1; showDiag(); }
+          else if (kind === 3) { diag.delta += 1; showDiag(); }
+          else if (kind !== 5 && kind !== 6) { diag.other += 1; showDiag(); }
           if (kind === 5) {
             startAudio(payload);
             return;
@@ -300,8 +320,10 @@
               timestamp: stamp,
               data: payload,
             }));
-          } catch {
+          } catch (e) {
             // Разностный кадр без опорного — не беда: просим опорный и ждём.
+            diag.decodeErr += 1; showDiag();
+            console.log("[vg-phone] decode() бросил:", e && e.message);
             stopDecoder();
             ask("key");
           }
