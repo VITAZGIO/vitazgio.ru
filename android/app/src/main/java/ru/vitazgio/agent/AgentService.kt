@@ -70,7 +70,14 @@ class AgentService : Service() {
 
         fun start(context: Context) {
             val intent = Intent(context, AgentService::class.java).setAction(ACTION_START)
-            context.startForegroundService(intent)
+            try {
+                context.startForegroundService(intent)
+            } catch (e: Exception) {
+                // С Android 12 службу нельзя поднять из фона, и система
+                // отвечает исключением. Это не повод ронять приложение: агент
+                // поднимется при следующем открытии оболочки.
+                AgentLog.add(context, "служба не поднялась: ${e.message}")
+            }
         }
 
         fun stop(context: Context) {
@@ -132,7 +139,17 @@ class AgentService : Service() {
             return START_STICKY
         }
 
-        startForeground(NOTIFICATION_ID, notification(AgentState.status))
+        // Тип обязателен и обязательно ОДИН — только specialUse.
+        //
+        // Здесь приложение и падало, «вылетая» сразу при заходе в кабинет: у
+        // службы в манифесте объявлено три типа (specialUse|mediaProjection|
+        // microphone), а вызов startForeground без явного типа применяет ВСЕ
+        // объявленные разом. Android 14 за microphone требует разрешение на
+        // запись, за mediaProjection — живое согласие на захват; ни того, ни
+        // другого при обычном старте нет, и система отвечает SecurityException
+        // — то есть падением всего приложения. Экран и звук добавляют свои
+        // типы сами, в тот момент, когда они действительно начинаются.
+        goForeground(ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
         if (!AgentState.running) {
             AgentState.running = true
             stopping = false
@@ -358,20 +375,27 @@ class AgentService : Service() {
         }
         // С Android 14 служба обязана объявить и тип microphone, пока идёт
         // захват звука, иначе система его оборвёт.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            try {
-                startForeground(
-                    NOTIFICATION_ID,
-                    notification(AgentState.status),
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or
-                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION or
-                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE,
-                )
-            } catch (e: Exception) {
-                log("не вышло объявить службу записью звука: ${e.message}")
-            }
-        }
+        goForeground(
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION or
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE,
+        )
         ensureAudio().start(caster?.session())
+    }
+
+    /** Стать foreground-службой с ровно теми типами, которые сейчас
+     *  оправданы. Отказ системы не должен ронять приложение: лучше остаться
+     *  без вывески, чем вылететь у человека на глазах. */
+    private fun goForeground(types: Int) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(NOTIFICATION_ID, notification(AgentState.status), types)
+            } else {
+                startForeground(NOTIFICATION_ID, notification(AgentState.status))
+            }
+        } catch (e: Exception) {
+            log("система не дала объявить службу: ${e.message}")
+        }
     }
 
     private fun ensureAudio(): AudioCaster {
@@ -451,18 +475,10 @@ class AgentService : Service() {
         }
         // С Android 14 служба обязана СНАЧАЛА стать foreground-службой с
         // типом mediaProjection и только потом брать саму проекцию.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            try {
-                startForeground(
-                    NOTIFICATION_ID,
-                    notification(AgentState.status),
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or
-                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION,
-                )
-            } catch (e: Exception) {
-                log("не вышло объявить службу захватом экрана: ${e.message}")
-            }
-        }
+        goForeground(
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION,
+        )
         ensureCaster().start(code, data)
     }
 

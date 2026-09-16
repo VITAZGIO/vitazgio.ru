@@ -50,11 +50,20 @@ class WebBridge(private val host: Host) {
         return hostname == ALLOWED_HOST || hostname.endsWith(".$ALLOWED_HOST")
     }
 
-    /** Что оболочка знает о себе: версия, есть ли токен, жив ли агент. */
+    /** Что оболочка знает о себе: версия, есть ли токен, жив ли агент.
+     *
+     *  Исключение отсюда убивает приложение целиком: вызовы моста приходят
+     *  своим потоком, и необработанная ошибка в нём — это падение, а не
+     *  ошибка на странице. Поэтому ловим всё и отвечаем пустотой. */
     @JavascriptInterface
     fun getStatus(): String {
         if (!allowed()) return "{}"
-        return host.statusJson()
+        return try {
+            host.statusJson()
+        } catch (e: Throwable) {
+            host.note("мост не смог рассказать о себе: ${e.message}")
+            "{}"
+        }
     }
 
     /** Показать экран телефона. Страница сайта, открытая в самой оболочке,
@@ -62,17 +71,20 @@ class WebBridge(private val host: Host) {
      *  телефону по сокету. И там, и там подтверждение даёт человек на
      *  телефоне — системным запросом Android, который не отключается. */
     @JavascriptInterface
-    fun startScreen(): Boolean {
-        if (!allowed()) return false
-        host.startScreen()
-        return true
-    }
+    fun startScreen(): Boolean = guard { host.startScreen() }
 
     @JavascriptInterface
-    fun stopScreen(): Boolean {
+    fun stopScreen(): Boolean = guard { host.stopScreen() }
+
+    private fun guard(work: () -> Unit): Boolean {
         if (!allowed()) return false
-        host.stopScreen()
-        return true
+        return try {
+            work()
+            true
+        } catch (e: Throwable) {
+            host.note("мост споткнулся: ${e.message}")
+            false
+        }
     }
 
     /** Сайт выдал устройству личный токен — кладём его в шифрованное
@@ -82,8 +94,13 @@ class WebBridge(private val host: Host) {
         if (!allowed()) return false
         val clean = token.trim()
         if (clean.isEmpty() || clean.length > 512) return false
-        host.saveAgentToken(clean)
-        host.note("сайт выдал токен устройству")
-        return true
+        return try {
+            host.saveAgentToken(clean)
+            host.note("сайт выдал токен устройству")
+            true
+        } catch (e: Throwable) {
+            host.note("токен сохранить не вышло: ${e.message}")
+            false
+        }
     }
 }

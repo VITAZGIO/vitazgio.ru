@@ -157,6 +157,10 @@ class MainActivity : AppCompatActivity(), WebBridge.Host {
 
         if (intent?.action == ACTION_ASK_SCREEN) askProjection()
 
+        // Прошлый запуск умер — показываем, на чём именно. «Просто вылетает»
+        // без текста ошибки лечить нечем, а телефон далеко.
+        VgApp.lastCrash(this)?.let { showCrash(it) }
+
         if (AgentPrefs.enabled(this) && AgentPrefs.token(this).isNotBlank()) {
             AgentService.start(this)
         }
@@ -454,9 +458,32 @@ class MainActivity : AppCompatActivity(), WebBridge.Host {
         AgentPrefs.save(this, AgentPrefs.server(this), token)
         AgentPrefs.setEnabled(this, true)
         ui.post {
-            askNotifications()
-            AgentService.start(this)
+            // Этот кусок выполняется уже вне моста, своим ходом: если он
+            // споткнётся, поймать будет некому, а падение приложения прямо
+            // на входе в кабинет — ровно то, что мы чиним.
+            try {
+                askNotifications()
+                AgentService.start(this)
+            } catch (e: Throwable) {
+                AgentLog.add(this, "агент не запустился: ${e.message}")
+            }
         }
+    }
+
+    /** Карточка «в прошлый раз упало вот на чём» с кнопкой «скопировать».
+     *  Показывается один раз: прочитали — забыли. */
+    private fun showCrash(text: String) {
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("В прошлый раз приложение упало")
+            .setMessage(text.take(1500))
+            .setPositiveButton("Скопировать") { _, _ ->
+                val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("vg-crash", text))
+                Toast.makeText(this, "Текст падения скопирован", Toast.LENGTH_SHORT).show()
+                VgApp.forgetCrash(this)
+            }
+            .setNegativeButton("Ладно") { _, _ -> VgApp.forgetCrash(this) }
+            .show()
     }
 
     /** Разрешение на запись звука: системный захват звука Android считает
