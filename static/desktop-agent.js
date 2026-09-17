@@ -30,9 +30,17 @@
     const call = { pc, stream: null, control: request.control };
     sessions.set(request.id, call);
     try {
-      call.stream = await navigator.mediaDevices.getDisplayMedia({
-        video: { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30, max: 60 } }, audio: true,
+      const capture = audio => navigator.mediaDevices.getDisplayMedia({
+        video: { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30, max: 60 } }, audio,
       });
+      // Windows/Electron can expose a screen while refusing loopback audio
+      // (for example with some drivers or remote desktop sessions).  Sound is
+      // optional: never let it prevent the actual screen from connecting.
+      try {
+        call.stream = await capture(true);
+      } catch (audioError) {
+        call.stream = await capture(false);
+      }
       if (gen !== generation || !sessions.has(request.id)) { call.stream.getTracks().forEach(t => t.stop()); pc.close(); return; }
       call.stream.getVideoTracks()[0].contentHint = 'detail';
       call.stream.getVideoTracks()[0].onended = () => stop(request.id);
