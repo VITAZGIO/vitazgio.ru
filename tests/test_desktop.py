@@ -7,11 +7,13 @@ import subprocess
 import pytest
 from flask import Flask, jsonify, session
 
-from blueprints.desktop import create_desktop_blueprint
-
-
 @pytest.fixture
-def desktop(tmp_path):
+def desktop(tmp_path, app_module):
+    # ``blueprints`` is deliberately imported by app_module from an isolated
+    # temporary copy of the site.  Importing it at collection time works on a
+    # developer machine by accident (the repository is on sys.path), but not
+    # reliably in GitHub Actions.
+    create_desktop_blueprint = app_module.create_desktop_blueprint
     app = Flask(__name__)
     app.secret_key = "desktop-test-only"
     app.testing = True
