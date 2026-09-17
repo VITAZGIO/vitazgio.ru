@@ -57,7 +57,8 @@ def test_login_console_gate_and_hashed_device_tokens(desktop):
     assert user.get("/api/desktop/config").status_code == 403
     assert user.post("/api/desktop/sessions", json={"device": device["id"], "offer": "v=0\r\n"}).status_code == 403
     assert device["token"] not in (folder / "desktop_devices.json").read_text()
-    listing = user.get("/api/desktop/devices").get_json()["devices"]
+    # Viewer uses the JSON content-type for every request, including GET.
+    listing = user.get("/api/desktop/devices", headers={"Content-Type": "application/json"}).get_json()["devices"]
     assert listing[0]["online"] is True
     assert "hash" not in listing[0] and "token" not in listing[0]
     assert guest.post("/api/desktop/host", json={}).status_code == 401

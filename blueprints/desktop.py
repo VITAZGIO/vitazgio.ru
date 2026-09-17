@@ -35,7 +35,10 @@ def create_desktop_blueprint(*, template, icon_links, login_required, data_dir, 
     def limit_body():
         if request.content_length and request.content_length > 70000:
             return jsonify(error="Слишком большой запрос."), 413
-        if request.is_json and not isinstance(request.get_json(silent=True), dict):
+        # The browser viewer sends Content-Type: application/json uniformly,
+        # including on GET requests without a body.  A GET has no JSON payload
+        # to validate, otherwise listing devices is rejected before its route.
+        if request.method in {"POST", "PUT", "PATCH"} and request.is_json and not isinstance(request.get_json(silent=True), dict):
             return jsonify(error="Ожидается JSON-объект."), 400
 
     def save():
