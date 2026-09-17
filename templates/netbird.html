@@ -202,7 +202,7 @@
         <div class="gate-backdrop" data-ssh-login-close></div>
         <section class="gate-panel" role="dialog" aria-modal="true" aria-labelledby="ssh-login-title">
           <button class="gate-close" type="button" data-ssh-login-close aria-label="Закрыть">×</button>
-          <h2 id="ssh-login-title">SSH-логин</h2>
+          <h2 id="ssh-login-title">Устройство</h2>
           <form id="ssh-login-form">
             <input id="ssh-login-username" name="username" type="text" autocomplete="off" placeholder="Имя пользователя" required>
             <input id="ssh-login-password" name="password" type="password" autocomplete="off" placeholder="Пароль" required>
@@ -216,7 +216,7 @@
         <div class="gate-backdrop" data-vnc-login-close></div>
         <section class="gate-panel" role="dialog" aria-modal="true" aria-labelledby="vnc-login-title">
           <button class="gate-close" type="button" data-vnc-login-close aria-label="Закрыть">×</button>
-          <h2 id="vnc-login-title">VNC</h2>
+          <h2 id="vnc-login-title">Устройство</h2>
           <form id="vnc-login-form">
             <input id="vnc-login-password" name="password" type="password" autocomplete="off" placeholder="Пароль (если задан)" required>
             <button class="gate-submit" type="submit">Подключиться</button>
@@ -229,7 +229,7 @@
         <div class="gate-backdrop" data-rdp-login-close></div>
         <section class="gate-panel" role="dialog" aria-modal="true" aria-labelledby="rdp-login-title">
           <button class="gate-close" type="button" data-rdp-login-close aria-label="Закрыть">×</button>
-          <h2 id="rdp-login-title">Windows RDP</h2>
+          <h2 id="rdp-login-title">Устройство</h2>
           <form id="rdp-login-form">
             <input id="rdp-login-username" name="username" type="text" autocomplete="off" placeholder="Имя пользователя" required>
             <input id="rdp-login-password" name="password" type="password" autocomplete="off" placeholder="Пароль" required>
@@ -592,7 +592,7 @@
           }));
 
           const openVncLogin = () => {
-            document.getElementById("vnc-login-title").textContent = pendingDevice ? `VNC — ${pendingDevice.name}` : "VNC";
+            document.getElementById("vnc-login-title").textContent = pendingDevice ? `Устройство · ${pendingDevice.name}` : "Устройство";
             vncLoginModal.hidden = false;
             requestAnimationFrame(() => vncLoginPassword.focus());
           };
@@ -677,7 +677,7 @@
           }));
 
           const openRdpLogin = () => {
-            document.getElementById("rdp-login-title").textContent = pendingDevice ? `RDP — ${pendingDevice.name}` : "Windows RDP";
+            document.getElementById("rdp-login-title").textContent = pendingDevice ? `Устройство · ${pendingDevice.name}` : "Устройство";
             if (rdpLoginQuality) rdpLoginQuality.value = localStorage.getItem("rdpQuality") || "medium";
             rdpLoginModal.hidden = false;
             requestAnimationFrame(() => rdpLoginUsername.focus());
@@ -1046,7 +1046,7 @@
           document.querySelectorAll("[data-ssh-login-close]").forEach((el) => el.addEventListener("click", closeSshLogin));
 
           const openSshLogin = () => {
-            document.getElementById("ssh-login-title").textContent = pendingDevice ? `SSH — ${pendingDevice.name}` : "SSH-логин";
+            document.getElementById("ssh-login-title").textContent = pendingDevice ? `Устройство · ${pendingDevice.name}` : "Устройство";
             sshLoginModal.hidden = false;
             requestAnimationFrame(() => sshLoginUsername.focus());
           };

@@ -204,8 +204,6 @@
         // Сервер знает, вводили ли уже суточный пароль консоли в этой сессии,
         // поэтому лишнюю карточку не показываем.
         let needConsole = "{{NEED_CONSOLE}}" === "1";
-        // У телефона нет SSH — карточка та же (логин+пароль), но текст
-        // и то, с чем сверяют, другие: своя пара секретов из .env на сервере.
         const IS_PHONE = "{{IS_PHONE}}" === "1";
 
         const esc = (s) => (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -315,10 +313,8 @@
         });
 
         const askSsh = () => uiModal({
-          title: (IS_PHONE ? "Пароль файлов телефона — " : "SSH-логин — ") + MACHINE,
-          text: IS_PHONE
-            ? "SSH на телефоне нет — это свой логин и пароль, заданы в .env на сервере."
-            : "Логин и пароль от самой машины — те же, что в консоли.",
+          title: "Устройство · " + MACHINE,
+          text: "",
           fields: [{ placeholder: "Имя пользователя" }, { type: "password", placeholder: "Пароль" }],
           okLabel: "Подключиться",
           onSubmit: async ([username, password]) => {
