@@ -694,6 +694,7 @@
             };
 
             const wireAnalyser = () => {
+              if (window.VGP && window.VGP.desktop) return;
               if (analyser) return;
               try {
                 const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -721,11 +722,22 @@
             };
 
             const showNow = () => {
-              const t = tracks[index];
+              const t = window.VGP && window.VGP.desktop ? window.VGP.state.track : tracks[index];
               el("pl-title").textContent = t ? t.title : "ничего не играет";
               el("pl-artist").textContent = t ? (t.artist || "без исполнителя") : "плеер выключен";
               renderList();
             };
+
+            if (window.VGP && window.VGP.desktop) {
+              let lastId;
+              window.VGP.subscribe(state => {
+                if (state.track && state.track.id !== lastId) {
+                  lastId = state.track.id;
+                  index = tracks.findIndex(t => "m_" + t.id === state.track.id);
+                  showNow();
+                }
+              });
+            }
 
             const load = async (autoplay) => {
               try {
@@ -791,8 +803,9 @@
               if (audio.paused) { index < 0 ? play(0) : (wireAnalyser(), audio.play().catch(() => {})); }
               else audio.pause();
             });
-            el("pl-next").addEventListener("click", () => play(index + 1));
+            el("pl-next").addEventListener("click", () => window.VGP && window.VGP.desktop ? window.VGP.next() : play(index + 1));
             el("pl-prev").addEventListener("click", () => {
+              if (window.VGP && window.VGP.desktop) { window.VGP.prev(); return; }
               if (audio.currentTime > 3) { audio.currentTime = 0; return; }
               play(index - 1);
             });

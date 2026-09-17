@@ -2,6 +2,10 @@
 # отношения не имеет: ни исходники, ни кэши Gradle в контексте сборки
 # не нужны — собирает его отдельный workflow (android.yml).
 android
+desktop
+.venv-desktop
+.pytest_cache
+scratchpad
 .git
 .github
 actions-runner

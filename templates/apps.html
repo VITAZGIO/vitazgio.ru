@@ -99,7 +99,7 @@
           </span>
           <div>
             <h1>Приложения</h1>
-            <p class="sub">программы на других устройствах — телефон, а следом и Windows</p>
+            <p class="sub">телефон и Windows · сайт доступен и в обычном браузере</p>
           </div>
         </header>
 
@@ -141,8 +141,17 @@
                 <path d="M6 24h15v14L6 36V24Z" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/>
                 <path d="M23 24h19v17l-19-2.7V24Z" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/>
               </svg>
-              <p class="empty" style="margin:0">Пока ни одной программы — раздел зарезервирован под будущие Windows-инструменты.</p>
+              <p class="panel-note" style="margin:0">Vitaz Gio для Windows: сайт, независимый мини-плеер поверх окон и прямое подключение к экрану ПК.</p>
             </div>
+            <p class="panel-note" id="desktop-version" style="margin-top:14px">Проверяю сборку…</p>
+            <div class="bar">
+              <a class="btn" id="desktop-download" hidden>Скачать для Windows</a>
+              <button class="btn" id="desktop-update" type="button" hidden>Проверить обновления</button>
+              <button class="btn" id="desktop-settings" type="button" hidden>Настройки этого ПК</button>
+              <a class="btn" href="/desktop">Экран компьютера</a>
+            </div>
+            <ul class="tok-list" id="desktop-devices"><li class="empty">Загружаю компьютеры…</li></ul>
+            <p class="panel-note" style="margin-top:14px">После установки войди в кабинет из приложения. Доступ к экрану и управлению включается в настройках на самом ПК. Браузер работает без установки.</p>
           </div>
         </section>
       </main>
@@ -306,6 +315,71 @@
           }
         });
         drawTokens();
+
+        const desktopBridge = window.VGDesktop;
+        const desktopVersion = document.getElementById("desktop-version");
+        if (desktopBridge) {
+          document.getElementById("desktop-settings").hidden = false;
+          document.getElementById("desktop-settings").onclick = () => desktopBridge.openSettings();
+          const update = document.getElementById("desktop-update");
+          update.hidden = false;
+          update.onclick = async () => {
+            update.disabled = true;
+            try { uiToast((await desktopBridge.checkUpdates()).message, "ok"); }
+            catch (error) { uiToast(error.message, "err"); }
+            finally { update.disabled = false; }
+          };
+          desktopBridge.onUpdate(value => { desktopVersion.textContent = value.message; });
+        }
+        (async () => {
+          try {
+            const response = await fetch("/api/desktop/version");
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error);
+            const installed = desktopBridge ? await desktopBridge.getStatus() : null;
+            desktopVersion.textContent = (installed ? "Установлена: " + installed.version + " · " : "")
+              + (data.version ? "Доступна сборка: " + data.version : "Первая Windows-сборка ещё не опубликована.");
+            if (data.url) {
+              const download = document.getElementById("desktop-download");
+              download.href = data.url; download.hidden = false;
+            }
+          } catch { desktopVersion.textContent = "Не удалось проверить сборку. Попробуй обновить страницу."; }
+        })();
+        async function drawDesktopDevices() {
+          const box = document.getElementById("desktop-devices");
+          try {
+            const response = await fetch("/api/desktop/devices");
+            if (!response.ok) return;
+            const { devices } = await response.json();
+            box.replaceChildren();
+            if (!devices.length) {
+              const empty = document.createElement("li"); empty.className = "empty";
+              empty.textContent = "Компьютеров пока нет — войди в кабинет из Windows-приложения."; box.append(empty);
+            }
+            for (const device of devices) {
+              const row = document.createElement("li"); row.className = "tok";
+              const link = document.createElement("a"); link.className = "tok-name";
+              link.href = "/desktop?device=" + encodeURIComponent(device.id);
+              link.textContent = device.name;
+              const info = document.createElement("span"); info.className = "tok-when";
+              info.textContent = device.online ? device.enabled ? "доступ включён" : "на связи" : "нет связи";
+              const revoke = document.createElement("button"); revoke.className = "tok-drop"; revoke.textContent = "Отозвать";
+              revoke.onclick = async () => {
+                if (revoke.dataset.armed !== "1") {
+                  revoke.dataset.armed = "1"; revoke.textContent = "Точно?";
+                  setTimeout(() => { revoke.dataset.armed = ""; revoke.textContent = "Отозвать"; }, 4000); return;
+                }
+                revoke.disabled = true;
+                const result = await fetch("/api/desktop/devices/" + encodeURIComponent(device.id), { method:"DELETE" }).catch(() => null);
+                if (!result || !result.ok) uiToast("Не удалось отозвать доступ", "err");
+                await drawDesktopDevices();
+              };
+              row.append(link, info, revoke); box.append(row);
+            }
+          } catch {}
+        }
+        drawDesktopDevices();
+        setInterval(drawDesktopDevices, 10000);
       })();
       </script>
     </body>

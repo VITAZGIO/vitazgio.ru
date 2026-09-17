@@ -1,0 +1,64 @@
+name: Windows application
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "desktop/**"
+      - "static/icons/maskable-512.png"
+      - ".github/workflows/windows.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "11.19.0"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Reuse Android icon
+        run: |
+          python -m pip install pillow==12.3.0
+          python desktop/scripts/icon.py
+      - name: Install, test and package
+        working-directory: desktop
+        run: |
+          pnpm install --frozen-lockfile
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node node_modules/electron/install.js
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          pnpm test
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          pnpm dist
+          exit $LASTEXITCODE
+      - name: Version
+        id: version
+        shell: pwsh
+        run: |
+          $version = (Get-Content desktop/package.json | ConvertFrom-Json).version
+          "value=$version" >> $env:GITHUB_OUTPUT
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vitazgio-windows-${{ steps.version.outputs.value }}
+          path: desktop/dist/*.exe
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: windows-v${{ steps.version.outputs.value }}
+          name: Vitaz Gio для Windows ${{ steps.version.outputs.value }}
+          make_latest: false
+          body: |
+            Windows 10/11 x64. Сайт внутри приложения, постоянный мини-плеер,
+            работа в трее и экспериментальное прямое подключение к экрану.
+            Обновления скачиваются в «Загрузки», установку запускает владелец.
+          files: desktop/dist/*.exe
+          fail_on_unmatched_files: true

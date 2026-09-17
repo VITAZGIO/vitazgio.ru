@@ -3,3 +3,5 @@
 # см. CLAUDE.md, «Зависимости: версии зафиксированы намеренно».
 -r requirements.txt
 pytest==9.1.1
+# Windows does not ship the IANA zoneinfo database used by the site.
+tzdata==2026.4; sys_platform == "win32"

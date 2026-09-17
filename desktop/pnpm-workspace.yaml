@@ -1,0 +1,6 @@
+allowBuilds:
+  electron: true
+  electron-winstaller: false
+  koffi: true
+minimumReleaseAgeExclude:
+  - electron@44.4.1

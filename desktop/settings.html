@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'unsafe-inline'">
+<title>Настройки · Vitaz Gio</title>
+<style>
+body{margin:0;padding:28px;color:#e9fbff;background:#0d1321;font:15px system-ui}h1{font-size:23px;margin-top:0}label{display:block;margin:19px 0}input{accent-color:#f97316;margin-right:10px}select,button{font:inherit;color:inherit;border:1px solid #596176;background:#17243a;padding:9px;border-radius:6px}select{max-width:100%}p{color:#9aa6bb;line-height:1.5}#status{white-space:pre-wrap}button{cursor:pointer}button:disabled{opacity:.5}
+</style></head><body>
+<h1>Этот компьютер</h1>
+<p id="identity">Загрузка…</p>
+<label><input type="checkbox" id="startup">Запускать вместе с Windows</label>
+<label><input type="checkbox" id="enabled">Разрешить подключение к экрану из моего кабинета</label>
+<label><input type="checkbox" id="control">Разрешить мышь и клавиатуру</label>
+<label>Экран для трансляции<br><br><select id="display"></select></label>
+<p>После включения доступа можно подключаться без подтверждения на ПК. Выключить доступ в любой момент можно здесь или через значок в трее. Ctrl+Alt+Shift+F12 немедленно отключает доступ.</p>
+<button id="save">Сохранить</button> <button id="update">Проверить обновления</button>
+<p id="status" role="status"></p>
+<script src="settings.cjs"></script>
+</body></html>

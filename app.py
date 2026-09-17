@@ -33,6 +33,7 @@ from blueprints.apps import create_apps_blueprint
 from blueprints.backup_sebastian import create_backup_sebastian_blueprint
 from blueprints.debts import create_debts_blueprint
 from blueprints.devices import create_devices_blueprint
+from blueprints.desktop import create_desktop_blueprint
 from blueprints.diy import create_diy_blueprint
 from blueprints.drop import create_drop_blueprint
 from blueprints.files import create_files_blueprint
@@ -4797,6 +4798,14 @@ app.register_blueprint(create_apps_blueprint(
     template=_template,
     icon_links=ICON_LINKS,
     login_required=login_required,
+))
+
+app.register_blueprint(create_desktop_blueprint(
+    template=_template,
+    icon_links=ICON_LINKS,
+    login_required=login_required,
+    data_dir=DATA_DIR,
+    repo=PHONE_APK_REPO,
 ))
 
 app.register_blueprint(create_pwa_blueprint(

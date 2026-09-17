@@ -12,3 +12,9 @@ ssh_host_key*
 # паролями, которыми их запускали. В общий репозиторий им нельзя.
 .claude/settings.local.json
 scratchpad/
+.venv-desktop/
+desktop/node_modules/
+desktop/dist/
+desktop/.cache/
+.pytest_cache/
+pytest-cache-files-*/

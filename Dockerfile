@@ -12,6 +12,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # попадает ни строкой: его собирает отдельный workflow, и в контекст
 # сборки оно тоже не идёт — см. .dockerignore.
 COPY app.py .
+COPY blueprints/ ./blueprints/
 COPY static/ ./static/
 COPY templates/ ./templates/
 

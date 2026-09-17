@@ -186,9 +186,10 @@ def test_freshest_build_wins_and_downloads(app_module, auth_client):
         assert payload["name"] == "vg-agent-11.apk"
         assert payload["size"] == len(builds["vg-agent-11.apk"])
 
-        download = auth_client.get("/app")
-        assert download.status_code == 200
-        assert download.data == builds["vg-agent-11.apk"]
+        # Close Flask's file response before cleanup (Windows locks open files).
+        with auth_client.get("/app") as download:
+            assert download.status_code == 200
+            assert download.data == builds["vg-agent-11.apk"]
     finally:
         for name in builds:
             os.remove(os.path.join(directory, name))

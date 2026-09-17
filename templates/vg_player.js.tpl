@@ -3,6 +3,42 @@
   "use strict";
   if (window.VGP) return;                       // второй раз не заводимся
 
+  // In the Windows shell, navigation pages are controls only. The permanent
+  // player window owns the sole audio element; ordinary browsers use the
+  // original engine below, unchanged.
+  const desktop = window.VGDesktop;
+  if (desktop && desktop.role !== "player") {
+    const listeners = [], proxyAudio = new EventTarget();
+    let snapshot = { track:null, idx:-1, queue:[], playing:false, time:0, duration:NaN, shuffle:false };
+    const values = { src:"", currentTime:0, duration:NaN, paused:true, volume:1, muted:false };
+    const command = (name, ...args) => desktop.playerCommand(name, args);
+    for (const key of Object.keys(values)) Object.defineProperty(proxyAudio, key, {
+      get: () => values[key],
+      set: value => { if (!["paused","duration"].includes(key)) { values[key] = value; command("set", key, value); } },
+    });
+    proxyAudio.play = () => { command("play"); return Promise.resolve(); };
+    proxyAudio.pause = () => command("pause");
+    proxyAudio.load = () => command("load");
+    window.VGP = {
+      audio:proxyAudio, desktop:true, get state() { return snapshot; },
+      subscribe(fn) { listeners.push(fn); fn(snapshot); },
+      ...Object.fromEntries(["adopt","playAt","playId","toggle","next","prev","seek","volume","shuffle","reload"].map(name => [name, (...args) => command(name, ...args)])),
+      open:() => desktop.openPlayer(), popOut:() => desktop.openPlayer(), floatOut:() => desktop.openPlayer(), hide:() => desktop.hidePlayer(),
+    };
+    desktop.onPlayerState(next => {
+      const prev = { ...values };
+      snapshot = next.state;
+      Object.assign(values, next.audio);
+      if (prev.paused !== values.paused) proxyAudio.dispatchEvent(new Event(values.paused ? "pause" : "play"));
+      if (prev.src !== values.src || prev.duration !== values.duration) proxyAudio.dispatchEvent(new Event("loadedmetadata"));
+      proxyAudio.dispatchEvent(new Event("timeupdate"));
+      if (prev.volume !== values.volume || prev.muted !== values.muted) proxyAudio.dispatchEvent(new Event("volumechange"));
+      for (const fn of listeners) { try { fn(snapshot); } catch {} }
+    });
+    command("state");
+    return;
+  }
+
   const KEY = "vgPlayerState";
   const POS = "vgPlayerBox";
   const headless = !!window.VGP_HEADLESS;       // движок без своего оверлея
@@ -196,6 +232,30 @@
     reload: () => fetchList(true),
   };
   window.VGP = api;
+
+  if (desktop && desktop.role === "player") {
+    const publish = () => desktop.publishPlayerState({ state:state(), audio: {
+      src:audio.src, currentTime:audio.currentTime, duration:audio.duration,
+      paused:audio.paused, volume:audio.volume, muted:audio.muted,
+    } });
+    desktop.onPlayerCommand(({ command, args = [] }) => {
+      if (command === "set") {
+        const [key, value] = args;
+        if (key === "src") {
+          try { const u = new URL(value, location.origin); if (u.origin === location.origin) audio.src = u.href; } catch {}
+        } else if (key === "currentTime" && Number.isFinite(value) && value >= 0) audio.currentTime = value;
+        else if (key === "volume" && Number.isFinite(value)) audio.volume = Math.max(0, Math.min(1, value));
+        else if (key === "muted") audio.muted = value === true;
+      } else if (command === "play") { userActed = true; wantPlay = true; audio.play().catch(() => {}); }
+      else if (command === "pause") { userActed = true; wantPlay = false; audio.pause(); }
+      else if (command === "load") audio.load();
+      else if (["adopt","playAt","playId","toggle","next","prev","seek","volume","shuffle","reload"].includes(command)) api[command](...args);
+      publish();
+    });
+    // Flush queued commands only once all engine variables and resume() exist.
+    setTimeout(() => { desktop.playerReady(); publish(); }, 0);
+    setInterval(publish, 250);
+  }
 
   /* Системные кнопки (наушники, медиаклавиши, шторка) */
   const media = () => {
@@ -843,7 +903,7 @@
 
     // В вынесенном окне крестик закрывает само это окно, а не прячет
     // виджет на сайте (виджет там вообще не при чём — окно отдельное).
-    q("[data-remove]").addEventListener("click", () => popup ? window.close() : api.hide());
+    q("[data-remove]").addEventListener("click", () => desktop ? desktop.hidePlayer() : popup ? window.close() : api.hide());
     if (popup) {
       // В окне плеера ⧉ — это уже не «вынести» (мы вынесены), а «поверх всех
       // окон, без рамок» — как маленькое окошко ютуба. В Chrome/Edge это наш
@@ -953,6 +1013,16 @@
   };
 
   const start = () => {
+    if (desktop && desktop.role === "player") {
+      const nativeStyle = document.createElement("style");
+      nativeStyle.textContent = `html,body{margin:0;height:100%;overflow:hidden}
+        body .vgp.vgp-pip{box-sizing:border-box;max-width:none;width:100%;height:100vh;display:flex;flex-direction:column;overflow-x:hidden;overflow-y:auto}
+        .vgp-head{-webkit-app-region:drag}.vgp-head button{-webkit-app-region:no-drag}
+        .vgp.vgp-pip .vgp-body{flex:1;display:flex;flex-direction:column;justify-content:center}
+        .vgp.vgp-pip .vgp-vline button{display:grid;place-items:center;color:#cfe2ee;background:none;border:0;cursor:pointer}
+        .vgp.vgp-pip .vgp-vline button svg{width:15px;height:15px}`;
+      document.head.append(nativeStyle);
+    }
     // Показываемся только если плеер включали кнопкой. Звук при этом живёт
     // всегда: трек, начатый на музыке, продолжается и без виджета.
     // /player/pop — исключение: там виджет и есть смысл окна, показываем

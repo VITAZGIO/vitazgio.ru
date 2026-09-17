@@ -615,6 +615,20 @@
           $("k-play").setAttribute("aria-label", audio.paused ? "Слушать" : "Пауза");
         };
 
+        if (window.VGP && window.VGP.desktop) {
+          let lastDesktopTrack;
+          window.VGP.subscribe(state => {
+            if (!state.track || state.track.id === lastDesktopTrack) return;
+            lastDesktopTrack = state.track.id;
+            queueIds = (state.queue || []).filter(t => t.id.startsWith("m_")).map(t => t.id.slice(2));
+            atIndex = queueIds.indexOf(state.track.id.replace(/^m_/, ""));
+            $("now-title").textContent = state.track.title;
+            $("now-artist").textContent = state.track.artist || "неизвестен";
+            setPlayIcon();
+            paint();
+          });
+        }
+
         // ── ползунки: одна механика на перемотку и громкость ────────────
         const slider = (el, read, write) => {
           const at = (e) => {
@@ -1043,4 +1057,3 @@
       </script>
     </body>
     </html>
-    

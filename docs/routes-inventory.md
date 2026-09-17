@@ -13,10 +13,10 @@ Baseline before blueprint split:
 
 Текущее состояние (проверяется одной строкой, а не на глаз):
 
-- Роутов сейчас: `164`. Считать так — поднять приложение и посмотреть
+- Роутов сейчас: `175`. Считать так — поднять приложение и посмотреть
   `[r for r in app.url_map.iter_rules() if r.endpoint != "static"]`.
   Число включает вебсокеты (`@sock.route` тоже попадает в `url_map`).
-  Уникальных адресов при этом `145`: один и тот же URL под GET и POST —
+  Уникальных адресов при этом `154`: один и тот же URL под GET и POST —
   два правила в `url_map`, но одна строка в таблицах ниже встречается
   дважды (по строке на метод), поэтому сходится.
 - 2026-09-11: +7 в разделе «files/sftp» — файловый менеджер по SFTP.
@@ -321,9 +321,30 @@ Guards column includes route decorators such as `login_required`, `debtor_requir
 аккордеон, как «Запомнить устройства» или «Журнал входов». Занимает бывшее
 место «Резерв 1» на `/cabinet`. Сама страница ничего не считает: данные и
 кнопки — те же API из раздела «phone/agent» выше (статус агента, версии,
-подтянуть/скачать сборку, токены устройства). Раздел «Windows» на странице
-пока пустой задел под будущие программы для компьютеров.
+подтянуть/скачать сборку, токены устройства). Раздел «Windows» использует
+API desktop: сборки EXE, список компьютеров и отзыв их доступа.
 
 | URL | Decorator | Function | Guards |
 | --- | --- | --- | --- |
 | `/apps` | `@apps_bp.get("/apps")` | `apps_page` | `login_required` |
+
+## desktop/windows (2026-09-17)
+
+`blueprints/desktop.py`. Сайт передаёт только SDP и состояние соединения;
+видео, системный звук и события ввода идут через WebRTC. Один зритель на ПК.
+Viewer = вход в кабинет + суточный пароль консоли + владелец конкретной сессии.
+Agent = отдельный токен компьютера, на диске хранится только SHA-256.
+
+| URL | Method | Function | Guards |
+| --- | --- | --- | --- |
+| `/desktop` | GET | `desktop_page` | login_required |
+| `/api/desktop/register` | POST | `register` | login_required |
+| `/api/desktop/devices` | GET | `device_list` | login_required |
+| `/api/desktop/devices/<did>` | DELETE | `revoke` | login_required |
+| `/api/desktop/host` | POST | `host` | agent token |
+| `/api/desktop/config` | GET | `config` | viewer |
+| `/api/desktop/sessions` | POST | `create_session` | viewer |
+| `/api/desktop/sessions/<cid>` | GET | `read_session` | owning viewer or own agent |
+| `/api/desktop/sessions/<cid>` | POST | `answer_session` | own agent |
+| `/api/desktop/sessions/<cid>` | DELETE | `close_session` | owning viewer or own agent |
+| `/api/desktop/version` | GET | `version` | login_required |

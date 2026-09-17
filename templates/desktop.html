@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow"><title>Экран компьютера · vitazgio.ru</title>__ICONLINKS__
+<style>
+:root{--ac:#f97316;color-scheme:dark}*{box-sizing:border-box}body{margin:0;background:#0d1321;color:#e9fbff;font:14px "Cascadia Code",Consolas,monospace}main{max-width:1400px;margin:auto;padding:24px}a{color:var(--ac)}h1{font-size:24px}p{color:#9ba5b8;line-height:1.6}.bar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:16px 0}button,input,select{font:inherit;color:inherit;background:#17243a;border:1px solid #536079;border-radius:5px;padding:9px}button{cursor:pointer}button:disabled{opacity:.45;cursor:default}label{display:flex;align-items:center;gap:6px}#stage{background:#050810;min-height:240px;display:flex;align-items:center;justify-content:center;border:1px solid #273448}video{max-width:100%;max-height:75vh;display:block;touch-action:none;outline:none}#stage:fullscreen video{max-height:100vh;width:100%;height:100%;object-fit:contain}#state{min-height:24px;color:var(--ac)}[hidden]{display:none!important}#gate{border:1px solid #536079;padding:16px;max-width:500px}#metrics{font-size:12px}#mobile-keys{display:flex;gap:8px;flex-wrap:wrap}#mobile-keys button{min-width:44px}input[type=checkbox]{accent-color:var(--ac)}
+</style></head><body><main>
+<a href="/apps">← Приложения</a><h1>Экран компьютера</h1>
+<p>Экспериментальное прямое подключение. Включи доступ в Windows-приложении на нужном ПК.</p>
+<form id="gate" hidden><label>Суточный пароль консоли <input id="password" type="password" autocomplete="current-password" required></label><div class="bar"><button>Открыть доступ</button></div></form>
+<div class="bar"><select id="devices" aria-label="Компьютер"></select><label><input type="checkbox" id="control">Мышь и клавиатура</label><button id="connect" disabled>Подключиться</button><button id="disconnect" disabled>Отключиться</button><button id="fullscreen" disabled>На весь экран</button><button id="sound" disabled>Включить звук</button></div>
+<p id="state" role="status">Проверяю доступ…</p>
+<div id="stage"><video id="screen" autoplay playsinline muted tabindex="0" aria-label="Удалённый экран"></video></div>
+<p id="metrics">Видео идёт напрямую между устройствами, когда сеть это позволяет.</p>
+<div id="mobile-keys"><button data-key="Escape">Esc</button><button data-key="Tab">Tab</button><button data-key="Enter">Enter</button><button data-key="Backspace">⌫</button><button data-key="ArrowLeft">←</button><button data-key="ArrowUp">↑</button><button data-key="ArrowDown">↓</button><button data-key="ArrowRight">→</button></div>
+<p>Для управления нажми на изображение. Если прямое соединение недоступно, можно использовать привычный <a href="/netbird">RDP в NetBird</a>.</p>
+</main><script src="/static/desktop-viewer.js"></script></body></html>
