@@ -863,12 +863,14 @@
               '<div class="tl-kick">Корзина · доступ</div>' +
               '<h3>Введите пароль</h3>' +
               '<p class="tl-sub">Пароль для прав админа.</p>' +
-              '<input id="tl-pass" type="password" autocomplete="current-password" placeholder="Пароль">' +
+              '<form id="tl-form">' +
+              '<input id="tl-pass" type="password" inputmode="numeric" autocomplete="current-password" placeholder="Пароль" autofocus>' +
               '<p class="tl-err" id="tl-err"></p>' +
               '<div class="share-btns">' +
                 '<button type="button" id="tl-no">Отмена</button>' +
-                '<button type="button" class="go" id="tl-ok">Открыть</button>' +
+                '<button type="submit" class="go" id="tl-ok">Открыть</button>' +
               '</div>' +
+              '</form>' +
             '</div>';
           document.body.appendChild(box);
           document.body.classList.add("modal-open");
@@ -896,11 +898,8 @@
             } catch { err.textContent = "Сервер недоступен."; }
             finally { okBtn.disabled = false; }
           };
-          const onKey = (e) => {
-            if (e.key === "Escape") shut(false);
-            if (e.key === "Enter") tryOpen();
-          };
-          okBtn.addEventListener("click", tryOpen);
+          const onKey = (e) => { if (e.key === "Escape") { e.preventDefault(); shut(false); } };
+          box.querySelector("#tl-form").addEventListener("submit", e => { e.preventDefault(); tryOpen(); });
           box.querySelector("#tl-no").addEventListener("click", () => shut(false));
           box.addEventListener("click", (e) => { if (e.target === box) shut(false); });
           document.addEventListener("keydown", onKey);
@@ -1695,6 +1694,29 @@
         // Кнопка «Из буфера»: на телефоне это обход кривого выбора файлов —
         // скопировал картинку в любом приложении и нажал сюда.
         $("from-clip").addEventListener("click", async () => {
+          // In the Windows wrapper this is an explicit, user-initiated native
+          // clipboard read. Browsers often deny clipboard.read() even from a
+          // click, so use the bridge first and keep the browser fallback.
+          try {
+            const native = await window.VGDesktop?.readClipboard?.();
+            if (native) {
+              if (native.image) {
+                const raw = atob(native.image);
+                const bytes = new Uint8Array(raw.length);
+                for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+                const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+                enqueue([new File([bytes], "буфер-" + stamp + ".png", { type: "image/png" })]);
+                toast("Картинка из буфера");
+                return;
+              }
+              if ((native.text || "").trim()) {
+                $("text-area").value = native.text;
+                $("text-area").focus();
+                toast("Текст вставлен — проверь и отправь");
+                return;
+              }
+            }
+          } catch { /* try the browser API below */ }
           if (!navigator.clipboard || !navigator.clipboard.read) {
             toast("Браузер не отдаёт буфер. Нажми Ctrl+V прямо на странице", true);
             return;
@@ -2088,4 +2110,3 @@
       <script src="/vg-player.js" defer></script>
     </body>
     </html>
-    

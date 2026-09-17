@@ -92,6 +92,13 @@ app.whenReady().then(async () => {
     await until(() => main.webContents.executeJavaScript('!!window.VGP?.desktop').catch(() => false));
     const player = await until(() => BrowserWindow.getAllWindows().find(w => w.webContents.getURL().endsWith('/player/pop')));
     await until(() => player.webContents.executeJavaScript('!!window.VGP').catch(() => false));
+    const playerLayout = await player.webContents.executeJavaScript(`(() => {
+      const box = document.querySelector('.vgp'), head = document.querySelector('.vgp-head');
+      return { height: box.getBoundingClientRect().height, viewport: innerHeight,
+        drag: getComputedStyle(head).webkitAppRegion };
+    })()`);
+    assert.equal(Math.round(playerLayout.height), playerLayout.viewport);
+    assert.equal(playerLayout.drag, 'drag');
     await main.webContents.executeJavaScript(`VGP.adopt([${JSON.stringify(track)}],0); VGP.playAt(0); VGP.popOut();`);
     await until(() => player.webContents.executeJavaScript('!VGP.audio.paused && VGP.audio.currentTime > 0.3'));
     const before = await player.webContents.executeJavaScript('VGP.audio.currentTime');

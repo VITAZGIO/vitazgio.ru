@@ -753,6 +753,20 @@
     const style = document.createElement("style");
     style.textContent = CSS;
     document.head.appendChild(style);
+    // This stylesheet must be appended *after* the regular widget CSS.  The
+    // former order let .vgp-pip reset the native drag area and size, leaving a
+    // small card stranded inside a larger frameless Electron window.
+    if (desktop && desktop.role === "player") {
+      const nativeStyle = document.createElement("style");
+      nativeStyle.textContent = `html,body{margin:0;height:100%;overflow:hidden}
+        body .vgp.vgp-pip{box-sizing:border-box;max-width:none;width:100%;height:100vh;display:flex;flex-direction:column;overflow-x:hidden;overflow-y:auto}
+        body .vgp.vgp-pip .vgp-head{-webkit-app-region:drag;cursor:move}
+        body .vgp.vgp-pip .vgp-head button{-webkit-app-region:no-drag}
+        body .vgp.vgp-pip .vgp-body{flex:1;display:flex;flex-direction:column;justify-content:center}
+        body .vgp.vgp-pip .vgp-vline button{display:grid;place-items:center;color:#cfe2ee;background:none;border:0;cursor:pointer}
+        body .vgp.vgp-pip .vgp-vline button svg{width:15px;height:15px}`;
+      document.head.appendChild(nativeStyle);
+    }
 
     box = document.createElement("div");
     // В вынесенном окне (/player/pop) виджет сразу разворачивается и
@@ -1013,16 +1027,6 @@
   };
 
   const start = () => {
-    if (desktop && desktop.role === "player") {
-      const nativeStyle = document.createElement("style");
-      nativeStyle.textContent = `html,body{margin:0;height:100%;overflow:hidden}
-        body .vgp.vgp-pip{box-sizing:border-box;max-width:none;width:100%;height:100vh;display:flex;flex-direction:column;overflow-x:hidden;overflow-y:auto}
-        .vgp-head{-webkit-app-region:drag}.vgp-head button{-webkit-app-region:no-drag}
-        .vgp.vgp-pip .vgp-body{flex:1;display:flex;flex-direction:column;justify-content:center}
-        .vgp.vgp-pip .vgp-vline button{display:grid;place-items:center;color:#cfe2ee;background:none;border:0;cursor:pointer}
-        .vgp.vgp-pip .vgp-vline button svg{width:15px;height:15px}`;
-      document.head.append(nativeStyle);
-    }
     // Показываемся только если плеер включали кнопкой. Звук при этом живёт
     // всегда: трек, начатый на музыке, продолжается и без виджета.
     // /player/pop — исключение: там виджет и есть смысл окна, показываем

@@ -292,7 +292,6 @@
             </svg>
           </a>
           <h1>Личный <span>кабинет</span></h1>
-          <button class="logout-button install-button" id="install" type="button" hidden>Установить приложение</button>
         </header>
         <div class="cabinet-cols">
         <div class="workspace">
@@ -582,54 +581,6 @@
       <script>
       {
         const esc = s => String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
-
-        // ── Установка приложения ──
-        // Ставится весь сайт целиком: приложение открывается на главной,
-        // оттуда вход в кабинет и дальше в дроп.
-        {
-          const button = document.getElementById("install");
-          let prompt = null;
-          if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
-
-          // Уже открыто как приложение — предлагать установку незачем.
-          const installed = window.matchMedia("(display-mode: standalone)").matches ||
-                            window.navigator.standalone === true;
-
-          // Только на телефоне и планшете. На настольном браузере поставить
-          // сайт тоже можно, но смысла в этом нет: то же самое окно и та же
-          // вкладка — кнопка там только мозолит глаза.
-          const handheld = window.matchMedia("(pointer: coarse)").matches &&
-                           "ontouchstart" in window && navigator.maxTouchPoints > 0;
-
-          // Кнопку показываем всегда, кроме этих случаев. Раньше она ждала
-          // beforeinstallprompt, а он молчит, если приложение уже поставлено
-          // или браузер решил, что показывать рано, — и кнопка исчезала
-          // насовсем без единого объяснения.
-          if (button && !installed && handheld) button.hidden = false;
-
-          window.addEventListener("beforeinstallprompt", e => {
-            e.preventDefault();
-            prompt = e;
-            if (button && handheld) button.hidden = false;
-          });
-          window.addEventListener("appinstalled", () => { if (button) button.hidden = true; });
-
-          if (button) button.addEventListener("click", async () => {
-            if (prompt) {
-              prompt.prompt();
-              await prompt.userChoice;
-              prompt = null;
-              button.hidden = true;
-              return;
-            }
-            // Своего окна установки нет — подсказываем, где оно у браузера.
-            const ios = /iPhone|iPad|iPod/.test(navigator.userAgent);
-            alert(ios
-              ? "Поделиться → «На экран Домой»."
-              : "Меню браузера (⋮) → «Установить приложение» или «Добавить на главный экран».\n\n" +
-                "Если пункта нет — приложение уже установлено, проверьте рабочий стол.");
-          });
-        }
 
         // ── Часы ──
         {

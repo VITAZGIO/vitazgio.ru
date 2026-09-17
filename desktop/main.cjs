@@ -1,5 +1,5 @@
 'use strict';
-const { app, BrowserWindow, Menu, Tray, nativeImage, ipcMain, shell, session, safeStorage,
+const { app, BrowserWindow, Menu, Tray, nativeImage, ipcMain, shell, session, safeStorage, clipboard,
   desktopCapturer, screen, globalShortcut, net, powerMonitor } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -189,6 +189,18 @@ ipcMain.handle('vg:settings', event => { authorized(event); openSettings(); });
 ipcMain.handle('vg:update', event => { authorized(event); return checkUpdates(); });
 ipcMain.handle('vg:player-open', event => { authorized(event); openPlayer(); });
 ipcMain.handle('vg:player-hide', event => { authorized(event); player?.hide(); });
+ipcMain.handle('vg:clipboard-read', event => {
+  authorized(event);
+  // The browser Clipboard API is often denied even after a button click. A
+  // bounded native read makes the site's explicit «Из буфера» button work in
+  // this application, without exposing arbitrary filesystem paths.
+  const image = clipboard.readImage();
+  const png = image.isEmpty() ? null : image.toPNG();
+  return {
+    text: clipboard.readText().slice(0, 1024 * 1024),
+    image: png && png.length <= 25 * 1024 * 1024 ? png.toString('base64') : null,
+  };
+});
 ipcMain.handle('vg:settings-read', event => {
   authorized(event, 'settings');
   return { ...status(), ...prefs, displays: screen.getAllDisplays().map((d, i) => ({

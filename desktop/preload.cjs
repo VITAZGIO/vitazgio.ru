@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('VGDesktop', Object.freeze({
   checkUpdates: () => ipcRenderer.invoke('vg:update'),
   openPlayer: () => ipcRenderer.invoke('vg:player-open'),
   hidePlayer: () => ipcRenderer.invoke('vg:player-hide'),
+  readClipboard: () => ipcRenderer.invoke('vg:clipboard-read'),
   playerCommand: (command, args) => ipcRenderer.send('vg:player-command', { command, args }),
   onPlayerState: fn => listen('vg:player-state', fn),
   onUpdate: fn => listen('vg:update-state', fn),
