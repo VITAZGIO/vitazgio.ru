@@ -1,7 +1,6 @@
 import gzip
 import hashlib
 import hmac
-import json
 import os
 import platform
 import re
@@ -10,13 +9,10 @@ import shutil
 import subprocess
 import threading
 import time
-import uuid
 from collections import defaultdict, deque
-from datetime import datetime
 
 import paramiko
-from flask import Flask, g, jsonify, redirect, request, send_file, session, url_for
-from markupsafe import escape
+from flask import Flask, g, jsonify, redirect, request, session, url_for
 from flask_sock import Sock
 from werkzeug.middleware.proxy_fix import ProxyFix
 
@@ -55,27 +51,31 @@ from blueprints.diy import (
     create_diy_blueprint,
     diy_items,
 )
-from blueprints.drop import create_drop_blueprint
+from blueprints.drop import (
+    DROP_DIR,
+    DROP_DOWNLOAD_ID,
+    DROP_MAX_SIZE,
+    DROP_MUSIK_ID,
+    DROP_QUOTA,
+    create_drop_blueprint,
+    drop_items,
+    drop_load_index,
+    drop_lock,
+    drop_musik_tracks,
+    drop_path,
+    drop_trash_bytes,
+    drop_used,
+    drop_used_safe,
+    drop_write_index,
+)
 from blueprints.files import create_files_blueprint
 from blueprints.home import create_home_blueprint
 from blueprints.login_log import create_login_log_blueprint
 from blueprints.music import (
-    MUSIC_DIR,
-    MUSIC_EXTS,
-    MUSIC_MAX_DEPTH,
-    MUSIC_MIMES,
     create_music_blueprint,
-    music_folder_depth as _music_folder_depth,
     music_folders,
     music_items,
-    music_lock,
-    music_safe_name as _music_safe_name,
-    music_scan as _music_scan,
-    music_split as _music_split,
-    music_unlink as _music_unlink,
     music_used as _music_used,
-    music_used_safe as _music_used_safe,
-    music_write_index as _music_write_index,
 )
 from blueprints.notebook import (
     create_notebook_blueprint,
@@ -346,356 +346,10 @@ def _metrics_loop():
 
 threading.Thread(target=_metrics_loop, daemon=True).start()
 
-# ---- Личный дроп ------------------------------------------------------------
-# Содержимое лежит на диске под именами-uuid, настоящие имена только в индексе.
-# Пользовательский текст никогда не попадает в путь, поэтому выйти за пределы
-# каталога принципиально нечем. Удаления по времени нет — только вручную,
-# ограничителем служит квота.
-DROP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "drop_data")
-DROP_TMP_DIR = os.path.join(DROP_DIR, "tmp")
-DROP_INDEX_PATH = os.path.join(DROP_DIR, "index.json")
-DROP_QUOTA = 30 * 1024 * 1024 * 1024      # 30 ГБ на весь дроп
-DROP_MAX_SIZE = 2 * 1024 * 1024 * 1024    # 2 ГБ на один файл
-DROP_CHUNK_TTL = 6 * 3600                 # брошенные недокачки убираем через 6 ч
-DROP_TEXT_PREVIEW = 400
-# Особая папка «MUSIK»: всегда внизу списка, удалить нельзя. Что кинешь в
-# неё (треки или папки с треками) — попадает в плеер. Живёт под своим
-# постоянным id, чтобы переживать перезапуски.
-DROP_MUSIK_ID = "musik"
-DROP_AUDIO_EXTS = {".mp3", ".ogg", ".wav", ".m4a", ".opus", ".flac", ".aac"}
-# Особая папка «Download»: тоже нельзя переименовать/удалить, тоже всегда на
-# месте. В отличие от MUSIK ничего не подменяет — обычная папка дропа, просто
-# защищённая и с фиксированным назначением: сюда по умолчанию (без явного
-# выбора папки) падает то, что прислали «Поделиться» с телефона и кнопка VG
-# со страницы файлов SFTP.
-DROP_DOWNLOAD_ID = "download"
-
-drop_items: dict = {}
-drop_uploads: dict = {}
-drop_lock = threading.Lock()
-os.makedirs(DROP_TMP_DIR, exist_ok=True)
-
-
-def _drop_path(item_id):
-    return os.path.join(DROP_DIR, f"{item_id}.bin")
-
-
-def _drop_tmp_path(upload_id):
-    return os.path.join(DROP_TMP_DIR, f"{upload_id}.part")
-
-
-def _drop_write_index():
-    """Вызывать под drop_lock."""
-    tmp = DROP_INDEX_PATH + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump(drop_items, fh, ensure_ascii=False)
-    os.replace(tmp, DROP_INDEX_PATH)
-
-
-def _drop_used():
-    """Занято байт. Вызывать под drop_lock."""
-    return sum(item.get("size", 0) for item in drop_items.values())
-
-
-def _drop_children(parent):
-    """Прямые потомки папки. Вызывать под drop_lock."""
-    return [k for k, v in drop_items.items() if v.get("parent") == parent]
-
-
-# Значки папок. Имя из этого списка сохраняется в индексе, а рисует его
-# уже страница — так на сервере не лежит ни байта разметки.
-DROP_FOLDER_ICONS = (
-    "folder", "warn", "clock", "tree", "monitor", "phone",
-    "claude", "vitaz", "star", "lock", "music", "photo",
-    "video", "work", "trash", "game",
-    # Вторая строка добавлена 2026-09-11 для папки Download: стрелка загрузки
-    # (её же икона), «поделиться», настройки (шестерёнка) и профиль —
-    # присланы вторым и третьим заходом, первые версии шестерёнки/профиля
-    # оказались той же стрелкой загрузки по ошибке.
-    "download", "share", "settings", "profile",
-)
-
-
-def _drop_folder_stats(item_id, memo=None):
-    """Сколько папка весит, сколько в ней всего и когда её трогали в последний
-    раз — считая по всему содержимому вглубь. Вызывать под drop_lock.
-
-    Свежесть папки берём по самому свежему файлу внутри: на Windows папка
-    считается изменённой, когда правишь её содержимое, и сортировка «сначала
-    новые» без этого выглядит враньём."""
-    memo = {} if memo is None else memo
-    if item_id in memo:
-        return memo[item_id]
-    memo[item_id] = (0, 0.0, 0)                       # заглушка от петли в индексе
-    size = 0
-    touched = drop_items.get(item_id, {}).get("created", 0.0)
-    count = 0
-    for child in _drop_children(item_id):
-        node = drop_items[child]
-        # Удалённое (в корзине) в счёт живой папки не идёт — оно считается
-        # отдельно, как содержимое корзины.
-        if node.get("deleted"):
-            continue
-        count += 1
-        if node["kind"] == "folder":
-            sub_size, sub_touched, sub_count = _drop_folder_stats(child, memo)
-            size += sub_size
-            count += sub_count
-            touched = max(touched, sub_touched)
-        else:
-            size += node.get("size", 0)
-            touched = max(touched, node.get("created", 0.0))
-    memo[item_id] = (size, touched, count)
-    return memo[item_id]
-
-
-def _drop_discard(item_id):
-    """Удаляет элемент, для папки — вместе со всем содержимым. Под drop_lock."""
-    item = drop_items.get(item_id)
-    if not item:
-        return
-    if item["kind"] == "folder":
-        for child in _drop_children(item_id):
-            _drop_discard(child)
-    drop_items.pop(item_id, None)
-    for path in (_drop_path(item_id), os.path.join(DROP_DIR, f"{item_id}.thumb")):
-        try:
-            os.remove(path)
-        except OSError:
-            pass
-
-
-# ---- Корзина -------------------------------------------------------------
-# Удалённое не стирается сразу, а уезжает в корзину: метка `deleted` со
-# временем. Место оно продолжает занимать (входит в «Занято»), само чистится
-# через месяц, а до того его можно вернуть или снести вручную по паролю.
-DROP_TRASH_TTL = 30 * 24 * 3600
-# Пароль корзины хранится хешем — plaintext в исходник не кладём.
-# sha256("1224"); пароль простой, это защёлка «как в Windows», не броня.
-DROP_TRASH_PASS_HASH = "0d866ba9f9fd0f2cbb2134daf52356d2021a3686352d5c19d967305bf9e4bbdc"
-
-
-def _drop_trash(item_id, when=None):
-    """Отправляет элемент в корзину. Для папки метку ставим только на неё —
-    содержимое уезжает вместе, но своих меток не получает. Особую папку MUSIK
-    не трогаем. Под drop_lock."""
-    if item_id == DROP_MUSIK_ID:
-        return
-    item = drop_items.get(item_id)
-    if item and item.get("special"):
-        return
-    if item and not item.get("deleted"):
-        item["deleted"] = when or time.time()
-
-
-def _drop_has_deleted_ancestor(item_id):
-    """Лежит ли элемент внутри уже удалённой папки. Под drop_lock."""
-    seen = set()
-    parent = drop_items.get(item_id, {}).get("parent")
-    while parent and parent in drop_items and parent not in seen:
-        seen.add(parent)
-        if drop_items[parent].get("deleted"):
-            return True
-        parent = drop_items[parent].get("parent")
-    return False
-
-
-def _drop_trash_roots():
-    """Корни удалённых поддеревьев — то, что показываем в корзине списком.
-    Вложенное в удалённую папку отдельной строкой не выводим. Под drop_lock."""
-    return [k for k, v in drop_items.items()
-            if v.get("deleted") and not _drop_has_deleted_ancestor(k)]
-
-
-def _drop_trash_bytes(memo=None):
-    """Сколько всего занимает корзина. Под drop_lock."""
-    memo = {} if memo is None else memo
-    total = 0
-    for root in _drop_trash_roots():
-        item = drop_items[root]
-        if item["kind"] == "folder":
-            total += _drop_trash_subtree_bytes(root)
-        else:
-            total += item.get("size", 0)
-    return total
-
-
-def _drop_trash_subtree_bytes(item_id):
-    """Вес удалённой папки со всем, что внутри (живое обычным подсчётом уже
-    пропускает удалённое, поэтому считаем отдельно). Под drop_lock."""
-    total = 0
-    for child in _drop_children(item_id):
-        node = drop_items[child]
-        if node["kind"] == "folder":
-            total += _drop_trash_subtree_bytes(child)
-        else:
-            total += node.get("size", 0)
-    return total
-
-
-def _drop_sweep_trash():
-    """Выносит из корзины то, что пролежало дольше месяца. Под drop_lock."""
-    now = time.time()
-    for root in _drop_trash_roots():
-        if now - (drop_items[root].get("deleted") or 0) > DROP_TRASH_TTL:
-            _drop_discard(root)
-
-
-def _drop_trash_ok(password):
-    got = hashlib.sha256((password or "").encode("utf-8")).hexdigest()
-    return hmac.compare_digest(got, DROP_TRASH_PASS_HASH)
-
-
-def _drop_path_to_root(item_id):
-    """Цепочка папок от корня до item_id включительно. Под drop_lock."""
-    chain, seen = [], set()
-    while item_id and item_id in drop_items and item_id not in seen:
-        seen.add(item_id)
-        chain.append({"id": item_id, "name": drop_items[item_id]["name"]})
-        item_id = drop_items[item_id].get("parent")
-    return list(reversed(chain))
-
-
-def _drop_is_descendant(item_id, maybe_parent):
-    """Не пытаются ли переместить папку внутрь самой себя. Под drop_lock."""
-    seen = set()
-    while maybe_parent and maybe_parent not in seen:
-        if maybe_parent == item_id:
-            return True
-        seen.add(maybe_parent)
-        maybe_parent = drop_items.get(maybe_parent, {}).get("parent")
-    return False
-
-
-def _drop_share_lookup(token):
-    """Ищет элемент по токену ссылки. Под drop_lock."""
-    now = time.time()
-    for item_id, item in drop_items.items():
-        share = item.get("share")
-        # Сравниваем байты: compare_digest падает на строках с не-ASCII,
-        # а токен приходит из адресной строки и может быть каким угодно.
-        if share and hmac.compare_digest(share["token"].encode(), token.encode()):
-            if share["expires"] and share["expires"] < now:
-                return None
-            return item_id
-    return None
-
-
-def _drop_sweep_uploads():
-    """Подчищает брошенные недокачки. Под drop_lock."""
-    now = time.time()
-    for upload_id in [k for k, v in drop_uploads.items() if now - v["started"] > DROP_CHUNK_TTL]:
-        drop_uploads.pop(upload_id, None)
-        try:
-            os.remove(_drop_tmp_path(upload_id))
-        except OSError:
-            pass
-
-
-def _drop_load_index():
-    try:
-        with open(DROP_INDEX_PATH, encoding="utf-8") as fh:
-            saved = json.load(fh)
-    except (OSError, ValueError):
-        saved = {}
-
-    for item_id, meta in saved.items():
-        # Записи старого формата: плоский список файлов без папок и ссылок.
-        meta.setdefault("kind", "text" if meta.pop("is_text", False) else "file")
-        meta.setdefault("parent", None)
-        meta.setdefault("share", None)
-        meta.setdefault("size", 0)
-        meta.setdefault("deleted", None)
-        if meta["kind"] == "folder" or os.path.exists(_drop_path(item_id)):
-            drop_items[item_id] = meta
-
-    known = set(drop_items)
-    for fname in os.listdir(DROP_DIR):
-        for suffix in (".bin", ".thumb"):
-            if fname.endswith(suffix) and fname[: -len(suffix)] not in known:
-                try:
-                    os.remove(os.path.join(DROP_DIR, fname))
-                except OSError:
-                    pass
-    for fname in os.listdir(DROP_TMP_DIR):
-        try:
-            os.remove(os.path.join(DROP_TMP_DIR, fname))
-        except OSError:
-            pass
-
-    # Потерянные родители: папку могли удалить в обход рекурсии.
-    for item in drop_items.values():
-        if item["parent"] and item["parent"] not in drop_items:
-            item["parent"] = None
-    _drop_ensure_musik()         # особая папка MUSIK всегда на месте
-    _drop_ensure_download()      # особая папка Download тоже
-    _drop_sweep_trash()          # что пролежало в корзине дольше месяца — вон
-    _drop_write_index()
-
-
-def _drop_ensure_download():
-    """Заводит (или чинит) особую папку Download в корне. Под drop_lock либо
-    на старте до потоков. Сюда по умолчанию падает то, что «Поделиться» с
-    телефона и кнопка VG со страницы файлов (SFTP) кладут без явного выбора
-    папки — сам дроп при обычной загрузке от этого не меняется, там папку
-    выбирают, зайдя в неё заранее."""
-    d = drop_items.get(DROP_DOWNLOAD_ID)
-    if not d or d.get("kind") != "folder":
-        drop_items[DROP_DOWNLOAD_ID] = {
-            "kind": "folder", "name": "Download", "parent": None, "share": None,
-            "size": 0, "deleted": None, "icon": "download", "special": True,
-            "created": time.time(),
-        }
-    else:
-        d["parent"] = None            # всегда в корне
-        d["deleted"] = None           # в корзину не уходит
-        d["special"] = True
-        d.setdefault("icon", "download")
-
-
-def _drop_ensure_musik():
-    """Заводит (или чинит) особую папку MUSIK в корне. Под drop_lock либо на
-    старте до потоков."""
-    m = drop_items.get(DROP_MUSIK_ID)
-    if not m or m.get("kind") != "folder":
-        drop_items[DROP_MUSIK_ID] = {
-            "kind": "folder", "name": "MUSIK", "parent": None, "share": None,
-            "size": 0, "deleted": None, "icon": "music", "special": True,
-            "created": time.time(),
-        }
-    else:
-        m["parent"] = None            # всегда в корне
-        m["deleted"] = None           # в корзину не уходит
-        m["special"] = True
-        m.setdefault("icon", "music")
-
-
-def _drop_musik_tracks():
-    """Аудиофайлы внутри папки MUSIK (вглубь по подпапкам) — для плеера.
-    Каждый со своим адресом потока. Под drop_lock."""
-    out = []
-
-    def walk(parent, label):
-        kids = [(k, v) for k, v in drop_items.items()
-                if v.get("parent") == parent and not v.get("deleted")]
-        kids.sort(key=lambda kv: kv[1]["name"].lower())
-        for k, v in kids:
-            if v["kind"] == "folder":
-                walk(k, (label + " / " if label else "") + v["name"])
-            elif v["kind"] == "file":
-                if os.path.splitext(v["name"])[1].lower() in DROP_AUDIO_EXTS:
-                    out.append({
-                        "id": "d_" + k,
-                        "title": os.path.splitext(v["name"])[0],
-                        "artist": "", "folder": label,
-                        "url": "/api/drop/view/" + k,
-                    })
-
-    walk(DROP_MUSIK_ID, "")
-    return out
-
-
-_drop_load_index()
+# Личный дроп (DROP_*, drop_items/drop_lock и вся логика) — теперь целиком
+# в blueprints/drop.py (задача 39): самый большой разрез, файл был
+# полностью самодостаточен в app.py, кроме музыки (см. ниже) и того, что
+# ещё несколько blueprint'ов читают его состояние обратно.
 
 # Доверенные устройства, журнал входов и login_required — в core/auth.py
 # (DATA_DIR, DEVICE_COOKIE, trusted_devices, devices_lock — импортированы
@@ -719,15 +373,6 @@ PHONE_TOKENS_PATH = os.path.join(DATA_DIR, "phone_tokens.json")
 # music_split, music_folder_depth, MUSIC_DIR, MUSIC_EXTS, MUSIC_MIMES,
 # MUSIC_MAX_DEPTH) app.py читает обратно — их напрямую трогает ещё не
 # переехавший drop.py (папка MUSIK показывает саму фонотеку).
-
-# Дроп и фонотека делят ОДНО хранилище на 30 ГБ (DROP_QUOTA) — правило:
-# сначала music_lock, потом drop_lock (или каждый отдельно), никогда
-# наоборот, иначе взаимоблокировка (music_used_safe — в blueprints/music.py).
-def _drop_used_safe():
-    with drop_lock:
-        return _drop_used()
-
-
 
 
 # _rate_blocked/_rate_hit/_rate_clear, console_password_today, device_check
@@ -815,7 +460,6 @@ def _phone_publish_status(online, last_seen):
 # больше не нужны — их читает только blueprints/login_log.py напрямую).
 
 
-
 @app.errorhandler(Exception)
 def any_error(err):
     """Любая непойманная ошибка. Страницам отдаём как было, а запросам к API —
@@ -846,8 +490,8 @@ def diag_api():
             out[name] = "ОШИБКА: %s: %s" % (e.__class__.__name__, e)
 
     probe("дроп: элементов", lambda: len(drop_items))
-    probe("дроп: занято", lambda: _drop_used())
-    probe("дроп: корзина", lambda: _drop_trash_bytes())
+    probe("дроп: занято", lambda: drop_used())
+    probe("дроп: корзина", lambda: drop_trash_bytes())
     probe("папка MUSIK", lambda: bool(drop_items.get(DROP_MUSIK_ID)))
     probe("фонотека: треков", lambda: len(music_items))
     probe("фонотека: папок", lambda: len(music_folders))
@@ -1018,11 +662,6 @@ def session_probe():
     return jsonify(trusted=trusted)
 
 
-
-
-
-
-
 # ---- Вкладка Claude: разговор с Claude Code через сайт ----------------------
 # Claude Code — программа для командной строки, и живёт она на домашней машине.
 # Городить ради неё отдельный сервис не нужно: у кабинета уже есть готовый
@@ -1081,8 +720,6 @@ def metrics_api():
     return jsonify(result)
 
 
-
-
 # WOL_RELAY_HOST/USER/PASS/WOL_BROADCASTS/_wol_relay — теперь в
 # blueprints/remote.py (задача 38): нужны только там, /api/wol —
 # единственный потребитель.
@@ -1102,540 +739,6 @@ def uptime_api():
 # music_editor_required и music_unlink (как _music_unlink) — тоже в
 # blueprints/music.py, импортированы наверху файла.
 
-
-def _drop_thumb_path(item_id):
-    return os.path.join(DROP_DIR, f"{item_id}.thumb")
-
-
-def _drop_can_thumb(item):
-    """Миниатюры делаем только для растровых картинок. SVG сюда не пускаем:
-    это документ со скриптами, а не картинка."""
-    if item.get("kind") != "file":
-        return False
-    name = item.get("name", "")
-    ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
-    return ext in {"jpg", "jpeg", "png", "gif", "webp", "bmp", "tif", "tiff"}
-
-
-def _drop_make_thumb(item_id):
-    """Рисует миниатюру рядом с файлом. Возвращает путь или None."""
-    thumb_path = _drop_thumb_path(item_id)
-    if os.path.exists(thumb_path):
-        return thumb_path
-    try:
-        from PIL import Image
-
-        Image.MAX_IMAGE_PIXELS = 80_000_000  # защита от «бомб» с гигантским разрешением
-        with Image.open(_drop_path(item_id)) as image:
-            image.draft("RGB", (256, 256))  # для JPEG декодируем сразу уменьшенным
-            image = image.convert("RGB")
-            image.thumbnail((200, 200))
-            image.save(thumb_path, "JPEG", quality=62, optimize=True)
-        return thumb_path
-    except Exception:
-        return None
-# Растровые картинки, которые можно безопасно отдать в строку: они не умеют
-# выполнять скрипты. SVG сюда не входит намеренно — внутри него живёт
-# полноценный JS, и на домене сайта он дотянулся бы до сессии.
-# Что можно безопасно показать прямо в браузере. Ни один из этих типов не
-# умеет выполнять скрипты. SVG и HTML сюда не входят намеренно: внутри них
-# живёт полноценный JS, и на домене сайта он дотянулся бы до сессии.
-DROP_INLINE_TYPES = {
-    ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
-    ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp",
-    ".ico": "image/x-icon", ".avif": "image/avif",
-    ".pdf": "application/pdf",
-    ".txt": "text/plain; charset=utf-8", ".log": "text/plain; charset=utf-8",
-    ".md": "text/plain; charset=utf-8", ".csv": "text/plain; charset=utf-8",
-    ".mp4": "video/mp4", ".webm": "video/webm", ".m4v": "video/mp4",
-    ".mov": "video/quicktime", ".ogv": "video/ogg",
-    ".mp3": "audio/mpeg", ".ogg": "audio/ogg", ".wav": "audio/wav",
-    ".m4a": "audio/mp4", ".opus": "audio/ogg", ".flac": "audio/flac",
-    ".aac": "audio/aac",
-}
-
-# Чем показывать файл на странице ссылки. Всё, чего тут нет, ссылка просто
-# отдаёт файлом — выдумывать просмотр для архива или экзешника незачем.
-DROP_VIEW_KINDS = (
-    ("image", {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".avif", ".ico"}),
-    ("video", {".mp4", ".webm", ".m4v", ".mov", ".ogv"}),
-    ("audio", {".mp3", ".ogg", ".wav", ".m4a", ".opus", ".flac", ".aac"}),
-    ("page", {".pdf", ".txt", ".log", ".md", ".csv"}),
-)
-
-
-def _drop_human_size(bytes_count):
-    """Вес файла по-человечески — для шапки страницы просмотра."""
-    if bytes_count >= 1073741824:
-        return f"{bytes_count / 1073741824:.2f} ГБ"
-    if bytes_count >= 1048576:
-        return f"{bytes_count / 1048576:.1f} МБ"
-    if bytes_count >= 1024:
-        return f"{round(bytes_count / 1024)} КБ"
-    return f"{bytes_count} Б"
-
-
-def _drop_view_kind(name):
-    """Каким тегом показывать файл, либо пусто — если показывать нечем."""
-    ext = os.path.splitext(name or "")[1].lower()
-    for kind, exts in DROP_VIEW_KINDS:
-        if ext in exts:
-            return kind
-    return ""
-
-
-def _drop_share_mode(share):
-    """Что делает ссылка: «view» — открывает страницу, «dl» — отдаёт файл.
-
-    У ссылок, выданных до появления тумблера, поля нет. Раньше правило было
-    негласным: бессрочная открывалась в браузере, а срочная скачивалась —
-    его и повторяем, чтобы старые ссылки вели себя как вели."""
-    mode = (share or {}).get("mode")
-    if mode in ("view", "dl"):
-        return mode
-    return "dl" if (share or {}).get("expires") else "view"
-
-
-def _drop_send(item_id, item, inline=False):
-    """По умолчанию отдаём вложением: иначе загруженный .html или .svg со
-    скриптом выполнился бы на домене сайта и добрался до сессии и токена
-    устройства. Открываем в браузере только по бессрочной ссылке и только
-    те типы, которые заведомо ничего не выполняют."""
-    ext = os.path.splitext(item["name"])[1].lower()
-    mime = DROP_INLINE_TYPES.get(ext) if inline else None
-    response = send_file(
-        _drop_path(item_id),
-        mimetype=mime or "application/octet-stream",
-        as_attachment=not mime,
-        download_name=item["name"],
-        conditional=True,
-    )
-    response.headers["Content-Security-Policy"] = "default-src 'none'; sandbox"
-    # Без этого браузер может «донюхать» тип сам и решить, что перед ним HTML
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    return response
-
-
-def _drop_text_name(first_line):
-    """Имя текстовой заметки: первая строка плюс .txt, если его ещё нет."""
-    name = (first_line or "").strip()[:60] or "Текст"
-    return name if name.lower().endswith(".txt") else name + ".txt"
-def _drop_music_take(tmp_path, name, size, folder):
-    """Принимает файл, брошенный в папку MUSIK, прямо в фонотеку — тогда он
-    сразу оказывается и в плеере, и на странице музыки."""
-    ext = os.path.splitext(name)[1].lower()
-    if ext not in MUSIC_EXTS:
-        _music_unlink(tmp_path)
-        return jsonify(error="В MUSIK кладём только музыку."), 415
-    # Место общее с дропом: дроп занят + вся музыка + новый файл против 30 ГБ.
-    drop_used = _drop_used_safe()
-    with music_lock:
-        if drop_used + _music_used() + size > DROP_QUOTA:
-            _music_unlink(tmp_path)
-            return jsonify(error="В хранилище кончилось место."), 507
-        if folder and folder not in music_folders:
-            folder = ""
-        # подбираем свободное имя, как это делает загрузка на странице музыки
-        safe = _music_safe_name(name)
-        taken = {t["file"] for t in music_items.values()}
-        stem, suffix = os.path.splitext(safe)
-        candidate, counter = safe, 2
-        while candidate in taken or os.path.exists(os.path.join(MUSIC_DIR, candidate)):
-            candidate = f"{stem} ({counter}){suffix}"
-            counter += 1
-        try:
-            os.replace(tmp_path, os.path.join(MUSIC_DIR, candidate))
-        except OSError as e:
-            _music_unlink(tmp_path)
-            return jsonify(error=f"Не удалось сохранить: {e}"), 500
-        artist, title = _music_split(os.path.splitext(candidate)[0])
-        track_id = str(uuid.uuid4())
-        music_items[track_id] = {"file": candidate, "artist": artist, "title": title,
-                                 "size": size, "added": time.time(), "folder": folder}
-        _music_write_index()
-    return jsonify(id="mt_" + track_id, music=True)
-
-
-def _drop_music_view(parent):
-    """Содержимое папки MUSIK — это сама фонотека, показанная глазами дропа.
-
-    Раньше дроп и фонотека были двумя разными складами: трек, загруженный на
-    странице музыки, в дропе не появлялся, и наоборот. Теперь MUSIK не хранит
-    ничего своего, а показывает папки и треки фонотеки — то же самое, что
-    играет плеер. Значки виртуальные: id папки начинается с «mf_», трека — с
-    «mt_», по ним и разбираем запросы дальше."""
-    inside = "" if parent == DROP_MUSIK_ID else parent[3:]
-    items, chain = [], []
-    with music_lock:
-        _music_scan()
-        music_used = _music_used()
-        for k, v in sorted(music_folders.items(), key=lambda x: x[1]["name"].lower()):
-            if v.get("parent", "") != inside:
-                continue
-            kids = sum(1 for t in music_items.values() if t.get("folder", "") == k)
-            size = sum(t.get("size", 0) for t in music_items.values()
-                       if t.get("folder", "") == k)
-            items.append({"id": "mf_" + k, "kind": "folder", "name": v["name"],
-                          "size": size, "count": kids, "icon": "music",
-                          "created": v.get("added", 0), "touched": v.get("added", 0),
-                          "share": False, "share_expires": None, "share_mode": None,
-                          "share_url": None, "thumb": False, "preview": None,
-                          "truncated": False, "music": True})
-        for k, v in sorted(music_items.items(),
-                           key=lambda x: (str(x[1].get("artist", "")).lower(),
-                                          str(x[1].get("title", "")).lower())):
-            if v.get("folder", "") != inside:
-                continue
-            name = " — ".join([p for p in (v.get("artist"), v.get("title")) if p]) or v["file"]
-            items.append({"id": "mt_" + k, "kind": "file", "name": name,
-                          "size": v.get("size", 0), "created": v.get("added", 0),
-                          "touched": v.get("added", 0), "preview": None, "truncated": False,
-                          "thumb": False, "share": False, "share_expires": None,
-                          "share_mode": None, "share_url": None, "music": True})
-        # путь наверх: MUSIK, а дальше вложенные папки фонотеки
-        node = inside
-        seen = set()
-        while node and node in music_folders and node not in seen:
-            seen.add(node)
-            chain.append({"id": "mf_" + node, "name": music_folders[node]["name"]})
-            node = music_folders[node].get("parent", "")
-        chain.reverse()
-    with drop_lock:
-        used, trash = _drop_used() + music_used, _drop_trash_bytes()
-    return jsonify(items=items,
-                   breadcrumbs=[{"id": DROP_MUSIK_ID, "name": "MUSIK"}] + chain,
-                   used=used, music=music_used, quota=DROP_QUOTA, trash=trash,
-                   music_view=True)
-def _drop_music_send(item_id, inline=False):
-    """Трек фонотеки, отданный через дроп: id вида «mt_<id>». Возвращает
-    ответ или None, если это обычный элемент дропа."""
-    if not item_id.startswith("mt_"):
-        return None
-    with music_lock:
-        track = music_items.get(item_id[3:])
-    if not track:
-        return "Не найдено", 404
-    path = os.path.join(MUSIC_DIR, track["file"])
-    if not os.path.exists(path):
-        return "Не найдено", 404
-    ext = os.path.splitext(track["file"])[1].lower()
-    name = " — ".join([p for p in (track.get("artist"), track.get("title")) if p]) or track["file"]
-    return send_file(path, mimetype=MUSIC_MIMES.get(ext, "audio/mpeg"),
-                     as_attachment=not inline, download_name=name + ext, conditional=True)
-# Архив папки собираем на лету и сразу отдаём: складывать его в памяти
-# нельзя — папка с фотографиями легко весит больше, чем есть оперативки.
-DROP_ZIP_CHUNK = 1024 * 1024
-
-
-class _ZipSink:
-    """Приёмник для zipfile: копит записанное и отдаёт порциями наружу.
-
-    zipfile умеет писать в непрокручиваемый поток — тогда размеры файлов он
-    дописывает после данных отдельной меткой. Нам это и нужно: считать файл
-    заранее, только чтобы узнать его длину, значит прочитать всю папку дважды."""
-
-    def __init__(self):
-        self._parts = []
-        self._pos = 0
-        self._held = 0
-
-    def write(self, data):
-        data = bytes(data)
-        self._parts.append(data)
-        self._pos += len(data)
-        self._held += len(data)
-        return len(data)
-
-    def tell(self):
-        return self._pos
-
-    def flush(self):
-        pass
-
-    @property
-    def held(self):
-        return self._held
-
-    def drain(self):
-        out = b"".join(self._parts)
-        self._parts.clear()
-        self._held = 0
-        return out
-
-
-def _drop_zip_name(name, taken):
-    """Имя внутри архива: без разделителей пути и без повторов в одной папке.
-
-    Разделители убираем не для красоты — имя вида «../ключи» распаковалось бы
-    мимо выбранной папки."""
-    clean = re.sub(r'[\x00-\x1f<>:"/\\|?*]', "", name or "").strip(" .") or "файл"
-    stem, dot, ext = clean.rpartition(".")
-    if not dot:
-        stem, ext = clean, ""
-    candidate, counter = clean, 2
-    while candidate.lower() in taken:
-        candidate = f"{stem} ({counter})" + (f".{ext}" if dot else "")
-        counter += 1
-    taken.add(candidate.lower())
-    return candidate
-
-
-def _drop_zip_plan(folder_id):
-    """Что кладём в архив: путь внутри архива, файл на диске, размер, время.
-    Пустые папки тоже попадают — иначе они пропадут при распаковке.
-    Вызывать под drop_lock."""
-    plan = []
-
-    def walk(node_id, prefix, seen):
-        if node_id in seen:
-            return
-        seen = seen | {node_id}
-        taken = set()
-        for child in sorted(_drop_children(node_id),
-                            key=lambda k: drop_items[k]["name"].lower()):
-            item = drop_items[child]
-            name = _drop_zip_name(item["name"], taken)
-            if item["kind"] == "folder":
-                plan.append((prefix + name + "/", None, 0, item.get("created", 0)))
-                walk(child, prefix + name + "/", seen)
-            else:
-                plan.append((prefix + name, child, item.get("size", 0),
-                             item.get("created", 0)))
-
-    walk(folder_id, "", set())
-    return plan
-
-
-def _drop_zip_length(plan):
-    """Точный размер будущего архива, чтобы браузер показал полосу загрузки.
-
-    Считается только для несжатого архива без ZIP64: заголовок файла 30 байт
-    плюс имя, затем данные, затем метка на 16 байт; в конце по 46 байт плюс
-    имя на каждую запись и 22 байта хвоста. Если выходит за четыре гигабайта,
-    формат переключится на ZIP64 и эта арифметика перестанет быть верной —
-    тогда длину не обещаем вовсе."""
-    total = 22
-    for arcname, file_id, size, _ in plan:
-        name_len = len(arcname.encode("utf-8"))
-        # 30 — заголовок файла, 16 — метка с размерами после данных,
-        # 46 — запись в оглавлении. Метка пишется и для папок: zipfile
-        # ставит её всем записям, раз поток непрокручиваемый.
-        total += 30 + name_len + 16 + 46 + name_len
-        if file_id:
-            total += size
-    limit = 0xFFFFFFFF
-    if total > limit or any(size > limit for _, _, size, _ in plan):
-        return None
-    return total
-
-
-def _drop_zip_time(stamp):
-    """Время файла для архива. До 1980 года формат не умеет, ниже не опускаем."""
-    try:
-        # Время в архиве пишется без пояса — берём местное, как и делают
-        # все архиваторы.
-        moment = datetime.fromtimestamp(stamp or 0)
-    except (OSError, OverflowError, ValueError):
-        moment = datetime.now()
-    if moment.year < 1980:
-        return (1980, 1, 1, 0, 0, 0)
-    return (moment.year, moment.month, moment.day,
-            moment.hour, moment.minute, moment.second - moment.second % 2)
-# ---- Пакетные действия: копирование, перенос, удаление -----------------------
-# Копирование гигабайтной папки занимает секунды, а то и минуты, поэтому работа
-# уходит в отдельный поток, а страница спрашивает о ходе дела по номеру задачи.
-# Диск трогаем вне drop_lock: под ним весь дроп встал бы на всё время копии.
-drop_jobs: dict = {}
-drop_jobs_lock = threading.Lock()
-DROP_JOB_TTL = 900              # доделанную задачу держим ещё четверть часа
-DROP_COPY_CHUNK = 4 * 1024 * 1024
-
-
-def _drop_job_set(job_id, **fields):
-    with drop_jobs_lock:
-        job = drop_jobs.get(job_id)
-        if job:
-            job.update(fields)
-
-
-def _drop_jobs_sweep():
-    """Выкидываем задачи, о которых уже не спросят. Под drop_jobs_lock."""
-    edge = time.time() - DROP_JOB_TTL
-    for key in [k for k, v in drop_jobs.items()
-                if v["state"] != "run" and v["ended"] < edge]:
-        drop_jobs.pop(key, None)
-
-
-def _drop_unique_name(name, parent, extra=()):
-    """«файл.txt» рядом с таким же становится «файл (2).txt». Под drop_lock.
-
-    extra — имена, которых в папке ещё нет, но они там вот-вот появятся:
-    при копировании план строится целиком заранее, и без этого списка две
-    одинаковые копии в одной пачке получили бы одно и то же имя."""
-    taken = {drop_items[k]["name"] for k in _drop_children(parent)} | set(extra)
-    if name not in taken:
-        return name
-    stem, ext = os.path.splitext(name)
-    for n in range(2, 1000):
-        candidate = f"{stem} ({n}){ext}"
-        if candidate not in taken:
-            return candidate
-    return f"{stem} ({uuid.uuid4().hex[:6]}){ext}"
-
-
-def _drop_copy_plan(ids, target):
-    """Разворачивает выделенное в плоский список работ. Под drop_lock.
-
-    Порядок обхода такой, что папка всегда идёт раньше своего содержимого —
-    значит к моменту создания ребёнка его новый родитель уже существует."""
-    plan, total, claimed = [], 0, set()
-
-    def walk(item_id, parent, rename):
-        nonlocal total
-        item = drop_items.get(item_id)
-        if not item:
-            return
-        new_id = str(uuid.uuid4())
-        if rename:
-            name = _drop_unique_name(item["name"], parent, claimed)
-            claimed.add(name)
-        else:
-            name = item["name"]
-        plan.append({"src": item_id, "new": new_id, "parent": parent,
-                     "name": name, "kind": item["kind"],
-                     "size": item.get("size", 0)})
-        total += item.get("size", 0)
-        if item["kind"] == "folder":
-            for child in _drop_children(item_id):
-                walk(child, new_id, False)
-
-    for item_id in ids:
-        walk(item_id, target, True)
-    return plan, total
-
-
-def _drop_copy_file(src_id, new_id, job_id):
-    """Копирует тело файла кусками, отмечая пройденные байты."""
-    src, dst = _drop_path(src_id), _drop_path(new_id)
-    with open(src, "rb") as fin, open(dst, "wb") as fout:
-        while True:
-            chunk = fin.read(DROP_COPY_CHUNK)
-            if not chunk:
-                break
-            fout.write(chunk)
-            with drop_jobs_lock:
-                job = drop_jobs.get(job_id)
-                if not job:
-                    raise RuntimeError("задача отменена")
-                job["bytes"] += len(chunk)
-    thumb = _drop_thumb_path(src_id)
-    if os.path.exists(thumb):
-        try:
-            shutil.copyfile(thumb, _drop_thumb_path(new_id))
-        except OSError:
-            pass
-
-
-def _drop_run_copy(job_id, ids, target):
-    with drop_lock:
-        plan, total_bytes = _drop_copy_plan(ids, target)
-        free = DROP_QUOTA - _drop_used()
-    if total_bytes > free:
-        raise RuntimeError("Не хватает места: нужно "
-                           f"{total_bytes // 1048576} МБ, свободно {max(free, 0) // 1048576} МБ.")
-    _drop_job_set(job_id, total=len(plan), bytes_total=total_bytes)
-    for step in plan:
-        if step["kind"] != "folder":
-            _drop_copy_file(step["src"], step["new"], job_id)
-        with drop_lock:
-            src = drop_items.get(step["src"])
-            if not src:                       # исчез, пока копировали
-                continue
-            copy = dict(src)
-            copy.update({"name": step["name"], "parent": step["parent"],
-                         "created": time.time(), "share": None})
-            drop_items[step["new"]] = copy
-            _drop_write_index()
-        with drop_jobs_lock:
-            job = drop_jobs.get(job_id)
-            if job:
-                job["done"] += 1
-
-
-def _drop_run_move(job_id, ids, target):
-    with drop_lock:
-        if target and drop_items.get(target, {}).get("kind") != "folder":
-            raise RuntimeError("Такой папки нет.")
-        for item_id in ids:
-            if target and _drop_is_descendant(item_id, target):
-                raise RuntimeError("Нельзя переложить папку внутрь себя.")
-        _drop_job_set(job_id, total=len(ids))
-        for item_id in ids:
-            item = drop_items.get(item_id)
-            if not item or item.get("parent") == target:
-                with drop_jobs_lock:
-                    drop_jobs[job_id]["done"] += 1
-                continue
-            # Имя подбираем до перекладывания: после него элемент уже лежит
-            # в приёмнике и считает тёзкой сам себя — папка «Склад» так
-            # переезжала и становилась «Склад (2)».
-            item["name"] = _drop_unique_name(item["name"], target)
-            item["parent"] = target
-            with drop_jobs_lock:
-                drop_jobs[job_id]["done"] += 1
-        _drop_write_index()
-
-
-def _drop_run_delete(job_id, ids, _target):
-    with drop_lock:
-        _drop_job_set(job_id, total=len(ids))
-        for item_id in ids:
-            _drop_trash(item_id)             # пакетное удаление — тоже в корзину
-            with drop_jobs_lock:
-                drop_jobs[job_id]["done"] += 1
-        _drop_write_index()
-
-
-DROP_OPS = {"copy": _drop_run_copy, "move": _drop_run_move, "delete": _drop_run_delete}
-def _drop_public_item(token):
-    """Файл по токену ссылки, либо пусто. Из-под замка выходим сразу:
-    держать его на время отдачи файла незачем."""
-    with drop_lock:
-        item_id = _drop_share_lookup(token)
-        item = drop_items.get(item_id) if item_id else None
-    return (item_id, item) if item else (None, None)
-def _drop_music_delete(item_id):
-    """Удаление из фонотеки по запросу из дропа. Корзины у фонотеки нет —
-    предупреждение об этом висит на самой кнопке."""
-    with music_lock:
-        if item_id.startswith("mt_"):
-            track = music_items.pop(item_id[3:], None)
-            if track:
-                still = any(t["file"] == track["file"] for t in music_items.values())
-                if not still:
-                    _music_unlink(os.path.join(MUSIC_DIR, track["file"]))
-                _music_write_index()
-            return jsonify(ok=True)
-        fid = item_id[3:]
-        if fid not in music_folders:
-            return jsonify(error="Папка не найдена."), 404
-        # вместе с папкой уносим её подпапки и треки
-        doomed, queue = {fid}, [fid]
-        while queue:
-            cur = queue.pop()
-            for k, v in music_folders.items():
-                if v.get("parent", "") == cur and k not in doomed:
-                    doomed.add(k)
-                    queue.append(k)
-        for k in [k for k, v in music_items.items() if v.get("folder", "") in doomed]:
-            track = music_items.pop(k)
-            still = any(t["file"] == track["file"] for t in music_items.values())
-            if not still:
-                _music_unlink(os.path.join(MUSIC_DIR, track["file"]))
-        for k in doomed:
-            music_folders.pop(k, None)
-        _music_write_index()
-    return jsonify(ok=True)
 
 # ---- Пиксельные значки для кнопок игр ---------------------------------------
 # Спрайт описан строками: символ — цвет из палитры, точка — прозрачно.
@@ -2040,8 +1143,9 @@ _GAME_ICONS = {
 # ---- Резервные копии и Себастьян переехали в blueprints/backup_sebastian.py
 # (задача 37): не связанные друг с другом разделы, но оба были самодостаточны
 # в app.py и не тянули за собой ничего, кроме DROP_DIR/drop_lock/drop_items/
-# drop_load_index (ещё не переехавших из app.py — задача 39, разрез drop.py)
-# и общего game_icons (см. пояснение в blueprints/home.py, задача 36).
+# drop_load_index (задача 39 — теперь эти четыре имени читаются из
+# blueprints.drop, а не объявляются здесь) и общего game_icons (см.
+# пояснение в blueprints/home.py, задача 36).
 
 app.register_blueprint(create_home_blueprint(
     game_icons=_GAME_ICONS,
@@ -2059,82 +1163,20 @@ app.register_blueprint(create_notebook_blueprint())
 app.register_blueprint(create_diy_blueprint())
 
 app.register_blueprint(create_music_blueprint(
-    drop_used_safe=_drop_used_safe,
+    drop_used_safe=drop_used_safe,
     drop_quota=DROP_QUOTA,
     drop_lock=drop_lock,
-    drop_musik_tracks=_drop_musik_tracks,
+    drop_musik_tracks=drop_musik_tracks,
 ))
 
-app.register_blueprint(create_drop_blueprint(
-    template=_template,
-    icon_links=ICON_LINKS,
-    escape=escape,
-    login_required=login_required,
-    logger=app.logger,
-    drop_items=drop_items,
-    drop_uploads=drop_uploads,
-    drop_lock=drop_lock,
-    drop_jobs=drop_jobs,
-    drop_jobs_lock=drop_jobs_lock,
-    drop_folder_icons=DROP_FOLDER_ICONS,
-    drop_max_size=DROP_MAX_SIZE,
-    drop_quota=DROP_QUOTA,
-    drop_text_preview=DROP_TEXT_PREVIEW,
-    drop_musik_id=DROP_MUSIK_ID,
-    drop_zip_chunk=DROP_ZIP_CHUNK,
-    drop_ops=DROP_OPS,
-    drop_path=_drop_path,
-    drop_tmp_path=_drop_tmp_path,
-    drop_write_index=_drop_write_index,
-    drop_used=_drop_used,
-    drop_children=_drop_children,
-    drop_folder_stats=_drop_folder_stats,
-    drop_trash=_drop_trash,
-    drop_trash_ok=_drop_trash_ok,
-    drop_path_to_root=_drop_path_to_root,
-    drop_is_descendant=_drop_is_descendant,
-    drop_share_lookup=_drop_share_lookup,
-    drop_sweep_uploads=_drop_sweep_uploads,
-    drop_sweep_trash=_drop_sweep_trash,
-    drop_trash_roots=_drop_trash_roots,
-    drop_trash_bytes=_drop_trash_bytes,
-    drop_trash_subtree_bytes=_drop_trash_subtree_bytes,
-    drop_discard=_drop_discard,
-    drop_thumb_path=_drop_thumb_path,
-    drop_can_thumb=_drop_can_thumb,
-    drop_make_thumb=_drop_make_thumb,
-    drop_human_size=_drop_human_size,
-    drop_view_kind=_drop_view_kind,
-    drop_share_mode=_drop_share_mode,
-    drop_send=_drop_send,
-    drop_text_name=_drop_text_name,
-    drop_music_take=_drop_music_take,
-    drop_music_view=_drop_music_view,
-    drop_music_send=_drop_music_send,
-    drop_music_delete=_drop_music_delete,
-    drop_zip_name=_drop_zip_name,
-    drop_zip_plan=_drop_zip_plan,
-    drop_zip_length=_drop_zip_length,
-    drop_zip_time=_drop_zip_time,
-    drop_job_set=_drop_job_set,
-    drop_jobs_sweep=_drop_jobs_sweep,
-    drop_unique_name=_drop_unique_name,
-    music_used_safe=_music_used_safe,
-    music_lock=music_lock,
-    music_items=music_items,
-    music_folders=music_folders,
-    music_folder_depth=_music_folder_depth,
-    music_max_depth=MUSIC_MAX_DEPTH,
-    music_write_index=_music_write_index,
-    music_used_raw=_music_used,
-))
+app.register_blueprint(create_drop_blueprint())
 
 app.register_blueprint(create_backup_sebastian_blueprint(
     game_icons=_GAME_ICONS,
     drop_dir=DROP_DIR,
     drop_lock=drop_lock,
     drop_items=drop_items,
-    drop_load_index=_drop_load_index,
+    drop_load_index=drop_load_index,
 ))
 
 app.register_blueprint(create_ai_blueprint(
@@ -2167,9 +1209,9 @@ app.register_blueprint(create_files_blueprint(
     sftp_enabled_ips=sftp_enabled_ips,
     drop_lock=drop_lock,
     drop_items=drop_items,
-    drop_path=_drop_path,
-    drop_write_index=_drop_write_index,
-    drop_used=_drop_used,
+    drop_path=drop_path,
+    drop_write_index=drop_write_index,
+    drop_used=drop_used,
     drop_quota=DROP_QUOTA,
     drop_download_id=DROP_DOWNLOAD_ID,
     phone_fs=phone_bp.fs,
@@ -2213,9 +1255,9 @@ app.register_blueprint(create_pwa_blueprint(
     drop_items=drop_items,
     drop_max_size=DROP_MAX_SIZE,
     drop_quota=DROP_QUOTA,
-    drop_path=_drop_path,
-    drop_used=_drop_used,
-    drop_write_index=_drop_write_index,
+    drop_path=drop_path,
+    drop_used=drop_used,
+    drop_write_index=drop_write_index,
     drop_download_id=DROP_DOWNLOAD_ID,
 ))
 
