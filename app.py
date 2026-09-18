@@ -171,11 +171,10 @@ PHONE_APK_REPO = os.environ.get("PHONE_APK_REPO", "VITAZGIO/vitazgio.ru")
 # PHONE_FILES_USER/PHONE_FILES_PASSWORD (логин/пароль перед файлами
 # телефона на /files) теперь читает сама blueprints/files.py (задача 39)
 # — были нужны только там.
-# Свой пароль вкладки «Долги», не связан с ежедневным паролем консоли —
-# задаётся один раз в .env и не меняется день ото дня.
-DEBTS_PASSWORD = os.environ.get("DEBTS_PASSWORD")
-# SERVERS_PASSWORD — теперь читает сама blueprints/home.py (задача 36),
-# больше нигде не нужен.
+# DEBTS_PASSWORD и SERVERS_PASSWORD теперь читают сами blueprints/debts.py
+# и blueprints/home.py (задача 36) — больше нигде не нужны. Мёртвая копия
+# DEBTS_PASSWORD (задачу 36 закрыли, а строку тут забыли) прибрана в
+# задаче 40 (docs/structure-plan.md).
 
 # guacd (RDP/VNC-хендшейк) — задача 38, теперь в blueprints/remote.py:
 # нужен только там, /ws/rdp и /ws/vnc — единственные потребители.
