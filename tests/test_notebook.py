@@ -3,9 +3,14 @@
 Первая фича, которая после задачи 35 владеет своим состоянием сама
 (`notebook_data`/`notebook_lock` теперь в `blueprints/notebook.py`, не в
 `app.py`) — раньше страница не была покрыта отдельным тестом вовсе.
+
+С задачи 37 (переезд `blueprints/backup_sebastian.py`) `app.py` больше не
+импортирует `notebook_lock` — читать состояние напрямую нужно через
+`sys.modules["blueprints.notebook"]`, как в `tests/test_debts.py`.
 """
 
 import io
+import sys
 
 import pytest
 
@@ -14,9 +19,10 @@ import pytest
 def reset_notebook(app_module):
     """`notebook_data` — модульное состояние `blueprints.notebook`, живёт
     весь сеанс тестов; без сброса записи одного теста мешали бы другому."""
-    with app_module.notebook_lock:
-        app_module.notebook_data["pages"] = [{"id": "p1", "name": "Заметки"}]
-        app_module.notebook_data["entries"] = {}
+    notebook_module = sys.modules["blueprints.notebook"]
+    with notebook_module.notebook_lock:
+        notebook_module.notebook_data["pages"] = [{"id": "p1", "name": "Заметки"}]
+        notebook_module.notebook_data["entries"] = {}
 
 
 def test_notebook_requires_login(client):
