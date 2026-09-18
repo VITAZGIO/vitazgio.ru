@@ -21,17 +21,18 @@ DATA_DIR = os.path.join(str(REPO_ROOT), "data")
 os.makedirs(DATA_DIR, exist_ok=True)
 
 
-def atomic_write_json(path, data, *, ensure_ascii=False):
+def atomic_write_json(path, data, *, ensure_ascii=False, indent=None):
     """Пишет `data` в `path` атомарно: во временный файл рядом, потом
     `os.replace`. Читатель никогда не увидит недописанный JSON, даже если
     процесс упадёт посреди записи — `os.replace` на одной файловой системе
     неделим. Ошибки (диск полон, нет прав) сама не глотает — как раньше,
     решает вызывающий (один код ловил `OSError` и молчал, другой — нет;
-    это сохранено на стороне вызовов, не здесь).
+    это сохранено на стороне вызовов, не здесь). `indent` — только для
+    debts.json, который и раньше писался с отступами (`indent=2`).
     """
     tmp = f"{path}.tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump(data, fh, ensure_ascii=ensure_ascii)
+        json.dump(data, fh, ensure_ascii=ensure_ascii, indent=indent)
     os.replace(tmp, path)
 
 

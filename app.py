@@ -17,8 +17,6 @@ import uuid
 import zipfile
 from collections import defaultdict, deque
 from datetime import datetime
-from decimal import Decimal, InvalidOperation
-from functools import wraps
 from zoneinfo import ZoneInfo
 
 import paramiko
@@ -47,6 +45,7 @@ from core.auth import (
     devices_lock,
     log_login as _log_login,
     login_required,
+    password_matches,
     rate_blocked as _rate_blocked,
     rate_clear as _rate_clear,
     rate_hit as _rate_hit,
@@ -58,7 +57,7 @@ from core.templates import template as _template
 from blueprints.ai import create_ai_blueprint
 from blueprints.apps import create_apps_blueprint
 from blueprints.backup_sebastian import create_backup_sebastian_blueprint
-from blueprints.debts import create_debts_blueprint
+from blueprints.debts import create_debts_blueprint, debt_find_user_by_password as _debt_find_user_by_password
 from blueprints.devices import create_devices_blueprint
 from blueprints.desktop import create_desktop_blueprint
 from blueprints.diy import (
@@ -123,28 +122,11 @@ app.wsgi_app = ProxyFix(
 
 sock = Sock(app)
 
-# Репозиторий публичный, поэтому соль и хэш живут только в .env. Запасных
-# значений в коде нет намеренно: раньше они тут лежали, и любой желающий мог
-# скачать их вместе с исходниками и спокойно подбирать пароль у себя дома,
-# без всяких ограничений на число попыток. Нет переменных — приложение не
-# поднимается вовсе; это лучше, чем молча работать с всем известным паролем.
-def _password_secret(name):
-    raw = os.environ.get(name)
-    if not raw:
-        raise SystemExit(
-            f"Не задана переменная {name}. Соль и хэш пароля кабинета хранятся "
-            "только в .env — в публичный репозиторий им нельзя. Как получить "
-            "новую пару, написано в README, раздел «Пароль кабинета»."
-        )
-    try:
-        return base64.b64decode(raw)
-    except (ValueError, TypeError) as e:
-        raise SystemExit(f"Переменная {name} не читается как base64: {e}")
-
-
-PASSWORD_SALT = _password_secret("CABINET_PASSWORD_SALT")
-PASSWORD_HASH = _password_secret("CABINET_PASSWORD_HASH")
-PASSWORD_ITERATIONS = 600_000
+# Пароль кабинета (_password_secret/PASSWORD_SALT/PASSWORD_HASH/
+# PASSWORD_ITERATIONS/password_matches) — в core/auth.py (задача 36):
+# нужен и здесь (/api/login), и blueprints/debts.py. SystemExit при
+# отсутствующей .env-переменной срабатывает там же, при импорте core.auth
+# наверху этого файла — раньше падало здесь же, разницы нет.
 LOGIN_WINDOW_SECONDS = 300
 LOGIN_MAX_ATTEMPTS = 5
 login_attempts = defaultdict(deque)
@@ -766,249 +748,17 @@ def _drop_used_safe():
 
 # _rate_blocked/_rate_hit/_rate_clear, console_password_today, _device_check
 # и вся остальная работа с доверенными устройствами — в core/auth.py.
-# _device_check импортирован наверху файла (нужен ещё не переехавшим
-# guard'ам — debts_owner_required); остальные device_*/devices_* app.py
-# больше не нужны — их взяли blueprints/devices.py (задача 35) и
-# blueprints/diy.py (задача 36) напрямую.
+# _device_check ещё нужен для форварда в create_backup_sebastian_blueprint
+# (не переехал); остальные device_*/devices_* app.py больше не нужны — их
+# взяли blueprints/devices.py (задача 35), blueprints/diy.py и
+# blueprints/debts.py (задача 36) напрямую.
 
 
-DEBTS_PATH = os.path.join(DATA_DIR, "debts.json")
-debts_lock = threading.Lock()
-debts_data = {
-    "users": [],
-    "entries": [],
-    "payment_requests": [],
-    "payment_request_attempts": [],
-}
-# Палитра для кружка-аватарки должника на /debts — фиксированный набор,
-# не произвольный CSS/hex с фронта (тот же принцип, что и цвета сайта
-# через переменные, а не хардкод: тут просто ключи вместо hex).
-DEBT_USER_COLORS = ("cyan", "green", "pink", "yellow", "violet", "orange")
+# Долги (DEBTS_PATH/DEBT_USER_COLORS, debts_data/debts_lock и вся
+# логика, guard'ы debts_owner_required/debtor_required) — теперь целиком
+# в blueprints/debts.py (задача 36). debt_find_user_by_password читает
+# обратно /api/login (перебор паролей должников после пароля кабинета).
 
-
-def _today_iso():
-    return datetime.now(ZoneInfo("Europe/Moscow")).strftime("%Y-%m-%d")
-
-
-def _debts_load():
-    global debts_data
-    try:
-        with open(DEBTS_PATH, encoding="utf-8") as fh:
-            raw = json.load(fh)
-    except (OSError, ValueError):
-        raw = {}
-    debts_data = {
-        "users": raw.get("users") if isinstance(raw.get("users"), list) else [],
-        "entries": raw.get("entries") if isinstance(raw.get("entries"), list) else [],
-        "payment_requests": (
-            raw.get("payment_requests")
-            if isinstance(raw.get("payment_requests"), list)
-            else []
-        ),
-        "payment_request_attempts": (
-            raw.get("payment_request_attempts")
-            if isinstance(raw.get("payment_request_attempts"), list)
-            else []
-        ),
-    }
-
-
-def _debts_write_locked():
-    os.makedirs(DATA_DIR, exist_ok=True)
-    tmp = DEBTS_PATH + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump(debts_data, fh, ensure_ascii=False, indent=2)
-    os.replace(tmp, DEBTS_PATH)
-
-
-def _debt_hash_password(password, salt=None):
-    salt = salt or secrets.token_bytes(16)
-    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, PASSWORD_ITERATIONS)
-    return base64.b64encode(salt).decode("ascii"), base64.b64encode(digest).decode("ascii")
-
-
-def _debt_password_matches(user, password):
-    visible = user.get("password_plain")
-    if isinstance(visible, str) and visible:
-        return hmac.compare_digest(visible, password)
-    try:
-        salt = base64.b64decode(user.get("salt", ""))
-        expected = base64.b64decode(user.get("password_hash", ""))
-    except (ValueError, TypeError):
-        return False
-    actual = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, PASSWORD_ITERATIONS)
-    return hmac.compare_digest(actual, expected)
-
-
-def _debt_find_user_by_password(password):
-    if not isinstance(password, str) or not password:
-        return None
-    with debts_lock:
-        for user in debts_data["users"]:
-            if _debt_password_matches(user, password):
-                return {"id": user["id"], "name": user.get("name", "Должник")}
-    return None
-
-
-def _debt_amount_cents(raw):
-    text = str(raw or "").strip().replace(" ", "").replace(",", ".")
-    if not re.fullmatch(r"\d+(?:\.\d{1,2})?", text):
-        raise ValueError("Введите сумму числом, максимум 2 знака после точки.")
-    try:
-        value = Decimal(text)
-    except InvalidOperation:
-        raise ValueError("Введите сумму числом.")
-    if value <= 0 or value > Decimal("10000000"):
-        raise ValueError("Сумма должна быть больше нуля и меньше 10 000 000.")
-    return int((value * Decimal("100")).quantize(Decimal("1")))
-
-
-def _debt_clean_date(raw):
-    text = (str(raw or "").strip() or _today_iso())
-    try:
-        datetime.strptime(text, "%Y-%m-%d")
-    except ValueError:
-        raise ValueError("Дата должна быть в формате ГГГГ-ММ-ДД.")
-    return text
-
-
-def _debt_user_total_locked(user_id):
-    total = 0
-    for entry in debts_data["entries"]:
-        if entry.get("user_id") != user_id:
-            continue
-        amount = int(entry.get("amount_cents") or 0)
-        total += amount if entry.get("kind") == "debt" else -amount
-    return total
-
-
-def _debt_pending_return_total_locked(user_id):
-    total = 0
-    for row in debts_data.get("payment_requests", []):
-        if row.get("user_id") != user_id or row.get("status", "pending") != "pending":
-            continue
-        total += int(row.get("amount_cents") or 0)
-    return total
-
-
-def _debt_entry_public_locked(entry):
-    user = next((u for u in debts_data["users"] if u.get("id") == entry.get("user_id")), None)
-    return {
-        "id": entry.get("id"),
-        "user_id": entry.get("user_id"),
-        "user_name": user.get("name", "Должник") if user else "Должник",
-        "date": entry.get("date") or _today_iso(),
-        "kind": entry.get("kind") if entry.get("kind") in ("debt", "return") else "debt",
-        "amount_cents": int(entry.get("amount_cents") or 0),
-        "comment": entry.get("comment") or "—",
-        "created": entry.get("created") or "",
-    }
-
-
-def _debt_payment_request_public_locked(row):
-    user = next((u for u in debts_data["users"] if u.get("id") == row.get("user_id")), None)
-    return {
-        "id": row.get("id"),
-        "user_id": row.get("user_id"),
-        "user_name": user.get("name", "Должник") if user else "Должник",
-        "date": row.get("date") or _today_iso(),
-        "amount_cents": int(row.get("amount_cents") or 0),
-        "bank": row.get("bank") or "Банк",
-        "status": row.get("status") or "pending",
-        "created": row.get("created") or "",
-    }
-
-
-def _debt_user_public_locked(user):
-    user_id = user.get("id")
-    entries = [e for e in debts_data["entries"] if e.get("user_id") == user_id]
-    pending_return_cents = _debt_pending_return_total_locked(user_id)
-    total_cents = _debt_user_total_locked(user_id)
-    color = user.get("color")
-    return {
-        "id": user_id,
-        "name": user.get("name", "Должник"),
-        "password": user.get("password_plain") or "",
-        "total_cents": total_cents,
-        "pending_return_cents": pending_return_cents,
-        "projected_total_cents": total_cents - pending_return_cents,
-        "entry_count": len(entries),
-        "created": user.get("created") or "",
-        "color": color if color in DEBT_USER_COLORS else DEBT_USER_COLORS[0],
-    }
-
-
-def _debts_snapshot_locked(user_id=None):
-    users = [_debt_user_public_locked(u) for u in debts_data["users"]]
-    users.sort(key=lambda u: u["name"].lower())
-    entries = [_debt_entry_public_locked(e) for e in debts_data["entries"] if user_id is None or e.get("user_id") == user_id]
-    entries.sort(key=lambda e: (e["date"], e["created"]), reverse=True)
-    payment_requests = [
-        _debt_payment_request_public_locked(r)
-        for r in debts_data.get("payment_requests", [])
-        if user_id is None or r.get("user_id") == user_id
-    ]
-    payment_requests.sort(key=lambda r: (r["date"], r["created"]), reverse=True)
-    total = sum(u["total_cents"] for u in users if user_id is None or u["id"] == user_id)
-    pending_total = sum(
-        u["pending_return_cents"] for u in users if user_id is None or u["id"] == user_id
-    )
-    return {
-        "users": users,
-        "entries": entries,
-        "payment_requests": payment_requests,
-        "total_cents": total,
-        "pending_return_cents": pending_total,
-        "projected_total_cents": total - pending_total,
-        "today": _today_iso(),
-    }
-
-
-# «Долги» — как сейф: страница СВЕЖИМ открытием (GET /debts) спрашивает
-# пароль всегда, не важно, разблокировали её недавно или нет (см.
-# debts_page_html в blueprints/debts.py — там owner_unlocked() не
-# вызывается вообще). А чтобы во время самой работы со страницей не
-# спрашивать пароль на каждый клик, разблокировка живёт ещё
-# DEBTS_OWNER_IDLE_SECONDS от последнего запроса (скользящее окно) — если
-# всё это время просто не трогать страницу (отошли, забыли), она сама
-# «запрётся» и следующий клик потребует пароль снова.
-DEBTS_OWNER_IDLE_SECONDS = 600
-
-
-def _debts_owner_unlocked():
-    return bool(
-        session.get("debts_owner_authenticated")
-        and time.time() - session.get("debts_owner_unlocked_at", 0) < DEBTS_OWNER_IDLE_SECONDS
-    )
-
-
-def debts_owner_required(view):
-    @wraps(view)
-    def wrapped(*args, **kwargs):
-        if not session.get("authenticated"):
-            fresh = _device_check(request.cookies.get(DEVICE_COOKIE))
-            if not fresh:
-                return jsonify(error="Нужен вход в кабинет."), 403
-            session["authenticated"] = True
-            g.new_device_cookie = fresh
-            _log_login("доверенное устройство")
-        if not _debts_owner_unlocked():
-            return jsonify(error="Нужен пароль."), 403
-        session["debts_owner_unlocked_at"] = time.time()
-        return view(*args, **kwargs)
-    return wrapped
-
-
-def debtor_required(view):
-    @wraps(view)
-    def wrapped(*args, **kwargs):
-        if not session.get("debtor_id"):
-            return redirect(url_for("home.home"))
-        return view(*args, **kwargs)
-    return wrapped
-
-
-_debts_load()
 
 
 # ---- Уведомления -----------------------------------------------------------
@@ -1163,12 +913,6 @@ def _phone_publish_status(online, last_seen):
 # импортированы наверху файла; сами login_log/login_log_lock app.py
 # больше не нужны — их читает только blueprints/login_log.py напрямую).
 
-
-def password_matches(password):
-    candidate = hashlib.pbkdf2_hmac(
-        "sha256", password.encode("utf-8"), PASSWORD_SALT, PASSWORD_ITERATIONS
-    )
-    return hmac.compare_digest(candidate, PASSWORD_HASH)
 
 
 @app.errorhandler(Exception)
@@ -3158,33 +2902,6 @@ app.register_blueprint(create_home_blueprint(
 ))
 
 app.register_blueprint(create_debts_blueprint(
-    template=_template,
-    login_required=login_required,
-    debts_owner_required=debts_owner_required,
-    debtor_required=debtor_required,
-    debts_lock=debts_lock,
-    debts_data=lambda: debts_data,
-    debts_snapshot_locked=_debts_snapshot_locked,
-    debts_write_locked=_debts_write_locked,
-    debt_hash_password=_debt_hash_password,
-    debt_password_matches=_debt_password_matches,
-    debt_user_public_locked=_debt_user_public_locked,
-    debt_amount_cents=_debt_amount_cents,
-    debt_clean_date=_debt_clean_date,
-    password_matches=password_matches,
-    device_check=_device_check,
-    device_cookie=DEVICE_COOKIE,
-    client_ip=_client_ip,
-    rate_blocked=_rate_blocked,
-    rate_hit=_rate_hit,
-    rate_clear=_rate_clear,
-    console_login_attempts=console_login_attempts,
-    console_login_attempts_lock=console_login_attempts_lock,
-    console_login_window_seconds=CONSOLE_LOGIN_WINDOW_SECONDS,
-    console_login_max_attempts=CONSOLE_LOGIN_MAX_ATTEMPTS,
-    debts_password=DEBTS_PASSWORD,
-    debt_user_colors=DEBT_USER_COLORS,
-    log_login=_log_login,
     notification_add=_notification_add,
 ))
 

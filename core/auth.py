@@ -1,6 +1,10 @@
-"""core/auth.py — вход в кабинет: доверенные устройства, журнал входов,
-`login_required`, суточный пароль консоли, ограничение частоты попыток
-(задачи 34-35).
+"""core/auth.py — вход в кабинет: пароль кабинета, доверенные устройства,
+журнал входов, `login_required`, суточный пароль консоли, ограничение
+частоты попыток (задачи 34-36).
+
+`password_matches` (задача 36) нужна и `app.py` (свой `/api/login`), и
+`blueprints/debts.py` (не даёт завести должника с паролем владельца) —
+классический признак того, что место — в core, а не в одном из двух.
 
 Перенесено из `app.py` дословно (то же поведение, те же имена данных —
 `docs/structure-plan.md` запрещает менять семантику в рамках этого
@@ -20,6 +24,7 @@
 разблокировки, свои сообщения об ошибке).
 """
 
+import base64
 import hashlib
 import hmac
 import json
@@ -35,6 +40,38 @@ from zoneinfo import ZoneInfo
 from flask import g, redirect, request, session, url_for
 
 from core.storage import DATA_DIR, atomic_write_json
+
+# ---- Пароль кабинета ---------------------------------------------------------
+# Репозиторий публичный, поэтому соль и хэш живут только в .env. Запасных
+# значений в коде нет намеренно: раньше они тут лежали, и любой желающий мог
+# скачать их вместе с исходниками и спокойно подбирать пароль у себя дома,
+# без всяких ограничений на число попыток. Нет переменных — приложение не
+# поднимается вовсе; это лучше, чем молча работать с всем известным паролем.
+def _password_secret(name):
+    raw = os.environ.get(name)
+    if not raw:
+        raise SystemExit(
+            f"Не задана переменная {name}. Соль и хэш пароля кабинета хранятся "
+            "только в .env — в публичный репозиторий им нельзя. Как получить "
+            "новую пару, написано в README, раздел «Пароль кабинета»."
+        )
+    try:
+        return base64.b64decode(raw)
+    except (ValueError, TypeError) as e:
+        raise SystemExit(f"Переменная {name} не читается как base64: {e}")
+
+
+PASSWORD_SALT = _password_secret("CABINET_PASSWORD_SALT")
+PASSWORD_HASH = _password_secret("CABINET_PASSWORD_HASH")
+PASSWORD_ITERATIONS = 600_000
+
+
+def password_matches(password):
+    candidate = hashlib.pbkdf2_hmac(
+        "sha256", password.encode("utf-8"), PASSWORD_SALT, PASSWORD_ITERATIONS
+    )
+    return hmac.compare_digest(candidate, PASSWORD_HASH)
+
 
 # ---- Доверенные устройства («запомнить это устройство») ---------------------
 # Кука содержит "селектор.валидатор". На сервере лежит только SHA-256 валидатора,

@@ -1,43 +1,301 @@
+"""blueprints/debts.py — вкладка кабинета «Долги» /debts (задача 36,
+docs/structure-plan.md).
+
+Данные и вся логика — на модульном уровне здесь же, а не в `app.py`: файл
+владеет своим состоянием сам, как остальные фичи блока Б. `debts_data`
+(в отличие от notebook_data/diy_items/music_items) не мутируется на
+месте, а ПЕРЕСОЗДАЁТСЯ целиком в `debts_load()` (`global debts_data`) —
+так было и в app.py; ни один другой файл её не читает, поэтому опасности
+устаревшей ссылки нет (раньше индирекция через `lambda: debts_data` была
+нужна именно из-за границы модуля app.py↔blueprint, сейчас всё в одном
+файле).
+
+`debt_find_user_by_password` читает и `app.py`: страница входа сначала
+проверяет пароль кабинета, а если не подошёл — перебирает пароли
+должников (`/api/login`, тот же вход, что и в кабинет) — импортирован в
+app.py из `blueprints.debts` для этого единственного вызова.
+`password_matches` (проверка «не совпадает ли с паролем кабинета») теперь
+в `core/auth.py`: нужна и `app.py` (свой `/api/login`), и этому файлу —
+классический признак того, что место — в core, а не в одном из двух.
+"""
+
+import base64
+import hashlib
 import hmac
+import json
+import os
+import re
+import secrets
+import threading
 import time
 import uuid
 from datetime import datetime, timedelta
+from decimal import Decimal, InvalidOperation
+from functools import wraps
 from zoneinfo import ZoneInfo
 
-from flask import Blueprint, g, jsonify, request, session
+from flask import Blueprint, g, jsonify, redirect, request, session, url_for
 
-
-def create_debts_blueprint(
-    *,
-    template,
-    login_required,
-    debts_owner_required,
-    debtor_required,
-    debts_lock,
-    debts_data,
-    debts_snapshot_locked,
-    debts_write_locked,
-    debt_hash_password,
-    debt_password_matches,
-    debt_user_public_locked,
-    debt_amount_cents,
-    debt_clean_date,
-    password_matches,
-    device_check,
-    device_cookie,
+from core.auth import (
+    CONSOLE_LOGIN_MAX_ATTEMPTS,
+    CONSOLE_LOGIN_WINDOW_SECONDS,
+    DEVICE_COOKIE,
+    PASSWORD_ITERATIONS,
     client_ip,
-    rate_blocked,
-    rate_hit,
-    rate_clear,
     console_login_attempts,
     console_login_attempts_lock,
-    console_login_window_seconds,
-    console_login_max_attempts,
-    debts_password,
-    debt_user_colors,
+    device_check,
     log_login,
-    notification_add,
-):
+    login_required,
+    password_matches,
+    rate_blocked,
+    rate_clear,
+    rate_hit,
+)
+from core.storage import DATA_DIR, atomic_write_json
+from core.templates import template
+
+# Свой пароль вкладки «Долги», не связан с ежедневным паролем консоли —
+# задаётся один раз в .env и не меняется день ото дня.
+DEBTS_PASSWORD = os.environ.get("DEBTS_PASSWORD")
+
+DEBTS_PATH = os.path.join(DATA_DIR, "debts.json")
+debts_lock = threading.Lock()
+debts_data = {
+    "users": [],
+    "entries": [],
+    "payment_requests": [],
+    "payment_request_attempts": [],
+}
+# Палитра для кружка-аватарки должника на /debts — фиксированный набор,
+# не произвольный CSS/hex с фронта (тот же принцип, что и цвета сайта
+# через переменные, а не хардкод: тут просто ключи вместо hex).
+DEBT_USER_COLORS = ("cyan", "green", "pink", "yellow", "violet", "orange")
+
+
+def _today_iso():
+    return datetime.now(ZoneInfo("Europe/Moscow")).strftime("%Y-%m-%d")
+
+
+def debts_load():
+    global debts_data
+    try:
+        with open(DEBTS_PATH, encoding="utf-8") as fh:
+            raw = json.load(fh)
+    except (OSError, ValueError):
+        raw = {}
+    debts_data = {
+        "users": raw.get("users") if isinstance(raw.get("users"), list) else [],
+        "entries": raw.get("entries") if isinstance(raw.get("entries"), list) else [],
+        "payment_requests": (
+            raw.get("payment_requests")
+            if isinstance(raw.get("payment_requests"), list)
+            else []
+        ),
+        "payment_request_attempts": (
+            raw.get("payment_request_attempts")
+            if isinstance(raw.get("payment_request_attempts"), list)
+            else []
+        ),
+    }
+
+
+def debts_write_locked():
+    os.makedirs(DATA_DIR, exist_ok=True)
+    atomic_write_json(DEBTS_PATH, debts_data, indent=2)
+
+
+def debt_hash_password(password, salt=None):
+    salt = salt or secrets.token_bytes(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, PASSWORD_ITERATIONS)
+    return base64.b64encode(salt).decode("ascii"), base64.b64encode(digest).decode("ascii")
+
+
+def debt_password_matches(user, password):
+    visible = user.get("password_plain")
+    if isinstance(visible, str) and visible:
+        return hmac.compare_digest(visible, password)
+    try:
+        salt = base64.b64decode(user.get("salt", ""))
+        expected = base64.b64decode(user.get("password_hash", ""))
+    except (ValueError, TypeError):
+        return False
+    actual = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, PASSWORD_ITERATIONS)
+    return hmac.compare_digest(actual, expected)
+
+
+def debt_find_user_by_password(password):
+    if not isinstance(password, str) or not password:
+        return None
+    with debts_lock:
+        for user in debts_data["users"]:
+            if debt_password_matches(user, password):
+                return {"id": user["id"], "name": user.get("name", "Должник")}
+    return None
+
+
+def debt_amount_cents(raw):
+    text = str(raw or "").strip().replace(" ", "").replace(",", ".")
+    if not re.fullmatch(r"\d+(?:\.\d{1,2})?", text):
+        raise ValueError("Введите сумму числом, максимум 2 знака после точки.")
+    try:
+        value = Decimal(text)
+    except InvalidOperation:
+        raise ValueError("Введите сумму числом.")
+    if value <= 0 or value > Decimal("10000000"):
+        raise ValueError("Сумма должна быть больше нуля и меньше 10 000 000.")
+    return int((value * Decimal("100")).quantize(Decimal("1")))
+
+
+def debt_clean_date(raw):
+    text = (str(raw or "").strip() or _today_iso())
+    try:
+        datetime.strptime(text, "%Y-%m-%d")
+    except ValueError:
+        raise ValueError("Дата должна быть в формате ГГГГ-ММ-ДД.")
+    return text
+
+
+def _debt_user_total_locked(user_id):
+    total = 0
+    for entry in debts_data["entries"]:
+        if entry.get("user_id") != user_id:
+            continue
+        amount = int(entry.get("amount_cents") or 0)
+        total += amount if entry.get("kind") == "debt" else -amount
+    return total
+
+
+def _debt_pending_return_total_locked(user_id):
+    total = 0
+    for row in debts_data.get("payment_requests", []):
+        if row.get("user_id") != user_id or row.get("status", "pending") != "pending":
+            continue
+        total += int(row.get("amount_cents") or 0)
+    return total
+
+
+def _debt_entry_public_locked(entry):
+    user = next((u for u in debts_data["users"] if u.get("id") == entry.get("user_id")), None)
+    return {
+        "id": entry.get("id"),
+        "user_id": entry.get("user_id"),
+        "user_name": user.get("name", "Должник") if user else "Должник",
+        "date": entry.get("date") or _today_iso(),
+        "kind": entry.get("kind") if entry.get("kind") in ("debt", "return") else "debt",
+        "amount_cents": int(entry.get("amount_cents") or 0),
+        "comment": entry.get("comment") or "—",
+        "created": entry.get("created") or "",
+    }
+
+
+def _debt_payment_request_public_locked(row):
+    user = next((u for u in debts_data["users"] if u.get("id") == row.get("user_id")), None)
+    return {
+        "id": row.get("id"),
+        "user_id": row.get("user_id"),
+        "user_name": user.get("name", "Должник") if user else "Должник",
+        "date": row.get("date") or _today_iso(),
+        "amount_cents": int(row.get("amount_cents") or 0),
+        "bank": row.get("bank") or "Банк",
+        "status": row.get("status") or "pending",
+        "created": row.get("created") or "",
+    }
+
+
+def debt_user_public_locked(user):
+    user_id = user.get("id")
+    entries = [e for e in debts_data["entries"] if e.get("user_id") == user_id]
+    pending_return_cents = _debt_pending_return_total_locked(user_id)
+    total_cents = _debt_user_total_locked(user_id)
+    color = user.get("color")
+    return {
+        "id": user_id,
+        "name": user.get("name", "Должник"),
+        "password": user.get("password_plain") or "",
+        "total_cents": total_cents,
+        "pending_return_cents": pending_return_cents,
+        "projected_total_cents": total_cents - pending_return_cents,
+        "entry_count": len(entries),
+        "created": user.get("created") or "",
+        "color": color if color in DEBT_USER_COLORS else DEBT_USER_COLORS[0],
+    }
+
+
+def debts_snapshot_locked(user_id=None):
+    users = [debt_user_public_locked(u) for u in debts_data["users"]]
+    users.sort(key=lambda u: u["name"].lower())
+    entries = [_debt_entry_public_locked(e) for e in debts_data["entries"] if user_id is None or e.get("user_id") == user_id]
+    entries.sort(key=lambda e: (e["date"], e["created"]), reverse=True)
+    payment_requests = [
+        _debt_payment_request_public_locked(r)
+        for r in debts_data.get("payment_requests", [])
+        if user_id is None or r.get("user_id") == user_id
+    ]
+    payment_requests.sort(key=lambda r: (r["date"], r["created"]), reverse=True)
+    total = sum(u["total_cents"] for u in users if user_id is None or u["id"] == user_id)
+    pending_total = sum(
+        u["pending_return_cents"] for u in users if user_id is None or u["id"] == user_id
+    )
+    return {
+        "users": users,
+        "entries": entries,
+        "payment_requests": payment_requests,
+        "total_cents": total,
+        "pending_return_cents": pending_total,
+        "projected_total_cents": total - pending_total,
+        "today": _today_iso(),
+    }
+
+
+# «Долги» — как сейф: страница СВЕЖИМ открытием (GET /debts) спрашивает
+# пароль всегда, не важно, разблокировали её недавно или нет (см.
+# debts_page_html в blueprints/debts.py — там owner_unlocked() не
+# вызывается вообще). А чтобы во время самой работы со страницей не
+# спрашивать пароль на каждый клик, разблокировка живёт ещё
+# DEBTS_OWNER_IDLE_SECONDS от последнего запроса (скользящее окно) — если
+# всё это время просто не трогать страницу (отошли, забыли), она сама
+# «запрётся» и следующий клик потребует пароль снова.
+DEBTS_OWNER_IDLE_SECONDS = 600
+
+
+def _debts_owner_unlocked():
+    return bool(
+        session.get("debts_owner_authenticated")
+        and time.time() - session.get("debts_owner_unlocked_at", 0) < DEBTS_OWNER_IDLE_SECONDS
+    )
+
+
+def debts_owner_required(view):
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if not session.get("authenticated"):
+            fresh = device_check(request.cookies.get(DEVICE_COOKIE))
+            if not fresh:
+                return jsonify(error="Нужен вход в кабинет."), 403
+            session["authenticated"] = True
+            g.new_device_cookie = fresh
+            log_login("доверенное устройство")
+        if not _debts_owner_unlocked():
+            return jsonify(error="Нужен пароль."), 403
+        session["debts_owner_unlocked_at"] = time.time()
+        return view(*args, **kwargs)
+    return wrapped
+
+
+def debtor_required(view):
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if not session.get("debtor_id"):
+            return redirect(url_for("home.home"))
+        return view(*args, **kwargs)
+    return wrapped
+
+
+debts_load()
+
+
+def create_debts_blueprint(*, notification_add):
     debts_bp = Blueprint("debts", __name__)
     payment_banks = ("ОЗОН", "Т-Банк")
     payment_request_limit = 5
@@ -60,15 +318,15 @@ def create_debts_blueprint(
         """Пароль долгов + троттлинг попыток. Используется и для входа в
         раздел, и для подтверждения удаления — случайный тычок не тот
         пункт списка не должен сносить запись без повторного ввода пароля."""
-        if not debts_password:
+        if not DEBTS_PASSWORD:
             return jsonify(error="Пароль долгов не настроен на сервере."), 503
         client = client_ip()
         if rate_blocked(console_login_attempts, console_login_attempts_lock, client,
-                        console_login_window_seconds, console_login_max_attempts):
+                        CONSOLE_LOGIN_WINDOW_SECONDS, CONSOLE_LOGIN_MAX_ATTEMPTS):
             return jsonify(error="Слишком много попыток. Попробуйте через 5 минут."), 429
         password = payload.get("password", "")
         if not isinstance(password, str) or not hmac.compare_digest(
-            password.encode(), debts_password.encode()
+            password.encode(), DEBTS_PASSWORD.encode()
         ):
             rate_hit(console_login_attempts, console_login_attempts_lock, client)
             return jsonify(error="Неверный пароль."), 401
@@ -78,7 +336,7 @@ def create_debts_blueprint(
     @debts_bp.post("/api/debts/unlock")
     def debts_unlock_api():
         if not session.get("authenticated"):
-            fresh = device_check(request.cookies.get(device_cookie))
+            fresh = device_check(request.cookies.get(DEVICE_COOKIE))
             if not fresh:
                 return jsonify(error="Нужен вход в кабинет."), 403
             session["authenticated"] = True
@@ -106,8 +364,8 @@ def create_debts_blueprint(
         name = str(payload.get("name") or "").strip()
         password = payload.get("password", "")
         color = str(payload.get("color") or "")
-        if color not in debt_user_colors:
-            color = debt_user_colors[0]
+        if color not in DEBT_USER_COLORS:
+            color = DEBT_USER_COLORS[0]
         if not name:
             return jsonify(error="Введите имя."), 400
         if len(name) > 60:
@@ -378,7 +636,7 @@ def create_debts_blueprint(
     def debts_user_color_api(user_id):
         payload = request.get_json(silent=True) or {}
         color = str(payload.get("color") or "")
-        if color not in debt_user_colors:
+        if color not in DEBT_USER_COLORS:
             return jsonify(error="Неверный цвет."), 400
         with debts_lock:
             store = data()
