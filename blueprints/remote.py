@@ -666,6 +666,10 @@ def create_remote_blueprint(
     def _device_kind(device):
         """МОБИЛА — телефон, НОУТ — ноутбук по имени; для остальных смотрим на
         разрешённый протокол: RDP — обычно ПК, SSH — сервер/одноплатник."""
+        # Явно заданный значок (kind) важнее догадок: у машины, которой не
+        # разрешён ни один протокол, угадывать не по чему.
+        if device.get("kind"):
+            return device["kind"]
         name_lower = device["name"].lower()
         if "mobil" in name_lower:
             return "phone"
@@ -712,8 +716,12 @@ def create_remote_blueprint(
             )
             # Файлы по SFTP — только там, где есть SSH-сервер. Остальным
             # (телефон, винды без OpenSSH) кнопка стоит местом на будущее.
+            # files_hidden — те, кому доступ не планируется вовсе: там не
+            # «СКОРО», а честно пустое место, чтобы не обещать лишнего.
             + (
-                f'<a class="smb-btn" href="/files/{device["ip"]}" title="Файлы по SFTP">SFTP</a>'
+                '<span class="smb-btn-empty"></span>'
+                if device.get("files_hidden")
+                else f'<a class="smb-btn" href="/files/{device["ip"]}" title="Файлы по SFTP">SFTP</a>'
                 if device["ip"] in sftp_enabled_ips
                 else '<button class="smb-btn" type="button" disabled title="Файлы сюда пока не настроены">СКОРО</button>'
             )

@@ -66,6 +66,9 @@
            остальных это «СКОРО» — заглушка без обработчика. */
         .smb-btn { display: block; padding: 6px 10px; color: #69e8ff; font: 700 .7rem "Cascadia Code", Consolas, monospace; letter-spacing: .04em; text-transform: uppercase; text-align: center; text-decoration: none; border: 1px solid rgba(45,226,255,.3); background: rgba(45,226,255,.07); cursor: pointer; }
         .smb-btn:hover, .smb-btn:focus-visible { color: #fff; background: rgba(45,226,255,.2); outline: none; }
+        /* Пустое место вместо кнопки файлов — у машин, куда доступ не
+           планируется (files_hidden): колонка должна остаться на месте. */
+        .smb-btn-empty { display: block; }
         .smb-btn[disabled], .smb-btn.btn-offline { color: #4a5060; border-color: rgba(100,100,110,.2); background: rgba(60,65,75,.06); cursor: not-allowed; pointer-events: none; }
         .wol-btn { padding: 5px 7px; color: #fbbf24; font-size: .9rem; border: 1px solid rgba(251,191,36,.3); background: rgba(251,191,36,.07); cursor: pointer; transition: all .2s; }
         .wol-btn:hover { background: rgba(251,191,36,.18); border-color: #fbbf24; }
@@ -90,7 +93,7 @@
           .device-status { width: auto; }
           .device-lastseen { grid-column: 1; grid-row: 3; padding-left: 8px; text-align: left; }
           .connect-btn, .connect-btn-empty { grid-column: 1; grid-row: 4; justify-self: start; margin-left: 8px; }
-          .smb-btn { grid-column: 2; grid-row: 4; justify-self: end; }
+          .smb-btn, .smb-btn-empty { grid-column: 2; grid-row: 4; justify-self: end; }
         }
 
         .gate-modal { position: fixed; z-index: 100; inset: 0; display: grid; place-items: center; padding: 20px; }
