@@ -114,7 +114,12 @@ def fake_openrouter():
 def app_module(tmp_path_factory, fake_openrouter):
     """Импортированная копия `app.py` со своими данными во временной папке."""
     work = tmp_path_factory.mktemp("site")
-    for name in ("app.py", "blueprints", "templates", "static"):
+    # core/ — с задачи 34: обычные модули (core/auth.py, core/storage.py,
+    # core/templates.py), но core/storage.py считает DATA_DIR от СВОЕГО
+    # расположения на диске — без копии сюда `from core.storage import
+    # DATA_DIR` в копии app.py находил бы настоящий core/ репозитория (он
+    # виден через sys.path) и писал бы в настоящую data/ хозяина.
+    for name in ("app.py", "blueprints", "templates", "static", "core"):
         src = REPO_ROOT / name
         dst = work / name
         if src.is_dir():
@@ -149,7 +154,10 @@ def app_module(tmp_path_factory, fake_openrouter):
     # Копия должна выиграть у настоящего репозитория: pytest кладёт корень
     # проекта в sys.path, а имена модулей (`app`, `blueprints`) совпадают.
     sys.path.insert(0, str(work))
-    for name in [m for m in sys.modules if m == "app" or m.startswith("blueprints")]:
+    for name in [
+        m for m in sys.modules
+        if m == "app" or m.startswith("blueprints") or m == "core" or m.startswith("core.")
+    ]:
         del sys.modules[name]
     try:
         module = importlib.import_module("app")

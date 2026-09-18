@@ -19,7 +19,6 @@ from collections import defaultdict, deque
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from functools import wraps
-from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import paramiko
@@ -27,6 +26,31 @@ from flask import Flask, g, jsonify, redirect, request, send_file, session, url_
 from markupsafe import escape
 from flask_sock import Sock
 from werkzeug.middleware.proxy_fix import ProxyFix
+
+# core/* — общая инфраструктура (задача 34, docs/structure-plan.md): плоские
+# модули, выполняются при импорте, как и сам app.py. Старые приватные имена
+# app.py (`_client_ip`, `_device_check`, ...) наведены через `as`, чтобы не
+# трогать все места, где они уже вызываются, — публичные имена без
+# подчёркивания (`client_ip`, `device_check`, ...) предназначены для
+# blueprints, которые импортируют их напрямую, без веретена фабрики.
+from core.auth import (
+    DEVICE_COOKIE,
+    DEVICE_TTL_DAYS,
+    client_ip as _client_ip,
+    device_check as _device_check,
+    device_forget as _device_forget,
+    device_issue as _device_issue,
+    device_label as _device_label,
+    devices_lock,
+    devices_prune_expired as _devices_prune_expired,
+    devices_write as _devices_write,
+    log_login as _log_login,
+    login_required,
+    trusted_devices,
+    unique_label as _unique_label,
+)
+from core.storage import DATA_DIR
+from core.templates import template as _template
 
 from blueprints.ai import create_ai_blueprint
 from blueprints.apps import create_apps_blueprint
@@ -67,13 +91,6 @@ app.wsgi_app = ProxyFix(
 )
 
 sock = Sock(app)
-
-TEMPLATE_DIR = Path(__file__).parent / "templates"
-
-
-def _template(name):
-    return (TEMPLATE_DIR / name).read_text(encoding="utf-8")
-
 
 # Репозиторий публичный, поэтому соль и хэш живут только в .env. Запасных
 # значений в коде нет намеренно: раньше они тут лежали, и любой желающий мог
@@ -173,11 +190,7 @@ CONSOLE_LOGIN_MAX_ATTEMPTS = 5
 console_login_attempts = defaultdict(deque)
 console_login_attempts_lock = threading.Lock()
 
-login_log: list = []
-login_log_lock = threading.Lock()
-LOGIN_LOG_DAYS = 14          # с запасом: просили хранить не меньше недели
-LOGIN_LOG_MAX = 500          # потолок, чтобы файл не рос бесконечно
-LOGIN_LOG_MAX_FAIL = 200     # отдельный потолок для неудачных попыток
+# login_log/login_log_lock и константы урезки — в core/auth.py.
 
 # Машины для сбора метрик. Первая — та, на которой крутится сам сайт: до неё
 # ходить по SSH не нужно, /proc читается локально (контейнер живёт в
@@ -689,24 +702,9 @@ def _drop_musik_tracks():
 
 _drop_load_index()
 
-# ---- Доверенные устройства («запомнить это устройство») ---------------------
-# Кука содержит "селектор.валидатор". На сервере лежит только SHA-256 валидатора,
-# поэтому утечка файла войти не позволяет. Валидатор периодически перевыпускается
-# (не на каждый запрос — см. DEVICE_ROTATE_AFTER): если украденной кукой
-# воспользуются, у настоящего устройства токен перестанет подходить — по этому
-# признаку запись сносится целиком (с коротким окном прощения на случай, если
-# это не кража, а просто несколько параллельных запросов браузера успели
-# разъехаться по старой и новой куке — см. DEVICE_GRACE_SECONDS).
-DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
-DEVICES_PATH = os.path.join(DATA_DIR, "devices.json")
-DEVICE_COOKIE = "vitazgio_device"
-DEVICE_TTL_DAYS = 90
-DEVICE_ROTATE_AFTER = 6 * 3600
-DEVICE_GRACE_SECONDS = 60
-
-trusted_devices: dict = {}
-devices_lock = threading.Lock()
-os.makedirs(DATA_DIR, exist_ok=True)
+# Доверенные устройства, журнал входов и login_required — в core/auth.py
+# (DATA_DIR, DEVICE_COOKIE, trusted_devices, devices_lock — импортированы
+# наверху файла; то, что нужно только внутри core/auth.py, туда не тянем).
 
 # Сборки телефонного приложения. Лежат в данных, а не в образе: собирает их
 # облачный раннер и кладёт в релиз, а раздаёт сайт из Амстердама — общего
@@ -940,17 +938,6 @@ def _music_load():
 _music_load()
 
 
-def _client_ip():
-    """Реальный адрес клиента.
-
-    Разбором X-Forwarded-For занимается ProxyFix выше, и это принципиально:
-    раньше здесь бралась левая запись заголовка, а её клиент присылает сам —
-    NPM свою дописывает следом, не затирая чужую. Так в журнал входов можно
-    было записать любой выдуманный адрес.
-    """
-    return request.remote_addr or "unknown"
-
-
 def _rate_blocked(store, lock, key, window, limit):
     """Не пора ли притормозить этот адрес. Заодно чистит остывшие записи,
     чтобы словарь не рос по одной строке на каждый заглянувший IP."""
@@ -975,129 +962,9 @@ def _rate_clear(store, lock, key):
         store.pop(key, None)
 
 
-def _devices_write():
-    """Вызывать под devices_lock."""
-    tmp = DEVICES_PATH + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump(trusted_devices, fh, ensure_ascii=False)
-    os.replace(tmp, DEVICES_PATH)
-
-
-def _devices_prune_expired():
-    """Вызывать под devices_lock. Возвращает число удалённых."""
-    now = time.time()
-    dead = [s for s, d in trusted_devices.items() if d.get("expires", 0) < now]
-    for selector in dead:
-        trusted_devices.pop(selector, None)
-    return len(dead)
-
-
-def _devices_load():
-    try:
-        with open(DEVICES_PATH, encoding="utf-8") as fh:
-            trusted_devices.update(json.load(fh))
-    except (OSError, ValueError):
-        pass
-    _devices_prune_expired()
-
-
-def _device_label(ua):
-    """Имя по User-Agent: точнее браузер не скажет, зато потом можно переименовать."""
-    ua = ua or ""
-    system = next((name for key, name in (
-        ("Windows", "Windows"), ("Android", "Android"), ("iPhone", "iPhone"),
-        ("iPad", "iPad"), ("Macintosh", "Mac"), ("Linux", "Linux"),
-    ) if key in ua), "Устройство")
-    browser = next((name for key, name in (
-        ("YaBrowser", "Яндекс"), ("Edg/", "Edge"), ("OPR/", "Opera"),
-        ("Firefox", "Firefox"), ("Chrome", "Chrome"), ("Safari", "Safari"),
-    ) if key in ua), "браузер")
-    return f"{system} · {browser}"
-
-
-def _unique_label(base):
-    """Вызывать под devices_lock."""
-    taken = {d["label"] for d in trusted_devices.values()}
-    if base not in taken:
-        return base
-    number = 2
-    while f"{base} {number}" in taken:
-        number += 1
-    return f"{base} {number}"
-
-
-def _device_issue(label, ua, ip, selector=None):
-    """Выдаёт или продлевает токен (с ротацией валидатора). Вызывать под devices_lock."""
-    selector = selector or secrets.token_urlsafe(12)
-    validator = secrets.token_urlsafe(32)
-    now = time.time()
-    previous = trusted_devices.get(selector, {})
-    entry = {
-        "hash": hashlib.sha256(validator.encode()).hexdigest(),
-        "label": previous.get("label") or label,
-        "ua": (ua or "")[:160],
-        "created": previous.get("created", now),
-        "last_used": now,
-        "last_ip": ip,
-        "expires": now + DEVICE_TTL_DAYS * 86400,
-        "rotated": now,
-    }
-    if previous.get("hash"):
-        # Старая кука ещё может лететь к другим параллельным запросам того
-        # же браузера (открытие кабинета дёргает сразу несколько ручек) —
-        # даём ей недолго прожить, иначе такой запрос выглядел бы как кража.
-        entry["prev_hash"] = previous["hash"]
-        entry["prev_hash_until"] = now + DEVICE_GRACE_SECONDS
-    trusted_devices[selector] = entry
-    _devices_write()
-    return f"{selector}.{validator}"
-
-
-def _device_check(raw):
-    """Проверяет куку. При успехе возвращает свежую куку, иначе None."""
-    if not raw or "." not in raw:
-        return None
-    selector, validator = raw.split(".", 1)
-    now = time.time()
-    with devices_lock:
-        record = trusted_devices.get(selector)
-        if not record or record.get("expires", 0) < now:
-            return None
-        expected = hashlib.sha256(validator.encode()).hexdigest()
-        if hmac.compare_digest(record["hash"], expected):
-            if now - record.get("rotated", record.get("created", now)) < DEVICE_ROTATE_AFTER:
-                # Кука свежая — не ротируем валидатор на каждый запрос.
-                # Страница кабинета дёргает сразу несколько ручек одной и той
-                # же (ещё не обновлённой браузером) кукой; ротация на каждую
-                # роняла бы устройство «по кражи» на втором же запросе.
-                record["last_used"] = now
-                record["last_ip"] = _client_ip()
-                record["expires"] = now + DEVICE_TTL_DAYS * 86400
-                _devices_write()
-                return raw
-            return _device_issue(record["label"], record.get("ua", ""), _client_ip(), selector)
-        prev_hash = record.get("prev_hash")
-        if prev_hash and now < record.get("prev_hash_until", 0) and hmac.compare_digest(prev_hash, expected):
-            # Параллельный запрос со старой кукой в окне прощения после
-            # ротации — не кража, просто ещё не долетевший Set-Cookie.
-            return raw
-        # Селектор есть, а валидатор чужой — похоже на кражу токена.
-        # Сносим запись: оба устройства пойдут вводить пароль заново.
-        trusted_devices.pop(selector, None)
-        _devices_write()
-        return None
-
-
-def _device_forget(selector):
-    with devices_lock:
-        dropped = trusted_devices.pop(selector, None)
-        if dropped:
-            _devices_write()
-    return dropped is not None
-
-
-_devices_load()
-
+# _devices_write/_devices_prune_expired/_device_label/_unique_label/
+# _device_issue/_device_check/_device_forget — в core/auth.py (импортированы
+# наверху файла под теми же именами через `as`).
 
 
 def console_password_today():
@@ -1610,75 +1477,10 @@ def _arcade_public():
 _arcade_load()
 
 
-LOGIN_LOG_PATH = os.path.join(DATA_DIR, "login_log.json")
-
-
-def _login_log_trim():
-    """Вызывать под login_log_lock: режет старьё по возрасту и по количеству.
-
-    Успехи и провалы урезаются по отдельности. Иначе достаточно было бы
-    подолбиться неверным паролем пятьсот раз, чтобы вытеснить из журнала все
-    настоящие входы — то есть заодно стереть следы того, что искал.
-    """
-    edge = time.time() - LOGIN_LOG_DAYS * 86400
-    rows = [row for row in login_log if row.get("at", 0) >= edge]
-    good = [row for row in rows if row.get("kind", "ok") == "ok"][-LOGIN_LOG_MAX:]
-    bad = [row for row in rows if row.get("kind", "ok") != "ok"][-LOGIN_LOG_MAX_FAIL:]
-    login_log[:] = sorted(good + bad, key=lambda row: row.get("at", 0))
-
-
-def _login_log_save():
-    """Вызывать под login_log_lock."""
-    try:
-        tmp = LOGIN_LOG_PATH + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as fh:
-            json.dump(login_log, fh, ensure_ascii=False)
-        os.replace(tmp, LOGIN_LOG_PATH)
-    except OSError:
-        pass
-
-
-def _login_log_load():
-    try:
-        with open(LOGIN_LOG_PATH, encoding="utf-8") as fh:
-            login_log.extend(json.load(fh))
-    except (OSError, ValueError):
-        return
-    _login_log_trim()
-
-
-def _log_login(note="", kind="ok"):
-    """kind: ok — вошли, fail — пароль не подошёл, block — упёрлись в лимит."""
-    with login_log_lock:
-        ua = request.headers.get("User-Agent", "")[:100]
-        login_log.append({
-            "at": time.time(),
-            "ip": _client_ip(),
-            "ts": datetime.now(ZoneInfo("Europe/Moscow")).strftime("%d.%m.%Y %H:%M:%S"),
-            "ua": f"{ua} · {note}" if note else ua,
-            "kind": kind,
-        })
-        _login_log_trim()
-        _login_log_save()
-
-
-_login_log_load()
-
-
-def login_required(view):
-    @wraps(view)
-    def wrapped(*args, **kwargs):
-        if not session.get("authenticated"):
-            # Пароль не вводили — но устройство могло быть помечено доверенным.
-            fresh = _device_check(request.cookies.get(DEVICE_COOKIE))
-            if not fresh:
-                return redirect(url_for("home.home"))
-            session["authenticated"] = True
-            g.new_device_cookie = fresh
-            _log_login("доверенное устройство")
-        return view(*args, **kwargs)
-
-    return wrapped
+# Журнал входов (login_log/login_log_lock/трим/сохранение) и
+# login_required — в core/auth.py (`_log_login`, `login_required`
+# импортированы наверху файла; сами login_log/login_log_lock app.py
+# больше не нужны — их читает только blueprints/login_log.py напрямую).
 
 
 def password_matches(password):
@@ -4496,14 +4298,7 @@ app.register_blueprint(create_devices_blueprint(
     log_login=_log_login,
 ))
 
-app.register_blueprint(create_login_log_blueprint(
-    template=_template,
-    icon_links=ICON_LINKS,
-    login_required=login_required,
-    login_log=login_log,
-    login_log_lock=login_log_lock,
-    login_log_trim=_login_log_trim,
-))
+app.register_blueprint(create_login_log_blueprint())
 
 app.register_blueprint(create_notebook_blueprint(
     template=_template,

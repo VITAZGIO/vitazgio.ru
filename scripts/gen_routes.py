@@ -71,7 +71,12 @@ def _collect_rules():
     """
     with tempfile.TemporaryDirectory(prefix="gen-routes-") as tmp:
         work = Path(tmp)
-        for name in ("app.py", "blueprints", "templates", "static"):
+        # core/ — с задачи 34: app.py импортирует core.auth/core.storage/
+        # core.templates, а core.storage считает DATA_DIR от своего
+        # расположения на диске. Без копии сюда копия app.py находила бы
+        # настоящий core/ репозитория через sys.path (тот же урок, что и в
+        # tests/conftest.py).
+        for name in ("app.py", "blueprints", "templates", "static", "core"):
             src = REPO_ROOT / name
             dst = work / name
             if src.is_dir():
@@ -83,10 +88,11 @@ def _collect_rules():
         backup = {k: os.environ.get(k) for k in env}
         os.environ.update(env)
         sys.path.insert(0, str(work))
+        stale_prefixes = ("blueprints", "core.")
         cached = {
             m: sys.modules.pop(m)
             for m in list(sys.modules)
-            if m == "app" or m.startswith("blueprints")
+            if m == "app" or m == "core" or m.startswith(stale_prefixes)
         }
         try:
             module = importlib.import_module("app")
@@ -101,7 +107,10 @@ def _collect_rules():
             ]
         finally:
             sys.path.remove(str(work))
-            for m in [m for m in list(sys.modules) if m == "app" or m.startswith("blueprints")]:
+            for m in [
+                m for m in list(sys.modules)
+                if m == "app" or m == "core" or m.startswith(stale_prefixes)
+            ]:
                 del sys.modules[m]
             sys.modules.update(cached)
             for k, v in backup.items():
