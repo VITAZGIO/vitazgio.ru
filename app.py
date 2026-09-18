@@ -71,7 +71,25 @@ from blueprints.drop import create_drop_blueprint
 from blueprints.files import create_files_blueprint
 from blueprints.home import create_home_blueprint
 from blueprints.login_log import create_login_log_blueprint
-from blueprints.music import create_music_blueprint
+from blueprints.music import (
+    MUSIC_DIR,
+    MUSIC_EXTS,
+    MUSIC_MAX_DEPTH,
+    MUSIC_MIMES,
+    create_music_blueprint,
+    music_folder_depth as _music_folder_depth,
+    music_folders,
+    music_items,
+    music_load as _music_load,
+    music_lock,
+    music_safe_name as _music_safe_name,
+    music_scan as _music_scan,
+    music_split as _music_split,
+    music_unlink as _music_unlink,
+    music_used as _music_used,
+    music_used_safe as _music_used_safe,
+    music_write_index as _music_write_index,
+)
 from blueprints.notebook import (
     create_notebook_blueprint,
     notebook_data,
@@ -728,225 +746,22 @@ os.makedirs(PHONE_APK_DIR, exist_ok=True)
 # себя, и после пересборки сервер должен его узнать.
 PHONE_TOKENS_PATH = os.path.join(DATA_DIR, "phone_tokens.json")
 
-# ---- Музыка ----------------------------------------------------------------
-# Файлы лежат под своими именами в data/music — так их можно просто закинуть
-# в папку по SSH, и плеер подхватит сам, разобрав «Исполнитель - Название».
-#
-# Записей может быть больше, чем файлов: один и тот же трек нередко нужен в
-# нескольких папках — в «Роке» и в «Любимом». Хранить его дважды глупо,
-# поэтому запись — это ссылка на файл, а файл удаляется, когда на него не
-# осталось ни одной ссылки. Одинаковость определяем по содержимому, а не по
-# имени: два файла с разными названиями, но одинаковыми байтами — один трек.
-MUSIC_DIR = os.path.join(DATA_DIR, "music")
-MUSIC_INDEX_PATH = os.path.join(DATA_DIR, "music.json")
-MUSIC_MAX_SIZE = 40 * 1024 * 1024
-MUSIC_QUOTA = 2 * 1024 * 1024 * 1024
-MUSIC_CHUNK = 1024 * 1024
-MUSIC_MAX_DEPTH = 6
-MUSIC_EXTS = {".mp3", ".m4a", ".aac", ".ogg", ".opus", ".flac", ".wav", ".webm"}
-MUSIC_MIMES = {
-    ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".aac": "audio/aac",
-    ".ogg": "audio/ogg", ".opus": "audio/ogg", ".flac": "audio/flac",
-    ".wav": "audio/wav", ".webm": "audio/webm",
-}
+# Фонотека (MUSIC_*, music_items/music_folders/music_lock и вся логика)
+# — теперь целиком в blueprints/music.py (задача 36). music_items/
+# music_folders/music_lock и часть хелперов (music_used, music_used_safe,
+# music_write_index, music_scan, music_load, music_unlink, music_safe_name,
+# music_split, music_folder_depth, MUSIC_DIR, MUSIC_EXTS, MUSIC_MIMES,
+# MUSIC_MAX_DEPTH) app.py читает обратно — их напрямую трогает ещё не
+# переехавший drop.py (папка MUSIK показывает саму фонотеку).
 
-music_items: dict = {}
-music_folders: dict = {}
-music_lock = threading.Lock()
-os.makedirs(MUSIC_DIR, exist_ok=True)
-
-
-def _music_safe_name(name):
-    """Имя файла без путей и запрещённых символов. secure_filename не годится —
-    он выбрасывает кириллицу, а треки как раз названы по-русски."""
-    name = os.path.basename(name or "")
-    name = re.sub(r'[\x00-\x1f<>:"/\\|?*]', "", name).strip(" .")
-    return name[:120] or "track"
-
-
-def _music_split(stem):
-    """«Исполнитель - Название» → пара. Разделителем может быть дефис или тире."""
-    for sep in (" — ", " – ", " - ", " -", "- "):
-        if sep in stem:
-            left, _, right = stem.partition(sep)
-            if left.strip() and right.strip():
-                return left.strip()[:80], right.strip()[:120]
-    return "", stem.strip()[:120]
-
-
-def _music_write_index():
-    """Вызывать под music_lock."""
-    try:
-        tmp = MUSIC_INDEX_PATH + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as fh:
-            json.dump({"items": music_items, "folders": music_folders},
-                      fh, ensure_ascii=False)
-        os.replace(tmp, MUSIC_INDEX_PATH)
-    except OSError:
-        pass
-
-
-def _music_digest(fname):
-    """Отпечаток содержимого файла. Читаем кусками: трек может быть на
-    десятки мегабайт, а держать его целиком в памяти незачем."""
-    digest = hashlib.sha256()
-    try:
-        with open(os.path.join(MUSIC_DIR, fname), "rb") as fh:
-            while True:
-                chunk = fh.read(MUSIC_CHUNK)
-                if not chunk:
-                    break
-                digest.update(chunk)
-    except OSError:
-        return ""
-    return digest.hexdigest()
-
-
-def _music_twin(size, digest):
-    """Имя уже лежащего файла с тем же содержимым, иначе пусто.
-
-    Считать отпечатки всей фонотеки при каждой загрузке было бы расточительно,
-    поэтому сначала отсеиваем по размеру: совпал размер — только тогда читаем
-    байты, и посчитанное запоминаем в записи. Вызывать под music_lock."""
-    for track in music_items.values():
-        if track.get("size") != size:
-            continue
-        if not track.get("hash"):
-            track["hash"] = _music_digest(track["file"])
-        if track["hash"] and track["hash"] == digest:
-            return track["file"]
-    return ""
-
-
-def _music_used():
-    """Занято на диске. Копии в других папках ничего не стоят, поэтому
-    считаем по разным файлам, а не по записям. Вызывать под music_lock.
-
-    К кривым записям относимся спокойно: одна порченая строчка в индексе не
-    должна ронять ни фонотеку, ни дроп, который показывает её же."""
-    seen = {}
-    for track in music_items.values():
-        if not isinstance(track, dict) or not track.get("file"):
-            continue
-        size = track.get("size")
-        seen[track["file"]] = size if isinstance(size, (int, float)) else 0
-    return sum(seen.values())
-
-
-# Дроп и фонотека делят ОДНО хранилище на 30 ГБ (DROP_QUOTA). Раньше у музыки
-# был свой лимит на 2 ГБ, из-за чего гигабайты треков не входили в «Занято»
-# дропа, а загрузка упиралась в «нет места в фонотеке», хотя на диске место
-# было. Эти помощники берут занятое каждой половиной СВОИМ локом и без
-# вложенности — правило одно: сначала music_lock, потом drop_lock (или
-# каждый отдельно), но никогда наоборот, иначе взаимоблокировка.
-def _music_used_safe():
-    with music_lock:
-        return _music_used()
-
-
+# Дроп и фонотека делят ОДНО хранилище на 30 ГБ (DROP_QUOTA) — правило:
+# сначала music_lock, потом drop_lock (или каждый отдельно), никогда
+# наоборот, иначе взаимоблокировка (music_used_safe — в blueprints/music.py).
 def _drop_used_safe():
     with drop_lock:
         return _drop_used()
 
 
-def _music_drop_file(fname):
-    """Убрать файл с диска, если на него больше никто не ссылается.
-    Вызывать под music_lock."""
-    if any(t["file"] == fname for t in music_items.values()):
-        return
-    try:
-        os.remove(os.path.join(MUSIC_DIR, fname))
-    except OSError:
-        pass
-
-
-def _music_folder_depth(folder_id):
-    """Сколько папок над этой. Заодно страхует от закольцованного дерева:
-    длиннее MUSIC_MAX_DEPTH подниматься не станем. Вызывать под music_lock."""
-    depth, seen = 0, set()
-    while folder_id and folder_id in music_folders and folder_id not in seen:
-        seen.add(folder_id)
-        folder_id = music_folders[folder_id].get("parent", "")
-        depth += 1
-    return depth
-
-
-def _music_subtree(folder_id):
-    """Папка и всё, что под ней. Вызывать под music_lock."""
-    found = {folder_id}
-    while True:
-        grown = {k for k, v in music_folders.items() if v.get("parent") in found}
-        if grown <= found:
-            return found
-        found |= grown
-
-
-def _music_scan():
-    """Синхронизирует индекс с папкой: подхватывает закинутое руками,
-    выбрасывает записи об исчезнувших файлах. Вызывать под music_lock."""
-    try:
-        on_disk = {f for f in os.listdir(MUSIC_DIR)
-                   if os.path.splitext(f)[1].lower() in MUSIC_EXTS}
-    except OSError:
-        return
-
-    # Сначала — прочь всё, что не похоже на запись о треке: без этого одна
-    # порченая строчка в индексе валила и фонотеку, и список дропа.
-    for track_id in [k for k, v in music_items.items()
-                     if not isinstance(v, dict) or not v.get("file")]:
-        music_items.pop(track_id, None)
-    for folder_id in [k for k, v in music_folders.items()
-                      if not isinstance(v, dict) or not v.get("name")]:
-        music_folders.pop(folder_id, None)
-
-    for track_id in [k for k, v in music_items.items() if v["file"] not in on_disk]:
-        music_items.pop(track_id, None)
-
-    # Папка исчезла — её содержимое всплывает наверх, а не пропадает из виду.
-    for track in music_items.values():
-        if track.get("folder") and track["folder"] not in music_folders:
-            track["folder"] = ""
-    for folder in music_folders.values():
-        if folder.get("parent") and folder["parent"] not in music_folders:
-            folder["parent"] = ""
-
-    known = {v["file"] for v in music_items.values()}
-    for fname in sorted(on_disk - known):
-        artist, title = _music_split(os.path.splitext(fname)[0])
-        try:
-            size = os.path.getsize(os.path.join(MUSIC_DIR, fname))
-        except OSError:
-            continue
-        music_items[str(uuid.uuid4())] = {
-            "file": fname, "artist": artist, "title": title,
-            "size": size, "added": time.time(), "folder": "", "hash": "",
-        }
-
-
-def _music_load():
-    try:
-        with open(MUSIC_INDEX_PATH, encoding="utf-8") as fh:
-            saved = json.load(fh)
-    except (OSError, ValueError):
-        saved = {}
-    # До появления папок индекс был просто «запись → трек». Такой файл узнаём
-    # по значениям: у трека есть «file», у нового раздела — нет.
-    if isinstance(saved, dict) and "items" not in saved:
-        saved = {"items": saved, "folders": {}}
-    music_items.update(saved.get("items") or {})
-    music_folders.update(saved.get("folders") or {})
-    for track in list(music_items.values()):
-        if not isinstance(track, dict):
-            continue
-        track.setdefault("folder", "")
-        track.setdefault("hash", "")
-        if not isinstance(track.get("size"), (int, float)):
-            track["size"] = 0
-    _music_scan()
-    _music_write_index()
-
-
-_music_load()
 
 
 # _rate_blocked/_rate_hit/_rate_clear, console_password_today, _device_check
@@ -1819,33 +1634,8 @@ def uptime_api():
         return jsonify(seconds=None)
 
 
-def music_editor_required(view):
-    """Фонотека целиком под паролем кабинета — и слушать, и менять.
-
-    Изначально слушать мог кто угодно, но выкладывать в открытый доступ
-    скачанную музыку — это раздача чужого, и претензии тут прилетают
-    именно за раздачу, а не за личную копию. Поэтому закрыто всё.
-
-    Отвечаем кодом, а не переадресацией: это разбирает скрипт страницы."""
-    @wraps(view)
-    def wrapped(*args, **kwargs):
-        if not session.get("authenticated"):
-            fresh = _device_check(request.cookies.get(DEVICE_COOKIE))
-            if not fresh:
-                return jsonify(error="Нужен расширенный режим."), 403
-            session["authenticated"] = True
-            g.new_device_cookie = fresh
-            _log_login("доверенное устройство")
-        return view(*args, **kwargs)
-
-    return wrapped
-
-
-def _music_unlink(path):
-    try:
-        os.remove(path)
-    except OSError:
-        pass
+# music_editor_required и music_unlink (как _music_unlink) — тоже в
+# blueprints/music.py, импортированы наверху файла.
 
 
 def _drop_thumb_path(item_id):
@@ -3407,31 +3197,8 @@ app.register_blueprint(create_notebook_blueprint())
 app.register_blueprint(create_diy_blueprint())
 
 app.register_blueprint(create_music_blueprint(
-    template=_template,
-    icon_links=ICON_LINKS,
-    login_required=login_required,
-    music_editor_required=music_editor_required,
-    music_items=music_items,
-    music_folders=music_folders,
-    music_lock=music_lock,
-    music_scan=_music_scan,
-    music_write_index=_music_write_index,
-    music_used=_music_used,
     drop_used_safe=_drop_used_safe,
     drop_quota=DROP_QUOTA,
-    music_max_size=MUSIC_MAX_SIZE,
-    music_safe_name=_music_safe_name,
-    music_exts=MUSIC_EXTS,
-    music_dir=lambda: MUSIC_DIR,
-    music_chunk=MUSIC_CHUNK,
-    music_unlink=_music_unlink,
-    music_twin=_music_twin,
-    music_split=_music_split,
-    music_folder_depth=_music_folder_depth,
-    music_max_depth=MUSIC_MAX_DEPTH,
-    music_subtree=_music_subtree,
-    music_drop_file=_music_drop_file,
-    music_mimes=MUSIC_MIMES,
     drop_lock=drop_lock,
     drop_musik_tracks=_drop_musik_tracks,
 ))
