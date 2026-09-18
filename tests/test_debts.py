@@ -1,3 +1,4 @@
+import sys
 import time
 
 import pytest
@@ -9,12 +10,16 @@ DEBTOR_PASSWORD = "debtor-pass-123"
 
 @pytest.fixture(autouse=True)
 def reset_debts(app_module):
-    salt, password_hash = app_module._debt_hash_password(DEBTOR_PASSWORD)
+    """`debts_data`/`debts_lock` — модульное состояние `blueprints.debts`
+    (задача 36: файл владеет своим состоянием сам, не `app.py`), доступ —
+    через sys.modules, как в tests/test_home.py."""
+    debts_module = sys.modules["blueprints.debts"]
+    salt, password_hash = debts_module.debt_hash_password(DEBTOR_PASSWORD)
     with app_module.notifications_lock:
         app_module.notifications_data.clear()
-    with app_module.debts_lock:
-        app_module.debts_data.clear()
-        app_module.debts_data.update({
+    with debts_module.debts_lock:
+        debts_module.debts_data.clear()
+        debts_module.debts_data.update({
             "users": [{
                 "id": DEBTOR_ID,
                 "name": "Иван",
