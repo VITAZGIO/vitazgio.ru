@@ -5,7 +5,9 @@
 дёргается — адрес подменён в conftest ещё до импорта приложения.
 """
 
-from conftest import FAKE_AI_REPLY
+import sys
+
+from conftest import FAKE_AI_CHUNKS, FAKE_AI_REPLY
 
 
 def _sse_payloads(raw):
@@ -75,3 +77,23 @@ def test_ai_send_rejects_empty(auth_client):
 def test_ai_send_unknown_chat(auth_client):
     resp = auth_client.post("/api/ai/chat/нет-такого/send", json={"text": "привет"})
     assert resp.status_code == 404
+
+
+def test_stop_saves_partial_reply(auth_client, fake_openrouter, app_module):
+    """Кнопка «Стоп» обрывает соединение — генератор `ai_run_stream` получает
+    `GeneratorExit` прямо на текущем `yield`. `finally` внутри него обязан
+    всё равно сохранить то, что успело прийти, иначе история чата разъедется
+    с тем, что человек увидел на экране (задача 37, docs/structure-plan.md)."""
+    ai_module = sys.modules["blueprints.ai"]
+    chat_id = auth_client.post("/api/ai/chat").get_json()["id"]
+    ctx = [{"role": "user", "text": "Как дела?", "ts": 0}]
+
+    gen = ai_module.ai_run_stream(chat_id, ctx, False, [], "", ai_module.OPENROUTER_MODEL)()
+    next(gen)               # первый кусок ответа долетел до клиента
+    gen.close()             # «Стоп»: GeneratorExit прямо на этом yield
+
+    with ai_module.ai_lock:
+        chat = ai_module.ai_find(chat_id)
+    assert chat["messages"][-1]["role"] == "assistant"
+    assert chat["messages"][-1]["text"] == FAKE_AI_CHUNKS[0]
+    assert chat["messages"][-1]["text"] != FAKE_AI_REPLY
