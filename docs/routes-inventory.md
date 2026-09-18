@@ -1,350 +1,268 @@
-# Flask Routes Inventory
+# Опись роутов
 
-Baseline before blueprint split:
+Генерируется скриптом `scripts/gen_routes.py` — не редактировать руками, правки потеряются при следующем запуске. Расхождение с кодом ловит `tests/test_docs.py`.
 
-- Source: `app.py`
-- Route decorators: `131`
-- Code changes in this inventory: none
-- Исправление 2026-09-04: в первой версии описи (задача 17) забыли 4
-  вебсокет-роута (`@sock.route`, не `@app.*`) — реальных роутов в коде
-  всегда было 127, не 123. Задачи 20-25 (перенос на blueprints) на этот
-  подсчёт не влияли и ничего не потеряли — проверено разбором AST,
-  до и после переноса ровно 127. Ошибка была только в самой описи.
+Роутов: **175** (без `static`). Уникальных адресов: **154** — один URL под несколько HTTP-методов даёт несколько роутов на
+один адрес, это не расхождение.
 
-Текущее состояние (проверяется одной строкой, а не на глаз):
+Группировка — по blueprint'у (по имени, переданному в `Blueprint(...)`), `app.py` — роуты без blueprint'а. Guards — decorator'ы, реально навешанные на функцию; пустая колонка не значит «без проверки» — где гейт сделан внутри функции (вебсокеты, живые SSH/SFTP-соединения и т.п.), подробности в `blueprints/<name>.md` рядом с кодом.
 
-- Роутов сейчас: `175`. Считать так — поднять приложение и посмотреть
-  `[r for r in app.url_map.iter_rules() if r.endpoint != "static"]`.
-  Число включает вебсокеты (`@sock.route` тоже попадает в `url_map`).
-  Уникальных адресов при этом `154`: один и тот же URL под GET и POST —
-  два правила в `url_map`, но одна строка в таблицах ниже встречается
-  дважды (по строке на метод), поэтому сходится.
-- 2026-09-11: +7 в разделе «files/sftp» — файловый менеджер по SFTP.
-- 2026-09-11: +1 туда же — скачивание папки zip-архивом.
-- 2026-09-11: +1 туда же — `/api/files/session` (в таблице раньше был
-  пропущен, хотя в коде уже существовал).
-- 2026-09-11: +2 туда же — `/api/files/to-drop` (POST, запускает перенос)
-  и `/api/files/to-drop/<job_id>` (GET, прогресс) для кнопки VG.
-- 2026-09-15: +5 — новый раздел «phone/agent» (ТЗ 1 ретранслятора):
-  `/ws/agent`, `/api/phone/agent`, `/app`, `/api/app/version`,
-  `/api/app/pull`.
-- 2026-09-15: +2 в раздел «phone/agent» (ТЗ 3, экран телефона): страница
-  `/phone` и вебсокет зрителя `/ws/phone`.
-- 2026-09-15: +3 в раздел «phone/agent» (ТЗ 2, оболочка-браузер):
-  `/api/phone/token` (выдать личный токен устройству), `/api/phone/tokens`
-  (список) и `/api/phone/token/<token_id>` (отозвать).
-- 2026-09-15: +1 — `/servers/unlock` (в коде был давно, в таблице
-  «servers/themes/home» его пропустили). Заодно пересчитано число в шапке:
-  стояло `143`, а в коде на тот момент было `153` — таблицы всё это время
-  были полными, отставала только цифра.
-- 2026-09-16: +1 — новый раздел «apps» (вкладка кабинета «Приложения»,
-  бывший «Резерв 1»): `/apps`. Показания и кнопки телефонного приложения
-  переехали сюда с самого телефона (служебный экран `AgentActivity` больше
-  не главный путь к ним), а «Токены телефона» переехали сюда же с
-  `/netbird` — там их не убавилось, а тут стало ровно всё про приложения.
+## app.py
 
-Guards column includes route decorators such as `login_required`, `debtor_required`,
-`music_editor_required`, plus existing domain guards where useful.
-
-## core/auth
-
-| URL | Decorator | Function | Guards |
+| URL | Метод | Функция | Guards |
 | --- | --- | --- | --- |
-| `/api/diag` | `@app.get("/api/diag")` | `diag_api` | `login_required` |
-| `/api/login` | `@app.post("/api/login")` | `login` | - |
-| `/logout` | `@app.post("/logout")` | `logout` | - |
-| `/api/session/probe` | `@app.get("/api/session/probe")` | `session_probe` | - |
+| `/api/diag` | GET | `diag_api` | login_required |
+| `/api/login` | POST | `login` | - |
+| `/api/metrics` | GET | `metrics_api` | login_required |
+| `/api/session/probe` | GET | `session_probe` | - |
+| `/api/uptime` | GET | `uptime_api` | login_required |
+| `/logout` | POST | `logout` | - |
 
-## devices
+## ai
 
-Вкладка кабинета «Запомнить устройства» — своя страница, не аккордеон.
-
-| URL | Decorator | Function | Guards |
+| URL | Метод | Функция | Guards |
 | --- | --- | --- | --- |
-| `/devices` | `@app.get("/devices")` | `devices_page` | `login_required` |
-| `/api/devices/trust` | `@app.post("/api/devices/trust")` | `device_trust` | `login_required` |
-| `/api/devices` | `@app.get("/api/devices")` | `devices_list_api` | `login_required` |
-| `/api/devices/<selector>` | `@app.patch("/api/devices/<selector>")` | `device_rename_api` | `login_required` |
-| `/api/devices/<selector>` | `@app.delete("/api/devices/<selector>")` | `device_forget_api` | `login_required` |
-
-## login_log
-
-Вкладка кабинета «Журнал входов» — своя страница, не аккордеон.
-
-| URL | Decorator | Function | Guards |
-| --- | --- | --- | --- |
-| `/login-log` | `@app.get("/login-log")` | `login_log_page` | `login_required` |
-| `/api/login-log` | `@app.get("/api/login-log")` | `login_log_api` | `login_required` |
-
-## cabinet
-
-`/netbird` живёт тут же (`blueprints/remote.py`) — рядом со статусом
-устройств и SSH/RDP/VNC-консолью, которыми и управляет.
-
-| URL | Decorator | Function | Guards |
-| --- | --- | --- | --- |
-| `/cabinet` | `@app.get("/cabinet")` | `cabinet` | `login_required` |
-| `/notifications` | `@app.get("/notifications")` | `notifications_page` | `login_required` |
-| `/api/notifications` | `@app.get("/api/notifications")` | `notifications_api` | `login_required` |
-| `/api/notifications/<notification_id>/read` | `@app.post("/api/notifications/<notification_id>/read")` | `notification_read_api` | `login_required` |
-| `/api/notifications/read-all` | `@app.post("/api/notifications/read-all")` | `notifications_read_all_api` | `login_required` |
-| `/api/notifications` | `@app.delete("/api/notifications")` | `notifications_clear_api` | `login_required` |
-| `/netbird` | `@app.get("/netbird")` | `netbird_page` | `login_required` |
-| `/api/metrics` | `@app.get("/api/metrics")` | `metrics_api` | `login_required` |
-| `/api/uptime` | `@app.get("/api/uptime")` | `uptime_api` | `login_required` |
-
-## drop
-
-| URL | Decorator | Function | Guards |
-| --- | --- | --- | --- |
-| `/drop` | `@app.get("/drop")` | `drop_page` | `login_required` |
-| `/api/drop/thumb/<item_id>` | `@app.get("/api/drop/thumb/<item_id>")` | `drop_thumb` | `login_required` |
-| `/api/drop/text` | `@app.post("/api/drop/text")` | `drop_upload_text` | `login_required` |
-| `/api/drop/text/<item_id>` | `@app.get("/api/drop/text/<item_id>")` | `drop_text_full` | `login_required` |
-| `/api/drop/text/<item_id>` | `@app.put("/api/drop/text/<item_id>")` | `drop_text_update` | `login_required` |
-| `/api/drop/folder` | `@app.post("/api/drop/folder")` | `drop_folder_create` | `login_required` |
-| `/api/drop/upload/init` | `@app.post("/api/drop/upload/init")` | `drop_upload_init` | `login_required` |
-| `/api/drop/upload/chunk/<upload_id>` | `@app.post("/api/drop/upload/chunk/<upload_id>")` | `drop_upload_chunk` | `login_required` |
-| `/api/drop/upload/finish/<upload_id>` | `@app.post("/api/drop/upload/finish/<upload_id>")` | `drop_upload_finish` | `login_required` |
-| `/api/drop/list` | `@app.get("/api/drop/list")` | `drop_list_api` | `login_required` |
-| `/api/drop/download/<item_id>` | `@app.get("/api/drop/download/<item_id>")` | `drop_download` | `login_required` |
-| `/api/drop/zip/<item_id>` | `@app.get("/api/drop/zip/<item_id>")` | `drop_zip` | `login_required` |
-| `/api/drop/view/<item_id>` | `@app.get("/api/drop/view/<item_id>")` | `drop_view` | `login_required` |
-| `/api/drop/<item_id>` | `@app.patch("/api/drop/<item_id>")` | `drop_update` | `login_required` |
-| `/api/drop/op` | `@app.post("/api/drop/op")` | `drop_op_start` | `login_required` |
-| `/api/drop/op/<job_id>` | `@app.get("/api/drop/op/<job_id>")` | `drop_op_status` | `login_required` |
-| `/api/drop/share/<item_id>` | `@app.post("/api/drop/share/<item_id>")` | `drop_share_create` | `login_required` |
-| `/api/drop/share/<item_id>` | `@app.delete("/api/drop/share/<item_id>")` | `drop_share_revoke` | `login_required` |
-| `/d/<token>` | `@app.get("/d/<token>")` | `drop_public` | - |
-| `/d/<token>/raw` | `@app.get("/d/<token>/raw")` | `drop_public_raw` | - |
-| `/d/<token>/save` | `@app.get("/d/<token>/save")` | `drop_public_save` | - |
-| `/api/drop/qr` | `@app.get("/api/drop/qr")` | `drop_qr` | `login_required` |
-| `/api/drop/<item_id>` | `@app.delete("/api/drop/<item_id>")` | `drop_delete` | `login_required` |
-| `/api/drop/trash/unlock` | `@app.post("/api/drop/trash/unlock")` | `drop_trash_unlock` | `login_required` |
-| `/api/drop/trash` | `@app.get("/api/drop/trash")` | `drop_trash_list` | `login_required` |
-| `/api/drop/<item_id>/restore` | `@app.post("/api/drop/<item_id>/restore")` | `drop_restore` | `login_required` |
-| `/api/drop/trash/<item_id>` | `@app.delete("/api/drop/trash/<item_id>")` | `drop_trash_purge` | `login_required` |
-| `/api/drop/trash` | `@app.delete("/api/drop/trash")` | `drop_trash_empty` | `login_required` |
-
-## music/player
-
-| URL | Decorator | Function | Guards |
-| --- | --- | --- | --- |
-| `/music` | `@app.get("/music")` | `music_page` | `login_required` |
-| `/api/music` | `@app.get("/api/music")` | `music_list_api` | `music_editor_required` |
-| `/api/music` | `@app.post("/api/music")` | `music_upload_api` | `music_editor_required` |
-| `/api/music/<track_id>` | `@app.patch("/api/music/<track_id>")` | `music_rename_api` | `music_editor_required` |
-| `/api/music/<track_id>` | `@app.delete("/api/music/<track_id>")` | `music_delete_api` | `music_editor_required` |
-| `/api/music/folder` | `@app.post("/api/music/folder")` | `music_folder_create_api` | `music_editor_required` |
-| `/api/music/folder/<folder_id>` | `@app.patch("/api/music/folder/<folder_id>")` | `music_folder_patch_api` | `music_editor_required` |
-| `/api/music/folder/<folder_id>` | `@app.delete("/api/music/folder/<folder_id>")` | `music_folder_delete_api` | `music_editor_required` |
-| `/api/music/op` | `@app.post("/api/music/op")` | `music_op_api` | `music_editor_required` |
-| `/api/music/file/<track_id>` | `@app.get("/api/music/file/<track_id>")` | `music_file_api` | `music_editor_required` |
-| `/api/player/tracks` | `@app.get("/api/player/tracks")` | `player_tracks` | `login_required` |
-| `/vg-player.js` | `@app.get("/vg-player.js")` | `vg_player_js` | - |
-| `/player/pop` | `@app.get("/player/pop")` | `player_pop_page` | `login_required` |
-
-## diy
-
-| URL | Decorator | Function | Guards |
-| --- | --- | --- | --- |
-| `/diy` | `@app.get("/diy")` | `diy_page` | - |
-| `/api/diy` | `@app.get("/api/diy")` | `diy_list_api` | - |
-| `/api/diy` | `@app.post("/api/diy")` | `diy_create_api` | `diy_editor_required` |
-| `/api/diy/<item_id>` | `@app.patch("/api/diy/<item_id>")` | `diy_update_api` | `diy_editor_required` |
-| `/api/diy/<item_id>` | `@app.delete("/api/diy/<item_id>")` | `diy_delete_api` | `diy_editor_required` |
-| `/api/diy/<item_id>/asset` | `@app.post("/api/diy/<item_id>/asset")` | `diy_asset_upload_api` | `diy_editor_required` |
-| `/api/diy/<item_id>/asset/<path:name>` | `@app.delete("/api/diy/<item_id>/asset/<path:name>")` | `diy_asset_delete_api` | `diy_editor_required` |
-| `/diy/asset/<item_id>/<path:name>` | `@app.get("/diy/asset/<item_id>/<path:name>")` | `diy_asset_api` | - |
-| `/api/diy/<item_id>/cover` | `@app.post("/api/diy/<item_id>/cover")` | `diy_cover_upload_api` | `diy_editor_required` |
-| `/api/diy/<item_id>/cover` | `@app.delete("/api/diy/<item_id>/cover")` | `diy_cover_delete_api` | `diy_editor_required` |
-| `/diy/cover/<item_id>` | `@app.get("/diy/cover/<item_id>")` | `diy_cover_api` | - |
-| `/diy/a/<item_id>` | `@app.get("/diy/a/<item_id>")` | `diy_article_page` | - |
-
-## notebook
-
-| URL | Decorator | Function | Guards |
-| --- | --- | --- | --- |
-| `/notebook` | `@app.get("/notebook")` | `notebook_page` | `login_required` |
-| `/api/notebook` | `@app.get("/api/notebook")` | `notebook_get_api` | `login_required` |
-| `/api/notebook/page` | `@app.post("/api/notebook/page")` | `notebook_page_add` | `login_required` |
-| `/api/notebook/page/<pid>` | `@app.patch("/api/notebook/page/<pid>")` | `notebook_page_rename` | `login_required` |
-| `/api/notebook/page/<pid>` | `@app.delete("/api/notebook/page/<pid>")` | `notebook_page_delete` | `login_required` |
-| `/api/notebook/entry` | `@app.post("/api/notebook/entry")` | `notebook_entry_add` | `login_required` |
-| `/api/notebook/entry/<eid>` | `@app.patch("/api/notebook/entry/<eid>")` | `notebook_entry_edit` | `login_required` |
-| `/api/notebook/entry/<eid>` | `@app.delete("/api/notebook/entry/<eid>")` | `notebook_entry_delete` | `login_required` |
-| `/api/notebook/entry/<eid>/pdf` | `@app.post("/api/notebook/entry/<eid>/pdf")` | `notebook_entry_pdf` | `login_required` |
-| `/notebook/pdf/<eid>` | `@app.get("/notebook/pdf/<eid>")` | `notebook_pdf_view` | `login_required` |
-
-## debts
-
-| URL | Decorator | Function | Guards |
-| --- | --- | --- | --- |
-| `/debts` | `@app.get("/debts")` | `debts_page` | `login_required` |
-| `/debts/me` | `@app.get("/debts/me")` | `debts_me_page` | `debtor_required` |
-| `/api/debts/unlock` | `@app.post("/api/debts/unlock")` | `debts_unlock_api` | - |
-| `/api/debts` | `@app.get("/api/debts")` | `debts_api` | `debts_owner_required` |
-| `/api/debts/users` | `@app.post("/api/debts/users")` | `debts_user_create_api` | `debts_owner_required` |
-| `/api/debts/entries` | `@app.post("/api/debts/entries")` | `debts_entry_create_api` | `debts_owner_required` |
-| `/api/debts/payment-requests` | `@app.post("/api/debts/payment-requests")` | `debts_payment_request_create_api` | - |
-| `/api/debts/payment-requests/<request_id>/approve` | `@app.post("/api/debts/payment-requests/<request_id>/approve")` | `debts_payment_request_approve_api` | `debts_owner_required` |
-| `/api/debts/payment-requests/<request_id>` | `@app.delete("/api/debts/payment-requests/<request_id>")` | `debts_payment_request_cancel_api` | `debts_owner_required` |
-| `/api/debts/me/payment-requests/<request_id>` | `@app.delete("/api/debts/me/payment-requests/<request_id>")` | `debts_own_payment_request_cancel_api` | `debtor_required` |
-| `/api/debts/entries/<entry_id>` | `@app.delete("/api/debts/entries/<entry_id>")` | `debts_entry_delete_api` | `debts_owner_required` |
-| `/api/debts/me` | `@app.get("/api/debts/me")` | `debts_me_api` | - |
-| `/api/debts/users/<user_id>` | `@app.delete("/api/debts/users/<user_id>")` | `debts_user_delete_api` | `debts_owner_required` |
-| `/api/debts/users/<user_id>/password` | `@app.post("/api/debts/users/<user_id>/password")` | `debts_user_password_api` | `debts_owner_required` |
-| `/api/debts/users/<user_id>/color` | `@app.post("/api/debts/users/<user_id>/color")` | `debts_user_color_api` | `debts_owner_required` |
-
-## ai/neuro/claude
-
-| URL | Decorator | Function | Guards |
-| --- | --- | --- | --- |
-| `/claude` | `@app.get("/claude")` | `claude_page` | `login_required` |
-| `/api/claude/state` | `@app.get("/api/claude/state")` | `claude_state_api` | `login_required` |
-| `/neuro` | `@app.get("/neuro")` | `neuro_page` | `login_required` |
-| `/ai` | `@app.get("/ai")` | `ai_page` | `login_required` |
-| `/api/ai/state` | `@app.get("/api/ai/state")` | `ai_state_api` | `login_required` |
-| `/api/ai/chat/<chat_id>` | `@app.get("/api/ai/chat/<chat_id>")` | `ai_chat_get` | `login_required` |
-| `/api/ai/chat` | `@app.post("/api/ai/chat")` | `ai_chat_new` | `login_required` |
-| `/api/ai/chat/<chat_id>` | `@app.patch("/api/ai/chat/<chat_id>")` | `ai_chat_rename` | `login_required` |
-| `/api/ai/folder` | `@app.get("/api/ai/folder")` | `ai_folder_list` | `login_required` |
-| `/api/ai/folder` | `@app.post("/api/ai/folder")` | `ai_folder_new` | `login_required` |
-| `/api/ai/folder/<fid>` | `@app.patch("/api/ai/folder/<fid>")` | `ai_folder_rename` | `login_required` |
-| `/api/ai/folder/<fid>` | `@app.delete("/api/ai/folder/<fid>")` | `ai_folder_delete` | `login_required` |
-| `/api/ai/chat/<chat_id>` | `@app.delete("/api/ai/chat/<chat_id>")` | `ai_chat_delete` | `login_required` |
-| `/api/ai/img/<img_id>` | `@app.get("/api/ai/img/<img_id>")` | `ai_img_api` | `login_required` |
-| `/api/ai/chat/<chat_id>/send` | `@app.post("/api/ai/chat/<chat_id>/send")` | `ai_chat_send` | `login_required` |
-| `/api/ai/chat/<chat_id>/regenerate` | `@app.post("/api/ai/chat/<chat_id>/regenerate")` | `ai_chat_regenerate` | `login_required` |
-
-## servers/themes/home
-
-| URL | Decorator | Function | Guards |
-| --- | --- | --- | --- |
-| `/` | `@app.route("/")` | `home` | - |
-| `/servers` | `@app.get("/servers")` | `servers_page` | - |
-| `/servers/unlock` | `@home_bp.post("/servers/unlock")` | `servers_unlock` | пароль страницы (`SERVERS_PASSWORD`) |
-| `/themes` | `@app.get("/themes")` | `themes_page` | `login_required` |
-| `/api/arcade/scores` | `@app.get("/api/arcade/scores")` | `arcade_scores_api` | - |
-| `/api/arcade/scores` | `@app.post("/api/arcade/scores")` | `arcade_score_add` | - |
-| `/api/arcade/scores/delete` | `@app.post("/api/arcade/scores/delete")` | `arcade_score_delete` | - |
-
-## sebastian
-
-| URL | Decorator | Function | Guards |
-| --- | --- | --- | --- |
-| `/sebastian` | `@app.get("/sebastian")` | `sebastian_page` | - |
-| `/api/sebastian/state` | `@app.get("/api/sebastian/state")` | `sebastian_state_api` | - |
-| `/api/sebastian/ask` | `@app.post("/api/sebastian/ask")` | `sebastian_ask_api` | - |
-
-## backup
-
-Вкладка кабинета «Резервная копия» — своя страница, не аккордеон.
-
-| URL | Decorator | Function | Guards |
-| --- | --- | --- | --- |
-| `/backup` | `@app.get("/backup")` | `backup_page` | `login_required` |
-| `/api/backup/state` | `@app.get("/api/backup/state")` | `backup_state_api` | `login_required` |
-| `/api/backup/export` | `@app.get("/api/backup/export")` | `backup_export_api` | - |
-| `/api/backup/import` | `@app.post("/api/backup/import")` | `backup_import_api` | `login_required` |
-
-## pwa/icons
-
-| URL | Decorator | Function | Guards |
-| --- | --- | --- | --- |
-| `/manifest.webmanifest` | `@app.get("/manifest.webmanifest")` | `manifest` | - |
-| `/sw.js` | `@app.get("/sw.js")` | `service_worker` | - |
-| `/favicon.ico` | `@app.get("/favicon.ico")` | `favicon` | - |
-| `/icon-<int:size>.png` | `@app.get("/icon-<int:size>.png")` | `app_icon` | - |
-| `/icon-maskable-<int:size>.png` | `@app.get("/icon-maskable-<int:size>.png")` | `app_icon_maskable` | - |
-| `/share-target` | `@app.post("/share-target")` | `share_target_fallback` | `login_required` |
-
-## websockets/remote access
-
-| URL | Decorator | Function | Guards |
-| --- | --- | --- | --- |
-| `/api/netbird/status` | `@app.get("/api/netbird/status")` | `netbird_status_api` | `login_required` |
-| `/api/console/login` | `@app.post("/api/console/login")` | `console_login` | `login_required` |
-| `/api/pc/shutdown` | `@app.post("/api/pc/shutdown")` | `pc_shutdown` | `login_required` |
-| `/api/wol` | `@app.post("/api/wol")` | `wol` | `login_required` |
-| `/ws/console/<ip>` | `@sock.route("/ws/console/<ip>")` | `console_ws` | проверка внутри функции |
-| `/ws/claude` | `@sock.route("/ws/claude")` | `claude_ws` | проверка внутри функции |
-| `/ws/rdp/<ip>` | `@sock.route("/ws/rdp/<ip>")` | `rdp_ws` | проверка внутри функции |
-| `/ws/vnc/<ip>` | `@sock.route("/ws/vnc/<ip>")` | `vnc_ws` | проверка внутри функции |
-
-## files/sftp
-
-Файлы на своих машинах по SFTP (подсистема SSH, порт 22). Все API, кроме
-страницы, дополнительно требуют пароля консоли (`console_authenticated`) и
-живого соединения — оно лежит в памяти процесса, ключ к нему в сессии.
-
-| URL | Decorator | Function | Guards |
-| --- | --- | --- | --- |
-| `/files/<ip>` | `@files_bp.get("/files/<ip>")` | `files_page` | `login_required` + машина из `sftp_enabled_ips` |
-| `/api/files/connect` | `@files_bp.post("/api/files/connect")` | `files_connect` | `login_required` + пароль консоли |
-| `/api/files/disconnect` | `@files_bp.post("/api/files/disconnect")` | `files_disconnect` | `login_required` |
-| `/api/files/session` | `@files_bp.get("/api/files/session")` | `files_session` | `login_required` |
-| `/api/files/list` | `@files_bp.get("/api/files/list")` | `files_list` | `login_required` + живое соединение |
-| `/api/files/download` | `@files_bp.get("/api/files/download")` | `files_download` | `login_required` + живое соединение |
-| `/api/files/zip` | `@files_bp.get("/api/files/zip")` | `files_zip` | `login_required` + живое соединение |
-| `/api/files/upload` | `@files_bp.post("/api/files/upload")` | `files_upload` | `login_required` + живое соединение |
-| `/api/files/op` | `@files_bp.post("/api/files/op")` | `files_op` | `login_required` + живое соединение |
-| `/api/files/to-drop` | `@files_bp.post("/api/files/to-drop")` | `files_to_drop` | `login_required` + живое соединение |
-| `/api/files/to-drop/<job_id>` | `@files_bp.get("/api/files/to-drop/<job_id>")` | `files_to_drop_status` | `login_required` |
-
-## phone/agent
-
-Ретранслятор телефона, ступени 1-3 (`blueprints/phone.py`). Телефон не может
-принимать входящие (CGNAT у оператора), поэтому приходит сам вебсокетом и
-держит его открытым; реестр живых агентов лежит в памяти процесса и он же
-красит строку MOBILA на `/netbird` — ICMP-пинг до телефона не дойдёт никогда.
-Экран (`/phone` + `/ws/phone`) — тот же приём, что у guacamole в
-`blueprints/remote.py`: сайт стоит мостом между двумя исходящими
-соединениями и перекладывает кадры, сам их не разбирая.
-
-| URL | Decorator | Function | Guards |
-| --- | --- | --- | --- |
-| `/ws/agent` | `@sock.route("/ws/agent")` | `agent_ws` | `PHONE_AGENT_TOKEN` либо личный токен устройства в первом сообщении `hello` |
-| `/ws/phone` | `@sock.route("/ws/phone")` | `phone_ws` | вход в кабинет + пароль консоли (проверка внутри функции) |
-| `/phone` | `@phone_bp.get("/phone")` | `phone_page` | `login_required` + пароль консоли спрашивает сама страница |
-| `/api/phone/agent` | `@phone_bp.get("/api/phone/agent")` | `phone_agent_api` | `login_required` |
-| `/api/phone/token` | `@phone_bp.post("/api/phone/token")` | `phone_token_issue` | `login_required` |
-| `/api/phone/tokens` | `@phone_bp.get("/api/phone/tokens")` | `phone_tokens_api` | `login_required` |
-| `/api/phone/token/<token_id>` | `@phone_bp.delete("/api/phone/token/<token_id>")` | `phone_token_revoke` | `login_required` |
-| `/app` | `@phone_bp.get("/app")` | `app_apk` | `login_required` |
-| `/api/app/version` | `@phone_bp.get("/api/app/version")` | `app_version_api` | `login_required` ИЛИ заголовок `X-Agent-Token` |
-| `/api/app/pull` | `@phone_bp.post("/api/app/pull")` | `app_pull_api` | `login_required` |
+| `/ai` | GET | `ai_page` | login_required |
+| `/api/ai/chat` | POST | `ai_chat_new` | login_required |
+| `/api/ai/chat/<chat_id>` | DELETE | `ai_chat_delete` | login_required |
+| `/api/ai/chat/<chat_id>` | GET | `ai_chat_get` | login_required |
+| `/api/ai/chat/<chat_id>` | PATCH | `ai_chat_rename` | login_required |
+| `/api/ai/chat/<chat_id>/regenerate` | POST | `ai_chat_regenerate` | login_required |
+| `/api/ai/chat/<chat_id>/send` | POST | `ai_chat_send` | login_required |
+| `/api/ai/folder` | GET | `ai_folder_list` | login_required |
+| `/api/ai/folder` | POST | `ai_folder_new` | login_required |
+| `/api/ai/folder/<fid>` | DELETE | `ai_folder_delete` | login_required |
+| `/api/ai/folder/<fid>` | PATCH | `ai_folder_rename` | login_required |
+| `/api/ai/img/<img_id>` | GET | `ai_img_api` | login_required |
+| `/api/ai/state` | GET | `ai_state_api` | login_required |
+| `/api/claude/state` | GET | `claude_state_api` | login_required |
+| `/claude` | GET | `claude_page` | login_required |
+| `/neuro` | GET | `neuro_page` | login_required |
 
 ## apps
 
-Вкладка кабинета «Приложения» (`blueprints/apps.py`) — своя страница, не
-аккордеон, как «Запомнить устройства» или «Журнал входов». Занимает бывшее
-место «Резерв 1» на `/cabinet`. Сама страница ничего не считает: данные и
-кнопки — те же API из раздела «phone/agent» выше (статус агента, версии,
-подтянуть/скачать сборку, токены устройства). Раздел «Windows» использует
-API desktop: сборки EXE, список компьютеров и отзыв их доступа.
-
-| URL | Decorator | Function | Guards |
+| URL | Метод | Функция | Guards |
 | --- | --- | --- | --- |
-| `/apps` | `@apps_bp.get("/apps")` | `apps_page` | `login_required` |
+| `/apps` | GET | `apps_page` | login_required |
 
-## desktop/windows (2026-09-17)
+## backup_sebastian
 
-`blueprints/desktop.py`. Сайт передаёт только SDP и состояние соединения;
-видео, системный звук и события ввода идут через WebRTC. Один зритель на ПК.
-Viewer = вход в кабинет + суточный пароль консоли + владелец конкретной сессии.
-Agent = отдельный токен компьютера, на диске хранится только SHA-256.
-
-| URL | Method | Function | Guards |
+| URL | Метод | Функция | Guards |
 | --- | --- | --- | --- |
-| `/desktop` | GET | `desktop_page` | login_required |
-| `/api/desktop/register` | POST | `register` | login_required |
+| `/api/backup/export` | GET | `backup_export_api` | - |
+| `/api/backup/import` | POST | `backup_import_api` | login_required |
+| `/api/backup/state` | GET | `backup_state_api` | login_required |
+| `/api/sebastian/ask` | POST | `sebastian_ask_api` | - |
+| `/api/sebastian/state` | GET | `sebastian_state_api` | - |
+| `/backup` | GET | `backup_page` | login_required |
+| `/sebastian` | GET | `sebastian_page` | - |
+
+## debts
+
+| URL | Метод | Функция | Guards |
+| --- | --- | --- | --- |
+| `/api/debts` | GET | `debts_api` | debts_owner_required |
+| `/api/debts/entries` | POST | `debts_entry_create_api` | debts_owner_required |
+| `/api/debts/entries/<entry_id>` | DELETE | `debts_entry_delete_api` | debts_owner_required |
+| `/api/debts/me` | GET | `debts_me_api` | - |
+| `/api/debts/me/payment-requests/<request_id>` | DELETE | `debts_own_payment_request_cancel_api` | debtor_required |
+| `/api/debts/payment-requests` | POST | `debts_payment_request_create_api` | - |
+| `/api/debts/payment-requests/<request_id>` | DELETE | `debts_payment_request_cancel_api` | debts_owner_required |
+| `/api/debts/payment-requests/<request_id>/approve` | POST | `debts_payment_request_approve_api` | debts_owner_required |
+| `/api/debts/unlock` | POST | `debts_unlock_api` | - |
+| `/api/debts/users` | POST | `debts_user_create_api` | debts_owner_required |
+| `/api/debts/users/<user_id>` | DELETE | `debts_user_delete_api` | debts_owner_required |
+| `/api/debts/users/<user_id>/color` | POST | `debts_user_color_api` | debts_owner_required |
+| `/api/debts/users/<user_id>/password` | POST | `debts_user_password_api` | debts_owner_required |
+| `/debts` | GET | `debts_page` | login_required |
+| `/debts/me` | GET | `debts_me_page` | debtor_required |
+
+## desktop
+
+| URL | Метод | Функция | Guards |
+| --- | --- | --- | --- |
+| `/api/desktop/config` | GET | `config` | viewer_required |
 | `/api/desktop/devices` | GET | `device_list` | login_required |
 | `/api/desktop/devices/<did>` | DELETE | `revoke` | login_required |
-| `/api/desktop/host` | POST | `host` | agent token |
-| `/api/desktop/config` | GET | `config` | viewer |
-| `/api/desktop/sessions` | POST | `create_session` | viewer |
-| `/api/desktop/sessions/<cid>` | GET | `read_session` | owning viewer or own agent |
-| `/api/desktop/sessions/<cid>` | POST | `answer_session` | own agent |
-| `/api/desktop/sessions/<cid>` | DELETE | `close_session` | owning viewer or own agent |
+| `/api/desktop/host` | POST | `host` | - |
+| `/api/desktop/register` | POST | `register` | login_required |
+| `/api/desktop/sessions` | POST | `create_session` | viewer_required |
+| `/api/desktop/sessions/<cid>` | DELETE | `close_session` | - |
+| `/api/desktop/sessions/<cid>` | GET | `read_session` | - |
+| `/api/desktop/sessions/<cid>` | POST | `answer_session` | - |
 | `/api/desktop/version` | GET | `version` | login_required |
+| `/desktop` | GET | `desktop_page` | login_required |
+
+## devices
+
+| URL | Метод | Функция | Guards |
+| --- | --- | --- | --- |
+| `/api/devices` | GET | `devices_list_api` | login_required |
+| `/api/devices/<selector>` | DELETE | `device_forget_api` | login_required |
+| `/api/devices/<selector>` | PATCH | `device_rename_api` | login_required |
+| `/api/devices/trust` | POST | `device_trust` | login_required |
+| `/devices` | GET | `devices_page` | login_required |
+
+## diy
+
+| URL | Метод | Функция | Guards |
+| --- | --- | --- | --- |
+| `/api/diy` | GET | `diy_list_api` | - |
+| `/api/diy` | POST | `diy_create_api` | diy_editor_required |
+| `/api/diy/<item_id>` | DELETE | `diy_delete_api` | diy_editor_required |
+| `/api/diy/<item_id>` | PATCH | `diy_update_api` | diy_editor_required |
+| `/api/diy/<item_id>/asset` | POST | `diy_asset_upload_api` | diy_editor_required |
+| `/api/diy/<item_id>/asset/<path:name>` | DELETE | `diy_asset_delete_api` | diy_editor_required |
+| `/api/diy/<item_id>/cover` | DELETE | `diy_cover_delete_api` | diy_editor_required |
+| `/api/diy/<item_id>/cover` | POST | `diy_cover_upload_api` | diy_editor_required |
+| `/diy` | GET | `diy_page` | - |
+| `/diy/a/<item_id>` | GET | `diy_article_page` | - |
+| `/diy/asset/<item_id>/<path:name>` | GET | `diy_asset_api` | - |
+| `/diy/cover/<item_id>` | GET | `diy_cover_api` | - |
+
+## drop
+
+| URL | Метод | Функция | Guards |
+| --- | --- | --- | --- |
+| `/api/drop/<item_id>` | DELETE | `drop_delete` | login_required |
+| `/api/drop/<item_id>` | PATCH | `drop_update` | login_required |
+| `/api/drop/<item_id>/restore` | POST | `drop_restore` | login_required |
+| `/api/drop/download/<item_id>` | GET | `drop_download` | login_required |
+| `/api/drop/folder` | POST | `drop_folder_create` | login_required |
+| `/api/drop/list` | GET | `drop_list_api` | login_required |
+| `/api/drop/op` | POST | `drop_op_start` | login_required |
+| `/api/drop/op/<job_id>` | GET | `drop_op_status` | login_required |
+| `/api/drop/qr` | GET | `drop_qr` | login_required |
+| `/api/drop/share/<item_id>` | DELETE | `drop_share_revoke` | login_required |
+| `/api/drop/share/<item_id>` | POST | `drop_share_create` | login_required |
+| `/api/drop/text` | POST | `drop_upload_text` | login_required |
+| `/api/drop/text/<item_id>` | GET | `drop_text_full` | login_required |
+| `/api/drop/text/<item_id>` | PUT | `drop_text_update` | login_required |
+| `/api/drop/thumb/<item_id>` | GET | `drop_thumb` | login_required |
+| `/api/drop/trash` | DELETE | `drop_trash_empty` | login_required |
+| `/api/drop/trash` | GET | `drop_trash_list` | login_required |
+| `/api/drop/trash/<item_id>` | DELETE | `drop_trash_purge` | login_required |
+| `/api/drop/trash/unlock` | POST | `drop_trash_unlock` | login_required |
+| `/api/drop/upload/chunk/<upload_id>` | POST | `drop_upload_chunk` | login_required |
+| `/api/drop/upload/finish/<upload_id>` | POST | `drop_upload_finish` | login_required |
+| `/api/drop/upload/init` | POST | `drop_upload_init` | login_required |
+| `/api/drop/view/<item_id>` | GET | `drop_view` | login_required |
+| `/api/drop/zip/<item_id>` | GET | `drop_zip` | login_required |
+| `/d/<token>` | GET | `drop_public` | - |
+| `/d/<token>/raw` | GET | `drop_public_raw` | - |
+| `/d/<token>/save` | GET | `drop_public_save` | - |
+| `/drop` | GET | `drop_page` | login_required |
+
+## files
+
+| URL | Метод | Функция | Guards |
+| --- | --- | --- | --- |
+| `/api/files/connect` | POST | `files_connect` | login_required |
+| `/api/files/disconnect` | POST | `files_disconnect` | login_required |
+| `/api/files/download` | GET | `files_download` | login_required |
+| `/api/files/list` | GET | `files_list` | login_required |
+| `/api/files/op` | POST | `files_op` | login_required |
+| `/api/files/session` | GET | `files_session` | login_required |
+| `/api/files/to-drop` | POST | `files_to_drop` | login_required |
+| `/api/files/to-drop/<job_id>` | GET | `files_to_drop_status` | login_required |
+| `/api/files/upload` | POST | `files_upload` | login_required |
+| `/api/files/zip` | GET | `files_zip` | login_required |
+| `/files/<ip>` | GET | `files_page` | login_required |
+
+## home
+
+| URL | Метод | Функция | Guards |
+| --- | --- | --- | --- |
+| `/` | GET | `home` | - |
+| `/api/arcade/scores` | GET | `arcade_scores_api` | - |
+| `/api/arcade/scores` | POST | `arcade_score_add` | - |
+| `/api/arcade/scores/delete` | POST | `arcade_score_delete` | - |
+| `/servers` | GET | `servers_page` | - |
+| `/servers/unlock` | POST | `servers_unlock` | - |
+| `/themes` | GET | `themes_page` | login_required |
+
+## login_log
+
+| URL | Метод | Функция | Guards |
+| --- | --- | --- | --- |
+| `/api/login-log` | GET | `login_log_api` | login_required |
+| `/login-log` | GET | `login_log_page` | login_required |
+
+## music
+
+| URL | Метод | Функция | Guards |
+| --- | --- | --- | --- |
+| `/api/music` | GET | `music_list_api` | music_editor_required |
+| `/api/music` | POST | `music_upload_api` | music_editor_required |
+| `/api/music/<track_id>` | DELETE | `music_delete_api` | music_editor_required |
+| `/api/music/<track_id>` | PATCH | `music_rename_api` | music_editor_required |
+| `/api/music/file/<track_id>` | GET | `music_file_api` | music_editor_required |
+| `/api/music/folder` | POST | `music_folder_create_api` | music_editor_required |
+| `/api/music/folder/<folder_id>` | DELETE | `music_folder_delete_api` | music_editor_required |
+| `/api/music/folder/<folder_id>` | PATCH | `music_folder_patch_api` | music_editor_required |
+| `/api/music/op` | POST | `music_op_api` | music_editor_required |
+| `/api/player/tracks` | GET | `player_tracks` | login_required |
+| `/music` | GET | `music_page` | login_required |
+| `/player/pop` | GET | `player_pop_page` | login_required |
+| `/vg-player.js` | GET | `vg_player_js` | - |
+
+## notebook
+
+| URL | Метод | Функция | Guards |
+| --- | --- | --- | --- |
+| `/api/notebook` | GET | `notebook_get_api` | login_required |
+| `/api/notebook/entry` | POST | `notebook_entry_add` | login_required |
+| `/api/notebook/entry/<eid>` | DELETE | `notebook_entry_delete` | login_required |
+| `/api/notebook/entry/<eid>` | PATCH | `notebook_entry_edit` | login_required |
+| `/api/notebook/entry/<eid>/pdf` | POST | `notebook_entry_pdf` | login_required |
+| `/api/notebook/page` | POST | `notebook_page_add` | login_required |
+| `/api/notebook/page/<pid>` | DELETE | `notebook_page_delete` | login_required |
+| `/api/notebook/page/<pid>` | PATCH | `notebook_page_rename` | login_required |
+| `/notebook` | GET | `notebook_page` | login_required |
+| `/notebook/pdf/<eid>` | GET | `notebook_pdf_view` | login_required |
+
+## phone
+
+| URL | Метод | Функция | Guards |
+| --- | --- | --- | --- |
+| `/api/app/pull` | POST | `app_pull_api` | login_required |
+| `/api/app/version` | GET | `app_version_api` | - |
+| `/api/phone/agent` | GET | `phone_agent_api` | login_required |
+| `/api/phone/token` | POST | `phone_token_issue` | login_required |
+| `/api/phone/token/<token_id>` | DELETE | `phone_token_revoke` | login_required |
+| `/api/phone/tokens` | GET | `phone_tokens_api` | login_required |
+| `/app` | GET | `app_apk` | login_required |
+| `/phone` | GET | `phone_page` | login_required |
+| `/ws/agent` | GET | `agent_ws` | - |
+| `/ws/phone` | GET | `phone_ws` | - |
+
+## pwa
+
+| URL | Метод | Функция | Guards |
+| --- | --- | --- | --- |
+| `/favicon.ico` | GET | `favicon` | - |
+| `/icon-<int:size>.png` | GET | `app_icon` | - |
+| `/icon-maskable-<int:size>.png` | GET | `app_icon_maskable` | - |
+| `/manifest.webmanifest` | GET | `manifest` | - |
+| `/share-target` | POST | `share_target_fallback` | login_required |
+| `/sw.js` | GET | `service_worker` | - |
+
+## remote
+
+| URL | Метод | Функция | Guards |
+| --- | --- | --- | --- |
+| `/api/console/login` | POST | `console_login` | login_required |
+| `/api/netbird/status` | GET | `netbird_status_api` | login_required |
+| `/api/notifications` | DELETE | `notifications_clear_api` | login_required |
+| `/api/notifications` | GET | `notifications_api` | login_required |
+| `/api/notifications/<notification_id>/read` | POST | `notification_read_api` | login_required |
+| `/api/notifications/read-all` | POST | `notifications_read_all_api` | login_required |
+| `/api/pc/shutdown` | POST | `pc_shutdown` | login_required |
+| `/api/wol` | POST | `wol` | login_required |
+| `/cabinet` | GET | `cabinet` | login_required |
+| `/netbird` | GET | `netbird_page` | login_required |
+| `/notifications` | GET | `notifications_page` | login_required |
+| `/ws/claude` | GET | `claude_ws` | - |
+| `/ws/console/<ip>` | GET | `console_ws` | - |
+| `/ws/rdp/<ip>` | GET | `rdp_ws` | - |
+| `/ws/vnc/<ip>` | GET | `vnc_ws` | - |
