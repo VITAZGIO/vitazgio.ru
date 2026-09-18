@@ -168,13 +168,9 @@ sftp_enabled_ips = {device["ip"] for device in NETBIRD_DEVICES
 PHONE_AGENT_TOKEN = os.environ.get("PHONE_AGENT_TOKEN")
 # Репозиторий со сборками приложения: оттуда /api/app/pull тянет свежий APK.
 PHONE_APK_REPO = os.environ.get("PHONE_APK_REPO", "VITAZGIO/vitazgio.ru")
-# Свой логин/пароль перед файлами телефона на /files — SSH там нет и не
-# будет, поэтому проверять НЕЧЕГО кроме этой пары, которую хозяин один раз
-# вписывает в .env сам. Не заданы — страница файлов телефона отказывает
-# всем, даже с верным суточным паролем консоли (закрыто по умолчанию, а не
-# открыто, если забыли настроить).
-PHONE_FILES_USER = os.environ.get("PHONE_FILES_USER")
-PHONE_FILES_PASSWORD = os.environ.get("PHONE_FILES_PASSWORD")
+# PHONE_FILES_USER/PHONE_FILES_PASSWORD (логин/пароль перед файлами
+# телефона на /files) теперь читает сама blueprints/files.py (задача 39)
+# — были нужны только там.
 # Свой пароль вкладки «Долги», не связан с ежедневным паролем консоли —
 # задаётся один раз в .env и не меняется день ото дня.
 DEBTS_PASSWORD = os.environ.get("DEBTS_PASSWORD")
@@ -1202,22 +1198,10 @@ phone_bp = create_phone_blueprint(
 app.register_blueprint(phone_bp)
 
 app.register_blueprint(create_files_blueprint(
-    template=_template,
-    icon_links=ICON_LINKS,
-    login_required=login_required,
     netbird_devices=NETBIRD_DEVICES,
     sftp_enabled_ips=sftp_enabled_ips,
-    drop_lock=drop_lock,
-    drop_items=drop_items,
-    drop_path=drop_path,
-    drop_write_index=drop_write_index,
-    drop_used=drop_used,
-    drop_quota=DROP_QUOTA,
-    drop_download_id=DROP_DOWNLOAD_ID,
     phone_fs=phone_bp.fs,
     phone_ip=PHONE_AGENT_IP,
-    phone_files_user=PHONE_FILES_USER,
-    phone_files_password=PHONE_FILES_PASSWORD,
 ))
 
 app.register_blueprint(create_remote_blueprint(
