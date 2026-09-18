@@ -1,224 +1,66 @@
-# AI_MAP
+# AI_MAP — где что лежит
 
-Этот проект должен быть удобен прежде всего для Codex/Claude: правки должны
-требовать чтения минимума файлов, новые фичи должны добавляться по одному
-предсказуемому шаблону, а важные правила должны быть видны до погружения в код.
+Навигация по проекту: тема → файлы. **Правил здесь нет** — они в
+`CLAUDE.md` (он читается сам в начале каждой сессии). Этот файл нужен в
+одном случае: не знаешь, в каком файле живёт нужная фича.
 
-## Главная цель
+Порядок чтения: `CLAUDE.md` (правила, ловушки) → этот файл (найти фичу)
+→ `blueprints/<name>.md` (карта фичи: точки входа, данные, инварианты,
+какой тест гонять) → сам код. Раньше, чем понадобилось, ничего не
+открывать.
 
-Держать проект как AI-first modular monolith:
+## Структура (после задач 1-40, оба плана выполнены)
 
-- один репозиторий;
-- один Flask-сервер и один деплой;
-- фичи изолированы по смыслу;
-- новые разделы не раздувают `app.py`;
-- нейросеть быстро находит нужный модуль, читает его карту и правит локально.
+| Папка | Что там |
+|---|---|
+| `app.py` | тонкий вход: создание Flask-приложения, конфиг, регистрация blueprint'ов, фоновые задачи (метрики, пинг NetBird), свои роуты входа. ~1250 строк |
+| `core/` | общая инфраструктура: `auth.py` (вход, доверенные устройства, суточный пароль консоли, ограничение попыток), `storage.py` (`DATA_DIR`, атомарная запись JSON, безопасные имена файлов), `templates.py` (`template()`) |
+| `blueprints/` | по файлу на фичу + `<name>.md` — карта рядом с кодом |
+| `templates/` | HTML/CSS/JS страниц, обычные текстовые файлы (без Jinja2) |
+| `tests/` | pytest, гоняется в CI дважды |
+| `scripts/` | `gen_routes.py` — генератор описи роутов |
+| `android/`, `desktop/` | клиентские приложения, свои README |
 
-## Перед любой правкой
+## Фичи
 
-1. Прочитать `README.md`, если нужна общая картина.
-2. Прочитать `CLAUDE.md`, если правка касается деплоя, инфраструктуры,
-   исторических решений или ловушек.
-3. Прочитать этот файл.
-4. Найти фичу ниже и открыть только её файлы.
-5. Если меняются маршруты, обновить `docs/routes-inventory.md`.
-6. Если меняется JS в шаблонах, помнить ловушку: в python-строках `\n`
-   превращается в реальный перенос, в шаблонах нужен `\\n`.
+| Тема | Файл | Карта |
+|---|---|---|
+| Главная, темы, серверы, аркада | `blueprints/home.py` | `home.md` |
+| Кабинет, NetBird, SSH/RDP/VNC/Claude, уведомления | `blueprints/remote.py` | `remote.md` |
+| Дроп и публичные ссылки | `blueprints/drop.py` | `drop.md` |
+| Файлы машин и телефона (SFTP) | `blueprints/files.py` | `files.md` |
+| Телефонный агент, экран, звук, управление | `blueprints/phone.py` | `phone.md` |
+| Музыка и плеер | `blueprints/music.py` | `music.md` |
+| Нейронки (/neuro, /ai), вкладка Claude | `blueprints/ai.py` | `ai.md` |
+| Долги | `blueprints/debts.py` | `debts.md` |
+| DIY | `blueprints/diy.py` | `diy.md` |
+| Блокнот | `blueprints/notebook.py` | `notebook.md` |
+| Вкладка «Приложения» | `blueprints/apps.py` | `apps.md` |
+| Оболочка Windows, просмотр экрана ПК | `blueprints/desktop.py` | `desktop.md` |
+| Бэкап и Себастьян | `blueprints/backup_sebastian.py` | `backup_sebastian.md` |
+| Доверенные устройства | `blueprints/devices.py` | `devices.md` |
+| Журнал входов | `blueprints/login_log.py` | `login_log.md` |
+| PWA, иконки, «Поделиться» | `blueprints/pwa.py` | `pwa.md` |
 
-## Куда смотреть
+Карты лежат рядом с кодом: `blueprints/<name>.md`.
 
-### Вход и общая сборка
+## Полный список роутов
 
-- `app.py` — создание Flask app, глобальные настройки, регистрация blueprints,
-  старые общие хранилища и функции.
-- `blueprints/` — серверные модули страниц/API.
-- `templates/` — HTML/CSS/JS страниц.
-- `static/` — статика, игры, иконки, vendor JS/CSS.
-- `tests/` — pytest-покрытие сайта.
-
-### Главная, кабинет, серверы, темы
-
-- `blueprints/home.py`
-- `templates/home.html`
-- `templates/cabinet.html`
-- `templates/themes.html`
-- `templates/servers_unlock.html`
-- тесты: `tests/test_servers.py`, `tests/test_auth.py`
-
-### Дроп и публичные ссылки
-
-- `blueprints/drop.py`
-- `templates/drop.html`
-- данные: `drop_data/`, индекс в `drop_data/index.json`
-- тесты: `tests/test_drop.py`
-- инварианты:
-  - пользовательское имя файла не должно становиться путём на диске;
-  - публичные файлы отдавать безопасно: attachment / sandbox CSP;
-  - удаление сначала идёт в корзину, не сразу физически.
-
-### Файлы устройств и SFTP
-
-- `blueprints/files.py`
-- `templates/files.html`
-- тесты: `tests/test_files.py`, `tests/test_phone_files.py`
-
-### Телефонный агент
-
-- `blueprints/phone.py`
-- `templates/phone.html`
-- Android-клиент: `android/`
-- ТЗ и этапы: `docs/phone-access-plan.md`, `docs/phone-tz/`
-- тесты: `tests/test_phone.py`, `tests/test_phone_files.py`
-- инварианты:
-  - телефон сам подключается к сайту websocket-ом;
-  - входящих подключений к телефону не предполагается;
-  - токены не хранить в открытом виде, если можно хранить хэш.
-
-### SSH/RDP/VNC/NetBird/Claude
-
-- `blueprints/remote.py`
-- `templates/netbird.html`
-- `templates/claude.html`
-- тесты частично в `tests/test_files.py`
-- инварианты:
-  - пароли машин не хранить на сервере;
-  - логин/пароль идут только в текущем websocket-сеансе;
-  - суточный пароль консоли проверяется отдельно от пароля кабинета.
-
-### Музыка и плеер
-
-- `blueprints/music.py`
-- `templates/music.html`
-- `templates/vg_player.js.tpl`
-- данные: `data/music/`, `data/music.json`
-- тесты: `tests/test_music.py`
-
-### AI/Neuro/OpenRouter
-
-- `blueprints/ai.py`
-- `templates/ai.html`
-- данные: `data/aichat.json`, `data/aichat_img/`
-- тесты: `tests/test_ai.py`
-
-### Долги
-
-- `blueprints/debts.py`
-- `templates/debts.html`
-- данные: `data/debts.json`
-- тесты: `tests/test_debts.py`
-- осторожно: сейчас есть `password_plain` для отображения владельцу. Не
-  усиливать эту схему без отдельного решения.
-
-### DIY, блокнот, уведомления, бэкап
-
-- DIY: `blueprints/diy.py`, `templates/diy.html`
-- Блокнот: `blueprints/notebook.py`, `templates/notebook.html`
-- Уведомления: `blueprints/remote.py`, `templates/notifications.html`,
-  `tests/test_notifications.py`
-- Бэкап/Себастьян: `blueprints/backup_sebastian.py`,
-  `templates/backup.html`, `templates/sebastian.html`
-
-### PWA
-
-- `blueprints/pwa.py`
-- `templates/service_worker.js.tpl`
-- `static/offline.html`
-- тесты: `tests/test_pwa.py`
-
-### Desktop Windows app
-
-- `desktop/`
-- `desktop/package.json`
-- тесты: `desktop/tests/*.cjs`, `tests/test_desktop.py`
-
-### Android app
-
-- `android/`
-- workflow: `.github/workflows/android.yml`
-- сайтовые API обновления APK: `blueprints/phone.py`, `blueprints/desktop.py`
+`docs/routes-inventory.md` — **генерируется** скриптом
+`python3 scripts/gen_routes.py`, руками не редактировать (правки
+потеряются, расхождение с кодом валит `tests/test_docs.py`).
 
 ## Что не читать без причины
 
-- `static/vendor/*`
-- `desktop/dist/*`
-- `desktop/node_modules/*`
-- `.venv-desktop/*`
-- `data/*`
-- `drop_data/*`
-- `pytest-cache-files-*`
-- `__pycache__/*`
+`static/vendor/*`, `desktop/dist/*`, `desktop/node_modules/*`,
+`android/app/build/*`, `data/*`, `drop_data/*`, `__pycache__/*`.
+Это артефакты сборки и живые данные — в задачах про код они не нужны.
 
-Если задача не про сборку Android/Desktop, не читать большие артефакты сборки.
+## Как добавить фичу
 
-## Как добавлять новые фичи
-
-Новая фича должна появляться отдельным модулем, а не кусками по всему проекту.
-
-Желаемый будущий шаблон:
-
-```text
-features/<name>/
-  FEATURE.md
-  routes.py
-  service.py
-  storage.py
-  templates/
-  tests/
-```
-
-Пока проект живёт в текущей структуре, минимальный шаблон такой:
-
-```text
-blueprints/<name>.py
-templates/<name>.html
-tests/test_<name>.py
-docs/routes-inventory.md
-```
-
-В `app.py` для новой фичи должна появляться только регистрация blueprint и
-передача зависимостей. Не складывать туда HTML, бизнес-логику и большие helper
-функции.
-
-## Как писать модуль
-
-Разделять уровни:
-
-- `routes` принимает HTTP-запрос и возвращает HTTP-ответ;
-- `service` решает, что должно произойти;
-- `storage` читает и пишет данные;
-- `security/auth` проверяет доступы, пароли, лимиты;
-- шаблон содержит UI, но не должен требовать чтения всего backend-кода.
-
-Не смешивать в одной функции request parsing, проверку прав, файловую систему,
-бизнес-логику и сборку HTML.
-
-## Правила для экономии токенов
-
-- Перед правкой читать `FEATURE.md` фичи, если он есть.
-- Если `FEATURE.md` нет, при крупной правке создать короткий.
-- Держать файлы небольшими: лучше 3 файла по 250 строк, чем один на 900.
-- Не делать широкие рефакторы вместе с фичей.
-- Не менять соседние модули без явной причины.
-- Не трогать документацию инфраструктуры, если задача не про инфраструктуру.
-- Для новой фичи сразу добавлять тест, который показывает основной сценарий.
-
-## Ближайшее направление рефакторинга
-
-Не переписывать проект целиком. Двигаться постепенно:
-
-1. Сделать `app.py` тоньше: оставить создание приложения, настройки и
-   регистрацию модулей.
-2. Вынести общие вещи в `core/`: config, auth, rate limit, json storage,
-   notifications, background jobs.
-3. Для крупных фичей завести локальные `FEATURE.md`.
-4. Новые фичи писать уже по модульному шаблону.
-5. Старые фичи переносить только когда их всё равно приходится менять.
-
-## Короткое заявление о стиле проекта
-
-Этот проект строится не под классическую командную разработку, а под работу
-нейросетевых агентов. Главный критерий структуры: агент должен быстро понять
-границы задачи, открыть мало файлов, внести локальную правку, запустить понятные
-тесты и не сломать соседние части. Поэтому новые возможности добавляются как
-изолированные модули с короткой картой, явными контрактами, тестом и минимумом
-изменений в центральном `app.py`.
+Правило целиком — в `CLAUDE.md`, раздел «Как добавлять новую фичу».
+Коротко: `blueprints/<name>.py` (фича владеет своим состоянием сама,
+общее берёт прямым импортом из `core/`, фабрика **без аргументов** —
+эталон `blueprints/login_log.py` и `debts.py`) + `templates/<name>.html`
++ `tests/test_<name>.py` + `blueprints/<name>.md` + перегенерировать
+опись роутов. В `app.py` — только строка регистрации.
