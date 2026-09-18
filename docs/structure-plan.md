@@ -297,6 +297,45 @@ auth`. Тогда фича действительно самодостаточн
     коммит, перед пушем — открыть консоль руками и убедиться, что
     подключается (тестами это не покрыть).
 
+    remote.py на практике: код /ws/console, /ws/claude, /ws/rdp, /ws/vnc
+    перенесён дословно (только переименования параметров в константы,
+    никакой логики) — уведомления (notifications_data/notifications_lock
+    и вся логика), вкладка Claude по SSH (CLAUDE_BIN/CLAUDE_TABS_MAX/
+    CLAUDE_PREFIX/CLAUDE_NAME_RE/CLAUDE_DIR, claude_run/claude_tabs/
+    claude_free_name), guacd-хендшейк (GUACD_HOST/GUACD_PORT/RDP_QUALITY/
+    guac_handshake/guac_handshake_vnc) и Wake-on-LAN (WOL_RELAY_*/
+    WOL_BROADCASTS/wol_relay) переехали в сам файл целиком — были
+    самодостаточны в app.py, ничего другое не читало. `notification_add`
+    нужен и blueprints/debts.py — читает его теперь оттуда напрямую
+    (create_debts_blueprint() стал беспараметровым). CLAUDE_HOST и
+    claude_ready()/claude_host_name() ОСТАЛИСЬ в app.py: им нужен
+    ssh_enabled_ips, который живёт там же; blueprints/ai.py по-прежнему
+    получает все три через фабрику app.py, только claude_dir теперь берёт
+    из blueprints.remote. netbird_devices/netbird_status/
+    netbird_status_lock (мутирует фоновый опрос в app.py),
+    sftp_enabled_ips (общий с files.py, задача 39), ssh_enabled_ips/
+    rdp_enabled_ips/vnc_enabled_ips (считаются в app.py рядом с
+    ssh_enabled_ips) остались аргументами фабрики. 45 зависимостей → 11.
+
+    Автоматическая проверка: полный pytest (190 тестов, включая
+    tests/test_netbird.py — не тронут, ssh_enabled_ips и остальные
+    множества IP остались в app.py под теми же именами), pyflakes на все
+    четыре файла, routes-inventory.md — нулевой диф (все 4 вебсокет-маршрута
+    /ws/console/<ip>, /ws/claude, /ws/rdp/<ip>, /ws/vnc/<ip> зарегистрированы
+    так же, как раньше). Живую консоль/RDP/VNC/Claude-вкладку руками из
+    этой песочницы проверить нельзя — здесь нет ни настоящих SSH-машин, ни
+    guacd, ни tmux-хоста; тот, кто разворачивает этот коммит на проде,
+    должен открыть /netbird и /claude и убедиться, что подключение
+    по-прежнему работает, прежде чем считать задачу закрытой.
+
+    Попутно почищено: tests/test_devices.py, tests/test_home.py,
+    tests/test_files.py брали `app_module.console_password_today()` —
+    app.py эту функцию больше не импортирует (её теперь использует только
+    blueprints/remote.py). Добавлен общий `console_password_today()` в
+    tests/conftest.py (через sys.modules["core.auth"], как и остальной
+    доступ к состоянию блюпринтов), все три файла и tests/test_notifications.py
+    (state теперь в blueprints.remote, не в app.py) переведены на него.
+
 39. drop.py (61 зависимость) и files.py (16) — самые жирные. Отдельный
     коммит на каждый. После drop обязательно прогнать tests/test_drop.py
     (там проверка целостности файла побайтово) и вручную: загрузить,

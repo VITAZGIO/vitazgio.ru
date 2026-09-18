@@ -17,6 +17,10 @@ app.py из `blueprints.debts` для этого единственного вы
 `password_matches` (проверка «не совпадает ли с паролем кабинета») теперь
 в `core/auth.py`: нужна и `app.py` (свой `/api/login`), и этому файлу —
 классический признак того, что место — в core, а не в одном из двух.
+
+`notification_add` (задача 38) теперь читается напрямую из
+`blueprints.remote` — уведомления переехали туда целиком вместе со своими
+маршрутами `/notifications`, а не через фабрику app.py.
 """
 
 import base64
@@ -53,6 +57,7 @@ from core.auth import (
     rate_hit,
 )
 from core.storage import DATA_DIR, atomic_write_json
+from blueprints.remote import notification_add
 from core.templates import template
 
 # Свой пароль вкладки «Долги», не связан с ежедневным паролем консоли —
@@ -295,7 +300,7 @@ def debtor_required(view):
 debts_load()
 
 
-def create_debts_blueprint(*, notification_add):
+def create_debts_blueprint():
     debts_bp = Blueprint("debts", __name__)
     payment_banks = ("ОЗОН", "Т-Банк")
     payment_request_limit = 5

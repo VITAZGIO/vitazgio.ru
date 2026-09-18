@@ -11,6 +11,8 @@ import sys
 
 import pytest
 
+from conftest import console_password_today
+
 
 @pytest.fixture(autouse=True)
 def reset_arcade(app_module):
@@ -73,7 +75,7 @@ def test_arcade_delete_with_correct_password(client, app_module):
 
     resp = client.post("/api/arcade/scores/delete", json={
         "game": "snake", "id": entry_id,
-        "password": app_module.console_password_today(),
+        "password": console_password_today(),
     })
     assert resp.status_code == 200
     scores = client.get("/api/arcade/scores").get_json()["scores"]

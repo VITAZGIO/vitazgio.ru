@@ -12,11 +12,14 @@ DEBTOR_PASSWORD = "debtor-pass-123"
 def reset_debts(app_module):
     """`debts_data`/`debts_lock` — модульное состояние `blueprints.debts`
     (задача 36: файл владеет своим состоянием сам, не `app.py`), доступ —
-    через sys.modules, как в tests/test_home.py."""
+    через sys.modules, как в tests/test_home.py. `notifications_lock`/
+    `notifications_data` — туда же с задачи 38, теперь в
+    `blueprints.remote` вместо `app.py`."""
     debts_module = sys.modules["blueprints.debts"]
+    remote_module = sys.modules["blueprints.remote"]
     salt, password_hash = debts_module.debt_hash_password(DEBTOR_PASSWORD)
-    with app_module.notifications_lock:
-        app_module.notifications_data.clear()
+    with remote_module.notifications_lock:
+        remote_module.notifications_data.clear()
     with debts_module.debts_lock:
         debts_module.debts_data.clear()
         debts_module.debts_data.update({
@@ -74,8 +77,9 @@ def test_debtor_payment_request_keeps_actual_debt_pending(app_module):
     assert body["payment_requests"][0]["bank"] == "ОЗОН"
     assert body["payment_requests"][0]["status"] == "pending"
     assert body["entries"][0]["kind"] == "debt"
-    with app_module.notifications_lock:
-        notifications = app_module._notifications_snapshot_locked()
+    remote_module = sys.modules["blueprints.remote"]
+    with remote_module.notifications_lock:
+        notifications = remote_module.notifications_snapshot_locked()
     assert notifications["unread_count"] == 1
     assert notifications["items"][0]["title"] == "Заявка на пополнение"
     assert "Иван" in notifications["items"][0]["text"]

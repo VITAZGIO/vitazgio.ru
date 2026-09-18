@@ -6,6 +6,8 @@
 
 import pytest
 
+from conftest import console_password_today
+
 
 @pytest.fixture(autouse=True)
 def reset_trusted_devices(app_module):
@@ -39,7 +41,7 @@ def test_trust_rejects_wrong_console_password(auth_client):
 def test_trust_issues_device_and_lists_it(auth_client, app_module):
     resp = auth_client.post(
         "/api/devices/trust",
-        json={"password": app_module.console_password_today()},
+        json={"password": console_password_today()},
     )
     assert resp.status_code == 200
     body = resp.get_json()
@@ -53,7 +55,7 @@ def test_trust_issues_device_and_lists_it(auth_client, app_module):
 
 def test_rename_and_forget_device(auth_client, app_module):
     auth_client.post("/api/devices/trust",
-                      json={"password": app_module.console_password_today()})
+                      json={"password": console_password_today()})
     selector = auth_client.get("/api/devices").get_json()[0]["id"]
 
     resp = auth_client.patch(f"/api/devices/{selector}", json={"label": "Мой ноутбук"})

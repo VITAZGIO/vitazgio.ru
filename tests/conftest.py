@@ -47,6 +47,15 @@ FAKE_AI_CHUNKS = ["Привет", ", ", "это тест."]
 FAKE_AI_REPLY = "".join(FAKE_AI_CHUNKS)
 
 
+def console_password_today():
+    """Суточный пароль консоли. С задачи 38 `app.py` больше не импортирует
+    `console_password_today` (только `blueprints/remote.py` его
+    использует) — тестам, которым он нужен (устройства, аркада, файлы),
+    берём прямо из core.auth загруженной тестовой копии, через
+    sys.modules, как и остальное модульное состояние блюпринтов."""
+    return sys.modules["core.auth"].console_password_today()
+
+
 # ---- Фейковый OpenRouter ----------------------------------------------------
 # В `scratchpad/` у хозяина лежит `fakeor.py` для ручных прогонов, но
 # scratchpad в .gitignore — в репозитории его нет, переиспользовать нечего.
