@@ -8,6 +8,18 @@ mesh-сети, ни второго набора секретов — тольк�
 Пароль SSH на диск не попадает: живое соединение лежит в памяти процесса,
 ключом к нему служит случайный токен из сессии (подписанная кука). Простой
 дольше SFTP_IDLE_SECONDS закрывается сам.
+
+Задача 39 (2/2, docs/structure-plan.md): drop_lock/drop_items/drop_path/
+drop_write_index/drop_used/DROP_QUOTA/DROP_DOWNLOAD_ID читаются напрямую из
+blueprints.drop (кнопка VG кладёт файлы в дроп, минуя браузер) — 16
+зависимостей фабрики → 4. netbird_devices/sftp_enabled_ips остались
+аргументами: общий список машин app.py ещё не переехал ни в один
+blueprint. phone_fs/phone_ip — тоже: `phone_fs` это конкретный экземпляр
+`PhoneFs`, живущий на объекте `phone_bp`, созданном в app.py (не
+модульная синглтон-переменная, взять напрямую неоткуда); `phone_ip`
+(PHONE_AGENT_IP) — общая константа, нужная и фоновому опросу netbird в
+app.py. PHONE_FILES_USER/PHONE_FILES_PASSWORD были нужны только этому
+файлу — теперь читает свою переменную окружения сам.
 """
 
 import hmac
@@ -27,6 +39,22 @@ from datetime import datetime
 import paramiko
 from flask import Blueprint, Response, jsonify, request, session
 from types import SimpleNamespace
+
+from blueprints.drop import (
+    DROP_DOWNLOAD_ID,
+    DROP_QUOTA,
+    drop_items,
+    drop_lock,
+    drop_path,
+    drop_used,
+    drop_write_index,
+)
+from blueprints.pwa import ICON_LINKS
+from core.auth import login_required
+from core.templates import template
+
+PHONE_FILES_USER = os.environ.get("PHONE_FILES_USER")
+PHONE_FILES_PASSWORD = os.environ.get("PHONE_FILES_PASSWORD")
 
 SFTP_IDLE_SECONDS = 15 * 60      # столько живёт соединение без единого запроса
 SFTP_CHUNK = 256 * 1024          # кусок чтения/записи: компромисс память/скорость
@@ -240,22 +268,10 @@ class _AgentWrite:
 
 def create_files_blueprint(
     *,
-    template,
-    icon_links,
-    login_required,
     netbird_devices,
     sftp_enabled_ips,
-    drop_lock,
-    drop_items,
-    drop_path,
-    drop_write_index,
-    drop_used,
-    drop_quota,
-    drop_download_id,
     phone_fs=None,
     phone_ip=None,
-    phone_files_user=None,
-    phone_files_password=None,
 ):
     files_bp = Blueprint("files", __name__)
 
@@ -271,15 +287,15 @@ def create_files_blueprint(
         секретов из `.env`, отдельная от токена агента (тот пускает сам
         ТЕЛЕФОН на сайт, этот — ЧЕЛОВЕКА к файлам телефона). Не заданы на
         сервере — отказ всем, а не пропуск: закрыто по умолчанию."""
-        if not phone_files_user or not phone_files_password:
+        if not PHONE_FILES_USER or not PHONE_FILES_PASSWORD:
             return False
         if not isinstance(username, str) or not isinstance(password, str):
             return False
         # Байтами, не строками: compare_digest на кириллице падает TypeError
         # вместо честного «не подошло», если её вдруг вписали в .env.
         return (
-            hmac.compare_digest(username.encode("utf-8"), str(phone_files_user).encode("utf-8"))
-            and hmac.compare_digest(password.encode("utf-8"), str(phone_files_password).encode("utf-8"))
+            hmac.compare_digest(username.encode("utf-8"), str(PHONE_FILES_USER).encode("utf-8"))
+            and hmac.compare_digest(password.encode("utf-8"), str(PHONE_FILES_PASSWORD).encode("utf-8"))
         )
 
     # token -> {"client", "sftp", "ip", "user", "used", "io_lock"}
@@ -488,7 +504,7 @@ def create_files_blueprint(
         except Exception:
             expected_size = 0
         with drop_lock:
-            if drop_used() + expected_size > drop_quota:
+            if drop_used() + expected_size > DROP_QUOTA:
                 raise OSError("Нет места: квота дропа исчерпана.")
 
         item_id = str(uuid.uuid4())
@@ -517,7 +533,7 @@ def create_files_blueprint(
             # Заявленный размер мог соврать (или файл на той стороне изменился
             # за время передачи) — перепроверяем по факту записанного, прежде
             # чем регистрировать в дропе.
-            if drop_used() + written > drop_quota:
+            if drop_used() + written > DROP_QUOTA:
                 try:
                     os.remove(drop_path(item_id))
                 except OSError:
@@ -624,9 +640,9 @@ def create_files_blueprint(
             try:
                 with entry["io_lock"]:
                     if is_dir:
-                        _to_drop_folder(sftp, path, drop_download_id, [SFTP_RECURSIVE_MAX], on_chunk)
+                        _to_drop_folder(sftp, path, DROP_DOWNLOAD_ID, [SFTP_RECURSIVE_MAX], on_chunk)
                     else:
-                        _to_drop_file(sftp, path, drop_download_id, on_chunk)
+                        _to_drop_file(sftp, path, DROP_DOWNLOAD_ID, on_chunk)
                 state, error = "done", ""
             except Exception as e:                       # noqa: BLE001 — причину показываем как есть
                 state, error = "error", _error_text(e)
@@ -697,7 +713,7 @@ def create_files_blueprint(
                     .replace("{{NAME}}", _device_name(ip))
                     .replace("{{NEED_CONSOLE}}", "" if session.get("console_authenticated") else "1")
                     .replace("{{IS_PHONE}}", "1" if _is_phone(ip) else "")
-                    .replace("__ICONLINKS__", icon_links))
+                    .replace("__ICONLINKS__", ICON_LINKS))
 
     # ---- Соединение ---------------------------------------------------------
 
