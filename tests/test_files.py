@@ -16,6 +16,8 @@ from types import SimpleNamespace
 import paramiko
 import pytest
 
+from conftest import console_password_today
+
 DEVICE_IP = "100.104.221.91"      # ubuntu-server: ssh_enabled, значит и SFTP
 SSH_PASSWORD = "ssh-pass"
 
@@ -117,7 +119,7 @@ def remote_root(tmp_path, monkeypatch):
 def sftp_client(auth_client, app_module, remote_root):
     """Хозяин, прошедший пароль консоли и подключённый к «машине»."""
     resp = auth_client.post("/api/console/login",
-                            json={"password": app_module.console_password_today()})
+                            json={"password": console_password_today()})
     assert resp.status_code == 200, resp.data
     resp = auth_client.post("/api/files/connect", json={
         "ip": DEVICE_IP, "username": "vitaz", "password": SSH_PASSWORD,
@@ -148,7 +150,7 @@ def test_connect_needs_console_password(auth_client, remote_root):
 
 
 def test_connect_rejects_wrong_ssh_password(auth_client, app_module, remote_root):
-    auth_client.post("/api/console/login", json={"password": app_module.console_password_today()})
+    auth_client.post("/api/console/login", json={"password": console_password_today()})
     resp = auth_client.post("/api/files/connect", json={
         "ip": DEVICE_IP, "username": "vitaz", "password": "не тот",
     })

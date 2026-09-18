@@ -13,7 +13,6 @@ import time
 import uuid
 from collections import defaultdict, deque
 from datetime import datetime
-from zoneinfo import ZoneInfo
 
 import paramiko
 from flask import Flask, g, jsonify, redirect, request, send_file, session, url_for
@@ -28,15 +27,9 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 # подчёркивания (`client_ip`, `device_check`, ...) предназначены для
 # blueprints, которые импортируют их напрямую, без веретена фабрики.
 from core.auth import (
-    CONSOLE_LOGIN_MAX_ATTEMPTS,
-    CONSOLE_LOGIN_WINDOW_SECONDS,
     DEVICE_COOKIE,
     DEVICE_TTL_DAYS,
-    SSH_GATE_PASSWORD_PREFIX,
     client_ip as _client_ip,
-    console_login_attempts,
-    console_login_attempts_lock,
-    console_password_today,
     devices_lock,
     log_login as _log_login,
     login_required,
@@ -90,7 +83,7 @@ from blueprints.notebook import (
 )
 from blueprints.phone import create_phone_blueprint
 from blueprints.pwa import ICON_LINKS, create_pwa_blueprint
-from blueprints.remote import create_remote_blueprint
+from blueprints.remote import CLAUDE_DIR, create_remote_blueprint
 
 app = Flask(__name__)
 app.config.update(
@@ -188,10 +181,8 @@ DEBTS_PASSWORD = os.environ.get("DEBTS_PASSWORD")
 # SERVERS_PASSWORD — теперь читает сама blueprints/home.py (задача 36),
 # больше нигде не нужен.
 
-# Дома guacd рядом (127.0.0.1). Если сайт крутится на VPS — сюда
-# подставляется Netbird-адрес домашнего сервера.
-GUACD_HOST = os.environ.get("GUACD_HOST", "127.0.0.1")
-GUACD_PORT = int(os.environ.get("GUACD_PORT", "4822"))
+# guacd (RDP/VNC-хендшейк) — задача 38, теперь в blueprints/remote.py:
+# нужен только там, /ws/rdp и /ws/vnc — единственные потребители.
 # CONSOLE_LOGIN_*/console_login_attempts(_lock) — в core/auth.py.
 
 # login_log/login_log_lock и константы урезки — в core/auth.py.
@@ -753,94 +744,10 @@ def _drop_used_safe():
 # в blueprints/debts.py (задача 36). debt_find_user_by_password читает
 # обратно /api/login (перебор паролей должников после пароля кабинета).
 
-
-
-# ---- Уведомления -----------------------------------------------------------
-# Это общий журнал для кабинета: сейчас в него пишут заявки на взносы, позже
-# тем же помощником сможет пользоваться Telegram-бот.
-NOTIFICATIONS_PATH = os.path.join(DATA_DIR, "notifications.json")
-NOTIFICATIONS_LIMIT = 500
-notifications_lock = threading.Lock()
-notifications_data = []
-
-
-def _notifications_load():
-    try:
-        with open(NOTIFICATIONS_PATH, encoding="utf-8") as fh:
-            saved = json.load(fh)
-    except (OSError, ValueError):
-        return
-    if not isinstance(saved, list):
-        return
-    notifications_data.extend(row for row in saved if isinstance(row, dict))
-
-
-def _notifications_write_locked():
-    os.makedirs(DATA_DIR, exist_ok=True)
-    tmp = NOTIFICATIONS_PATH + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump(notifications_data, fh, ensure_ascii=False, indent=2)
-    os.replace(tmp, NOTIFICATIONS_PATH)
-
-
-def _notifications_snapshot_locked():
-    rows = [dict(row) for row in notifications_data]
-    rows.sort(key=lambda row: str(row.get("created") or ""), reverse=True)
-    return {
-        "items": rows,
-        "unread_count": sum(1 for row in rows if not row.get("read")),
-    }
-
-
-def _notification_add(title, text, href="/cabinet", kind="info"):
-    now = datetime.now(ZoneInfo("Europe/Moscow")).isoformat(timespec="seconds")
-    with notifications_lock:
-        notifications_data.append({
-            "id": uuid.uuid4().hex,
-            "title": str(title).strip()[:120],
-            "text": str(text).strip()[:500],
-            "href": str(href).strip()[:300] or "/cabinet",
-            "kind": str(kind).strip()[:40] or "info",
-            "read": False,
-            "created": now,
-        })
-        if len(notifications_data) > NOTIFICATIONS_LIMIT:
-            del notifications_data[:-NOTIFICATIONS_LIMIT]
-        _notifications_write_locked()
-
-
-def _notification_mark_read(notification_id):
-    with notifications_lock:
-        notification = next((row for row in notifications_data if row.get("id") == notification_id), None)
-        if not notification:
-            return None
-        if not notification.get("read"):
-            notification["read"] = True
-            _notifications_write_locked()
-        return _notifications_snapshot_locked()
-
-
-def _notifications_mark_all_read():
-    with notifications_lock:
-        changed = False
-        for row in notifications_data:
-            if not row.get("read"):
-                row["read"] = True
-                changed = True
-        if changed:
-            _notifications_write_locked()
-        return _notifications_snapshot_locked()
-
-
-def _notifications_clear():
-    with notifications_lock:
-        if notifications_data:
-            notifications_data.clear()
-            _notifications_write_locked()
-        return _notifications_snapshot_locked()
-
-
-_notifications_load()
+# Уведомления (notifications_data/notifications_lock и вся логика) —
+# теперь целиком в blueprints/remote.py (задача 38): все их маршруты
+# (/notifications, /api/notifications/*) и там же. notification_add
+# нужен и blueprints/debts.py — читает его оттуда напрямую.
 
 
 def ping_once(ip):
@@ -1133,14 +1040,13 @@ def session_probe():
 # делается один раз на домашней машине (claude login), а сайт только показывает
 # её экран. Пароль SSH живёт в одном соединении и на диск не попадает.
 CLAUDE_HOST = os.environ.get("CLAUDE_HOST", "").strip()
-CLAUDE_DIR = os.environ.get("CLAUDE_DIR", "").strip()
-# Команда, которую вкладка запускает внутри tmux. По умолчанию claude, но
-# ничего специфичного для него тут нет: поставь сюда другую — вкладка будет
-# разговаривать с ней. Так же встанет любой другой консольный помощник.
-CLAUDE_BIN = os.environ.get("CLAUDE_BIN", "claude").strip() or "claude"
-CLAUDE_TABS_MAX = 8                     # больше и не нужно, и память не резиновая
-CLAUDE_PREFIX = "vg-"                   # чтобы не путать со своими сессиями tmux
-CLAUDE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,23}$")
+# CLAUDE_DIR/CLAUDE_BIN/CLAUDE_TABS_MAX/CLAUDE_PREFIX/CLAUDE_NAME_RE и
+# claude_run/claude_tabs/claude_free_name — теперь в blueprints/remote.py
+# (задача 38): нужны только там, /ws/claude — единственный потребитель.
+# CLAUDE_HOST и claude_ready()/claude_host_name() остались здесь: им нужен
+# ssh_enabled_ips, который живёт тут же. blueprints/ai.py по-прежнему
+# получает все три через фабрику app.py (claude_dir теперь берём из
+# blueprints.remote, а не объявляем сами).
 
 
 def _claude_ready():
@@ -1155,159 +1061,13 @@ def _claude_host_name():
     return CLAUDE_HOST
 
 
-def _claude_run(client, command, timeout=10):
-    """Разовая команда по SSH. Возвращает (код, вывод)."""
-    try:
-        _stdin, stdout, stderr = client.exec_command(command, timeout=timeout)
-        out = stdout.read().decode(errors="replace")
-        err = stderr.read().decode(errors="replace")
-        return stdout.channel.recv_exit_status(), (out + err).strip()
-    except (paramiko.SSHException, OSError, EOFError) as e:
-        return 1, str(e)
-
-
-def _claude_tabs(client):
-    """Список вкладок — это список сессий tmux с нашим префиксом."""
-    code, out = _claude_run(
-        client,
-        "tmux list-sessions -F '#{session_name}\t#{session_created}\t#{session_attached}' 2>/dev/null || true",
-    )
-    tabs = []
-    if code != 0:
-        return tabs
-    for line in out.splitlines():
-        parts = line.split("\t")
-        name = parts[0] if parts else ""
-        if not name.startswith(CLAUDE_PREFIX):
-            continue
-        try:
-            made = int(parts[1]) if len(parts) > 1 else 0
-        except ValueError:
-            made = 0
-        tabs.append({
-            "id": name[len(CLAUDE_PREFIX):],
-            "made": made,
-            "live": (len(parts) > 2 and parts[2] not in ("", "0")),
-        })
-    tabs.sort(key=lambda t: t["made"])
-    return tabs
-
-
-def _claude_free_name(tabs):
-    """Первое свободное имя вида «1», «2», …"""
-    taken = {t["id"] for t in tabs}
-    for n in range(1, CLAUDE_TABS_MAX + 1):
-        if str(n) not in taken:
-            return str(n)
-    return None
-
-
-
-
 rdp_enabled_ips = {device["ip"] for device in NETBIRD_DEVICES if device.get("rdp_enabled")}
 vnc_enabled_ips = {device["ip"] for device in NETBIRD_DEVICES if device.get("vnc_enabled")}
 
 
-def _guac_encode(*args):
-    parts = [f"{len(str(a))}.{a}" for a in args]
-    return (",".join(parts) + ";").encode()
-
-
-def _guac_recv_instr(sock_file):
-    parts = []
-    buf = ""
-    while True:
-        while "." not in buf:
-            ch = sock_file.read(1)
-            if not ch:
-                raise ConnectionError("guacd closed")
-            buf += ch.decode()
-        dot = buf.index(".")
-        length = int(buf[:dot])
-        buf = buf[dot + 1:]
-        while len(buf) < length:
-            ch = sock_file.read(1)
-            if not ch:
-                raise ConnectionError("guacd closed")
-            buf += ch.decode()
-        parts.append(buf[:length])
-        buf = buf[length:]
-        while not buf:
-            ch = sock_file.read(1)
-            if not ch:
-                raise ConnectionError("guacd closed")
-            buf += ch.decode()
-        sep, buf = buf[0], buf[1:]
-        if sep == ";":
-            return parts
-
-
-# Пресеты качества RDP. Чем ниже качество, тем меньше данных по каналу:
-# срезаем глубину цвета и отключаем украшения рабочего стола.
-RDP_QUALITY = {
-    "high": {"color-depth": "32", "enable-wallpaper": "true", "enable-theming": "true",
-             "enable-font-smoothing": "true", "enable-full-window-drag": "true",
-             "enable-desktop-composition": "true", "enable-menu-animations": "true"},
-    "medium": {"color-depth": "16", "enable-wallpaper": "false", "enable-theming": "true",
-               "enable-font-smoothing": "true", "enable-full-window-drag": "false",
-               "enable-desktop-composition": "false", "enable-menu-animations": "false"},
-    "low": {"color-depth": "8", "enable-wallpaper": "false", "enable-theming": "false",
-            "enable-font-smoothing": "false", "enable-full-window-drag": "false",
-            "enable-desktop-composition": "false", "enable-menu-animations": "false"},
-}
-
-
-def _guac_handshake(guac_sock, hostname, username, password, width, height, quality="medium"):
-    f = guac_sock.makefile("rb", buffering=0)
-    guac_sock.sendall(_guac_encode("select", "rdp"))
-    instr = _guac_recv_instr(f)
-    if not instr or instr[0] != "args":
-        raise ValueError(f"expected args, got {instr}")
-    arg_names = instr[1:]
-    guac_sock.sendall(_guac_encode("size", str(width), str(height), "96"))
-    guac_sock.sendall(_guac_encode("audio"))
-    guac_sock.sendall(_guac_encode("video"))
-    guac_sock.sendall(_guac_encode("image", "image/png", "image/jpeg"))
-    rdp_params = {
-        "hostname": hostname,
-        "port": "3389",
-        "username": username,
-        "password": password,
-        "ignore-cert": "true",
-        "security": "any",
-        "width": str(width),
-        "height": str(height),
-        "dpi": "96",
-    }
-    rdp_params.update(RDP_QUALITY.get(quality, RDP_QUALITY["medium"]))
-    connect_values = [rdp_params.get(name, "") for name in arg_names]
-    guac_sock.sendall(_guac_encode("connect", *connect_values))
-
-
-
-
-def _guac_handshake_vnc(guac_sock, hostname, password, width, height):
-    f = guac_sock.makefile("rb", buffering=0)
-    guac_sock.sendall(_guac_encode("select", "vnc"))
-    instr = _guac_recv_instr(f)
-    if not instr or instr[0] != "args":
-        raise ValueError(f"expected args, got {instr}")
-    arg_names = instr[1:]
-    guac_sock.sendall(_guac_encode("size", str(width), str(height), "96"))
-    guac_sock.sendall(_guac_encode("audio"))
-    guac_sock.sendall(_guac_encode("video"))
-    guac_sock.sendall(_guac_encode("image", "image/png", "image/jpeg"))
-    vnc_params = {
-        "hostname": hostname,
-        "port": "5900",
-        "password": password,
-        "color-depth": "24",
-        "encodings": "zrle ultra copyrect hextile zlib corre rre raw",
-    }
-    connect_values = [vnc_params.get(name, "") for name in arg_names]
-    guac_sock.sendall(_guac_encode("connect", *connect_values))
-
-
+# _guac_encode/_guac_recv_instr/RDP_QUALITY/_guac_handshake/
+# _guac_handshake_vnc — теперь в blueprints/remote.py (задача 38): нужны
+# только там, /ws/rdp и /ws/vnc — единственные потребители.
 
 
 @app.get("/api/metrics")
@@ -1323,42 +1083,9 @@ def metrics_api():
 
 
 
-WOL_RELAY_HOST = os.environ.get("WOL_RELAY_HOST", "100.104.221.91")   # домашний сервер
-WOL_RELAY_USER = os.environ.get("WOL_RELAY_USER") or os.environ.get("METRICS_UBUNTUSERVER_USER")
-WOL_RELAY_PASS = os.environ.get("WOL_RELAY_PASS") or os.environ.get("METRICS_UBUNTUSERVER_PASS")
-WOL_BROADCASTS = ("255.255.255.255", "192.168.1.255")
-
-
-def _wol_relay(hex_packet):
-    """Шлёт пакет с машины, стоящей в домашней сети.
-
-    Само приложение живёт в Амстердаме, а «магический пакет» — широковещательный:
-    он расходится только по той подсети, откуда отправлен, и до домашнего ПК
-    не долетает. Поэтому отправку выполняет постоянно включённый хост дома.
-    """
-    if not (WOL_RELAY_USER and WOL_RELAY_PASS):
-        return "Ретранслятор не настроен: нет WOL_RELAY_USER/PASS."
-    targets = ";".join(f"s.sendto(p,('{addr}',9))" for addr in WOL_BROADCASTS)
-    command = (
-        "python3 -c \"import socket;"
-        "s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);"
-        "s.setsockopt(socket.SOL_SOCKET,socket.SO_BROADCAST,1);"
-        f"p=bytes.fromhex('{hex_packet}');{targets}\""
-    )
-    client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    try:
-        client.connect(WOL_RELAY_HOST, username=WOL_RELAY_USER, password=WOL_RELAY_PASS,
-                       timeout=8, look_for_keys=False, allow_agent=False)
-        _, _, stderr = client.exec_command(command, timeout=8)
-        problem = stderr.read().decode("utf-8", "replace").strip()
-        return problem or None
-    except Exception as e:
-        return f"{WOL_RELAY_HOST}: {e}"
-    finally:
-        client.close()
-
-
+# WOL_RELAY_HOST/USER/PASS/WOL_BROADCASTS/_wol_relay — теперь в
+# blueprints/remote.py (задача 38): нужны только там, /api/wol —
+# единственный потребитель.
 
 
 @app.get("/api/uptime")
@@ -2321,9 +2048,7 @@ app.register_blueprint(create_home_blueprint(
     netbird_devices=NETBIRD_DEVICES,
 ))
 
-app.register_blueprint(create_debts_blueprint(
-    notification_add=_notification_add,
-))
+app.register_blueprint(create_debts_blueprint())
 
 app.register_blueprint(create_devices_blueprint())
 
@@ -2455,50 +2180,16 @@ app.register_blueprint(create_files_blueprint(
 
 app.register_blueprint(create_remote_blueprint(
     sock=sock,
-    template=_template,
-    icon_links=ICON_LINKS,
-    login_required=login_required,
-    notifications_lock=notifications_lock,
-    notifications_snapshot_locked=_notifications_snapshot_locked,
-    notification_mark_read=_notification_mark_read,
-    notifications_mark_all_read=_notifications_mark_all_read,
-    notifications_clear=_notifications_clear,
     netbird_devices=NETBIRD_DEVICES,
-    sftp_enabled_ips=sftp_enabled_ips,
     netbird_status=netbird_status,
     netbird_status_lock=netbird_status_lock,
-    ssh_gate_password_prefix=SSH_GATE_PASSWORD_PREFIX,
-    console_password_today=console_password_today,
-    client_ip=_client_ip,
-    rate_blocked=_rate_blocked,
-    rate_hit=_rate_hit,
-    rate_clear=_rate_clear,
-    console_login_attempts=console_login_attempts,
-    console_login_attempts_lock=console_login_attempts_lock,
-    console_login_window_seconds=CONSOLE_LOGIN_WINDOW_SECONDS,
-    console_login_max_attempts=CONSOLE_LOGIN_MAX_ATTEMPTS,
-    log_login=_log_login,
     ssh_enabled_ips=ssh_enabled_ips,
+    sftp_enabled_ips=sftp_enabled_ips,
     rdp_enabled_ips=rdp_enabled_ips,
     vnc_enabled_ips=vnc_enabled_ips,
-    claude_ready=lambda: _claude_ready(),
-    claude_host=lambda: CLAUDE_HOST,
-    claude_host_name=lambda: _claude_host_name(),
-    claude_dir=CLAUDE_DIR,
-    claude_bin=CLAUDE_BIN,
-    claude_tabs_max=CLAUDE_TABS_MAX,
-    claude_prefix=CLAUDE_PREFIX,
-    claude_name_re=CLAUDE_NAME_RE,
-    claude_run=lambda *args, **kwargs: _claude_run(*args, **kwargs),
-    claude_tabs=lambda *args, **kwargs: _claude_tabs(*args, **kwargs),
-    claude_free_name=lambda *args, **kwargs: _claude_free_name(*args, **kwargs),
-    guacd_host=GUACD_HOST,
-    guacd_port=GUACD_PORT,
-    rdp_quality=RDP_QUALITY,
-    guac_handshake=lambda *args, **kwargs: _guac_handshake(*args, **kwargs),
-    guac_handshake_vnc=lambda *args, **kwargs: _guac_handshake_vnc(*args, **kwargs),
-    wol_relay=lambda *args, **kwargs: _wol_relay(*args, **kwargs),
-    wol_broadcasts=WOL_BROADCASTS,
+    claude_ready=_claude_ready,
+    claude_host=CLAUDE_HOST,
+    claude_host_name=_claude_host_name,
 ))
 
 app.register_blueprint(create_apps_blueprint(

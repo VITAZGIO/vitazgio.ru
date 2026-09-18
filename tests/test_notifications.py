@@ -1,11 +1,20 @@
-def _reset_notifications(app_module):
-    with app_module.notifications_lock:
-        app_module.notifications_data.clear()
+"""/notifications — с задачи 38 состояние (`notifications_data`/
+`notifications_lock`) живёт в `blueprints.remote`, не в `app.py` —
+доступ через sys.modules, как в tests/test_debts.py."""
+
+import sys
+
+
+def _reset_notifications():
+    remote_module = sys.modules["blueprints.remote"]
+    with remote_module.notifications_lock:
+        remote_module.notifications_data.clear()
+    return remote_module
 
 
 def test_notifications_page_and_api_flow(app_module, auth_client):
-    _reset_notifications(app_module)
-    app_module._notification_add(
+    remote_module = _reset_notifications()
+    remote_module.notification_add(
         "Заявка на пополнение",
         "Иван: 500 ₽ · ОЗОН",
         href="/debts",
