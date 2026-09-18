@@ -34,22 +34,29 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 # подчёркивания (`client_ip`, `device_check`, ...) предназначены для
 # blueprints, которые импортируют их напрямую, без веретена фабрики.
 from core.auth import (
+    CONSOLE_LOGIN_MAX_ATTEMPTS,
+    CONSOLE_LOGIN_WINDOW_SECONDS,
     DEVICE_COOKIE,
     DEVICE_TTL_DAYS,
+    SSH_GATE_PASSWORD_PREFIX,
     client_ip as _client_ip,
+    console_login_attempts,
+    console_login_attempts_lock,
+    console_password_today,
     device_check as _device_check,
-    device_forget as _device_forget,
-    device_issue as _device_issue,
-    device_label as _device_label,
     devices_lock,
-    devices_prune_expired as _devices_prune_expired,
-    devices_write as _devices_write,
     log_login as _log_login,
     login_required,
+    rate_blocked as _rate_blocked,
+    rate_clear as _rate_clear,
+    rate_hit as _rate_hit,
     trusted_devices,
-    unique_label as _unique_label,
 )
-from core.storage import DATA_DIR
+from core.storage import (
+    DATA_DIR,
+    clean_url as _notebook_clean_url,
+    safe_filename as _diy_safe_name,
+)
 from core.templates import template as _template
 
 from blueprints.ai import create_ai_blueprint
@@ -64,7 +71,12 @@ from blueprints.files import create_files_blueprint
 from blueprints.home import create_home_blueprint
 from blueprints.login_log import create_login_log_blueprint
 from blueprints.music import create_music_blueprint
-from blueprints.notebook import create_notebook_blueprint
+from blueprints.notebook import (
+    create_notebook_blueprint,
+    notebook_data,
+    notebook_lock,
+    notebook_load as _notebook_load,
+)
 from blueprints.phone import create_phone_blueprint
 from blueprints.pwa import ICON_LINKS, create_pwa_blueprint
 from blueprints.remote import create_remote_blueprint
@@ -162,7 +174,7 @@ sftp_enabled_ips = {device["ip"] for device in NETBIRD_DEVICES
                     if device.get("ssh_enabled") or device.get("sftp_enabled")
                     or device.get("agent_enabled")}
 
-SSH_GATE_PASSWORD_PREFIX = os.environ.get("SSH_GATE_PASSWORD_PREFIX")
+# SSH_GATE_PASSWORD_PREFIX/суточный пароль консоли — в core/auth.py.
 # Пароль телефонного агента: одна строка в .env, её же вбивают в приложении.
 # Не задан — вебсокет /ws/agent никого не пускает, страница просто показывает
 # MOBILA офлайн. В репозиторий токен не попадает: репозиторий публичный.
@@ -185,10 +197,7 @@ SERVERS_PASSWORD = os.environ.get("SERVERS_PASSWORD", "1224")
 # подставляется Netbird-адрес домашнего сервера.
 GUACD_HOST = os.environ.get("GUACD_HOST", "127.0.0.1")
 GUACD_PORT = int(os.environ.get("GUACD_PORT", "4822"))
-CONSOLE_LOGIN_WINDOW_SECONDS = 300
-CONSOLE_LOGIN_MAX_ATTEMPTS = 5
-console_login_attempts = defaultdict(deque)
-console_login_attempts_lock = threading.Lock()
+# CONSOLE_LOGIN_*/console_login_attempts(_lock) — в core/auth.py.
 
 # login_log/login_log_lock и константы урезки — в core/auth.py.
 
@@ -938,38 +947,12 @@ def _music_load():
 _music_load()
 
 
-def _rate_blocked(store, lock, key, window, limit):
-    """Не пора ли притормозить этот адрес. Заодно чистит остывшие записи,
-    чтобы словарь не рос по одной строке на каждый заглянувший IP."""
-    now = time.monotonic()
-    with lock:
-        for stale, hits in [(k, v) for k, v in store.items() if k != key]:
-            if not hits or now - hits[-1] > window:
-                store.pop(stale, None)
-        attempts = store[key]
-        while attempts and now - attempts[0] > window:
-            attempts.popleft()
-        return len(attempts) >= limit
-
-
-def _rate_hit(store, lock, key):
-    with lock:
-        store[key].append(time.monotonic())
-
-
-def _rate_clear(store, lock, key):
-    with lock:
-        store.pop(key, None)
-
-
-# _devices_write/_devices_prune_expired/_device_label/_unique_label/
-# _device_issue/_device_check/_device_forget — в core/auth.py (импортированы
-# наверху файла под теми же именами через `as`).
-
-
-def console_password_today():
-    now = datetime.now(ZoneInfo("Europe/Moscow"))
-    return f"{SSH_GATE_PASSWORD_PREFIX}{now:%d%m}"
+# _rate_blocked/_rate_hit/_rate_clear, console_password_today, _device_check
+# и вся остальная работа с доверенными устройствами — в core/auth.py.
+# _device_check импортирован наверху файла (нужен другим guard'ам —
+# debts_owner_required, diy_editor_required, _diy_can_edit); остальные
+# device_*/devices_* app.py больше не нужны — их взял blueprints/devices.py
+# напрямую (задача 35).
 
 
 DEBTS_PATH = os.path.join(DATA_DIR, "debts.json")
@@ -2973,12 +2956,8 @@ def _diy_asset_dir(item_id):
     return os.path.join(DIY_DIR, item_id)
 
 
-def _diy_safe_name(raw):
-    """Имя вложения: без путей и опасных символов, но кириллицу оставляем —
-    хозяин зовёт файлы по-русски, и по этим же именам ссылается в коде."""
-    name = os.path.basename((raw or "").strip()).replace("\\", "").replace("/", "")
-    name = re.sub(r'[\x00-\x1f<>:"|?*]', "", name).strip(". ")
-    return name[:80]
+# _diy_safe_name — теперь core.storage.safe_filename (общая с notebook.py,
+# импортирована наверху файла под старым именем через `as`).
 
 
 def _diy_asset_path(item_id, name):
@@ -3526,103 +3505,11 @@ def _diy_can_edit():
     return False
 
 
-# ---- Блокнот: страницы-вкладки с записями ---------------------------------
-# Хозяйская записная книжка. Записи трёх видов: ссылка, текст и PDF. Всё
-# лежит данными в DATA_DIR и переживает деплой, как дроп и DIY.
-NOTEBOOK_DIR = os.path.join(DATA_DIR, "notebook")
-NOTEBOOK_PATH = os.path.join(DATA_DIR, "notebook.json")
-NOTEBOOK_TEXT_MAX = 20000
-NOTEBOOK_ENTRY_LIMIT = 1000
-NOTEBOOK_PDF_MAX = 25 * 1024 * 1024
-NOTEBOOK_TYPES = ("link", "text", "pdf")
-NOTEBOOK_BORDERS = ("solid", "dashed", "dotted", "double", "none")
-NOTEBOOK_WIDTHS = ("half", "full")
-
-notebook_data: dict = {"pages": [], "entries": {}}
-notebook_lock = threading.Lock()
-os.makedirs(NOTEBOOK_DIR, exist_ok=True)
-
-
-def _notebook_pdf_path(entry_id):
-    return os.path.join(NOTEBOOK_DIR, f"{entry_id}.pdf")
-
-
-def _notebook_write():
-    """Вызывать под notebook_lock."""
-    try:
-        tmp = NOTEBOOK_PATH + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as fh:
-            json.dump(notebook_data, fh, ensure_ascii=False)
-        os.replace(tmp, NOTEBOOK_PATH)
-    except OSError:
-        pass
-
-
-def _notebook_load():
-    try:
-        with open(NOTEBOOK_PATH, encoding="utf-8") as fh:
-            saved = json.load(fh) or {}
-        notebook_data["pages"] = saved.get("pages", [])
-        notebook_data["entries"] = saved.get("entries", {})
-    except (OSError, ValueError):
-        pass
-    if not notebook_data["pages"]:
-        notebook_data["pages"] = [{"id": str(uuid.uuid4()), "name": "Заметки"}]
-    for e in notebook_data["entries"].values():
-        e.setdefault("note", "")
-        e.setdefault("width", "half")
-        e.setdefault("border", "solid")
-        e.setdefault("accent", "#2de2ff")
-        e.setdefault("order", 0)
-
-
-_notebook_load()
-
-
-def _notebook_clean_url(raw):
-    url = (raw or "").strip()[:600]
-    if not url:
-        return ""
-    if not re.match(r"^https?://", url, re.I):
-        url = "https://" + url.lstrip("/")
-    return url
-
-
-def _notebook_entry_public(eid, e):
-    row = {
-        "id": eid, "page": e.get("page"), "type": e.get("type"),
-        "title": e.get("title", ""), "width": e.get("width", "half"),
-        "border": e.get("border", "solid"), "accent": e.get("accent", "#2de2ff"),
-        "note": e.get("note", ""), "order": e.get("order", 0),
-    }
-    if e.get("type") == "link":
-        row["url"] = e.get("url", "")
-    elif e.get("type") == "text":
-        row["text"] = e.get("text", "")
-    elif e.get("type") == "pdf":
-        row["pdf"] = bool(e.get("pdf"))
-        row["filename"] = e.get("filename", "")
-    return row
-
-
-def _notebook_apply(e, payload):
-    """Переносит присланные поля в запись, каждое — по своим правилам."""
-    if "title" in payload:
-        e["title"] = (payload.get("title") or "").strip()[:160]
-    if "note" in payload:
-        e["note"] = (payload.get("note") or "").strip()[:4000]
-    if "url" in payload and e["type"] == "link":
-        e["url"] = _notebook_clean_url(payload.get("url"))
-    if "text" in payload and e["type"] == "text":
-        e["text"] = (payload.get("text") or "")[:NOTEBOOK_TEXT_MAX]
-    if payload.get("width") in NOTEBOOK_WIDTHS:
-        e["width"] = payload["width"]
-    if payload.get("border") in NOTEBOOK_BORDERS:
-        e["border"] = payload["border"]
-    ac = (payload.get("accent") or "").strip()
-    if re.match(r"^#[0-9a-fA-F]{6}$", ac):
-        e["accent"] = ac
-
+# Блокнот (notebook_data/notebook_lock и вся его логика) — теперь целиком
+# в blueprints/notebook.py (задача 35): фича владеет своим состоянием сама,
+# а не раздаёт его отсюда пачкой аргументов. notebook_data/notebook_lock
+# импортированы наверху файла — они ещё нужны здесь для /api/metrics и для
+# передачи в create_ai_blueprint (кнопка «В блокнот» на /ai).
 
 # ---- Резервные копии ------------------------------------------------------
 # Всё, что нажито сайтом, лежит в двух папках: data (записи DIY, блокнот,
@@ -4272,50 +4159,11 @@ app.register_blueprint(create_debts_blueprint(
     notification_add=_notification_add,
 ))
 
-app.register_blueprint(create_devices_blueprint(
-    template=_template,
-    icon_links=ICON_LINKS,
-    login_required=login_required,
-    device_cookie=DEVICE_COOKIE,
-    devices_lock=devices_lock,
-    trusted_devices=trusted_devices,
-    devices_prune_expired=_devices_prune_expired,
-    devices_write=_devices_write,
-    unique_label=_unique_label,
-    device_label=_device_label,
-    device_issue=_device_issue,
-    device_forget=_device_forget,
-    ssh_gate_password_prefix=SSH_GATE_PASSWORD_PREFIX,
-    console_password_today=console_password_today,
-    client_ip=_client_ip,
-    rate_blocked=_rate_blocked,
-    rate_hit=_rate_hit,
-    rate_clear=_rate_clear,
-    console_login_attempts=console_login_attempts,
-    console_login_attempts_lock=console_login_attempts_lock,
-    console_login_window_seconds=CONSOLE_LOGIN_WINDOW_SECONDS,
-    console_login_max_attempts=CONSOLE_LOGIN_MAX_ATTEMPTS,
-    log_login=_log_login,
-))
+app.register_blueprint(create_devices_blueprint())
 
 app.register_blueprint(create_login_log_blueprint())
 
-app.register_blueprint(create_notebook_blueprint(
-    template=_template,
-    icon_links=ICON_LINKS,
-    login_required=login_required,
-    notebook_data=notebook_data,
-    notebook_lock=notebook_lock,
-    notebook_borders=NOTEBOOK_BORDERS,
-    notebook_types=NOTEBOOK_TYPES,
-    notebook_entry_limit=NOTEBOOK_ENTRY_LIMIT,
-    notebook_pdf_max=NOTEBOOK_PDF_MAX,
-    notebook_pdf_path=_notebook_pdf_path,
-    notebook_write=_notebook_write,
-    notebook_entry_public=_notebook_entry_public,
-    notebook_apply=_notebook_apply,
-    diy_safe_name=_diy_safe_name,
-))
+app.register_blueprint(create_notebook_blueprint())
 
 app.register_blueprint(create_diy_blueprint(
     template=_template,

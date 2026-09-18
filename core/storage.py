@@ -13,6 +13,7 @@
 
 import json
 import os
+import re
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -32,3 +33,26 @@ def atomic_write_json(path, data, *, ensure_ascii=False):
     with open(tmp, "w", encoding="utf-8") as fh:
         json.dump(data, fh, ensure_ascii=ensure_ascii)
     os.replace(tmp, path)
+
+
+def safe_filename(raw):
+    """Имя вложения: без путей и опасных символов, но кириллицу оставляем —
+    хозяин зовёт файлы по-русски, и по этим же именам ссылается в коде.
+    Была `_diy_safe_name` в app.py — общая для diy.py и notebook.py, отсюда
+    и переезд сюда, а не в feature-специфичный blueprint."""
+    name = os.path.basename((raw or "").strip()).replace("\\", "").replace("/", "")
+    name = re.sub(r'[\x00-\x1f<>:"|?*]', "", name).strip(". ")
+    return name[:80]
+
+
+def clean_url(raw):
+    """Ссылка из пользовательского ввода: без протокола — сама подставляет
+    https. Была `_notebook_clean_url` в app.py — общая для notebook.py
+    (ссылка в записи) и diy.py (ссылка в шапке статьи), поэтому здесь, а не
+    в notebook.py."""
+    url = (raw or "").strip()[:600]
+    if not url:
+        return ""
+    if not re.match(r"^https?://", url, re.I):
+        url = "https://" + url.lstrip("/")
+    return url

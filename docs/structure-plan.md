@@ -153,8 +153,31 @@ auth`. Тогда фича действительно самодостаточн
     Добавлен `tests/test_login_log.py` — раньше страница `/login-log` не
     была покрыта отдельно, только косвенно через `test_every_url_for_target_exists`.
 
-35. devices.py (23 зависимости) и notebook.py (14) — по образцу из 34.
+35. [выполнено 2026-09-18] devices.py (23 зависимости) и notebook.py (14) — по образцу из 34.
     Один коммит на оба (они мелкие).
+
+    Как выполнено на практике: `devices.py` тянул за собой суточный пароль
+    консоли и общее ограничение частоты попыток (`rate_blocked/hit/clear`,
+    `console_login_attempts`, `SSH_GATE_PASSWORD_PREFIX`,
+    `console_password_today`) — тоже переехали в `core/auth.py` целиком
+    (они и раньше были общими: `debts.py`/`home.py`/`remote.py` получают их
+    через `app.py`, тот теперь просто импортирует их вместо того, чтобы
+    объявлять). После этого `devices.py` берёт вообще всё из `core.auth`/
+    `blueprints.pwa`/`core.templates`, фабрика — без аргументов.
+
+    `notebook.py` пошёл дальше «просто импортов»: `notebook_data`/
+    `notebook_lock`/весь код чтения-записи переехали В САМ blueprint —
+    фича владеет своим состоянием, а не получает его от `app.py` (как и
+    ICON_LINKS в `pwa.py`). `app.py` и `blueprints/ai.py` (кнопка «В
+    блокнот») по-прежнему читают `notebook_data`/`notebook_lock`, но теперь
+    импортируют их из `blueprints.notebook`, а не объявляют сами. Два
+    мелких общих хелпера, которые notebook.py делил с ещё не переехавшим
+    diy.py (`_diy_safe_name`, `_notebook_clean_url`), заведены в
+    `core/storage.py` как `safe_filename`/`clean_url` — иначе notebook.py
+    зависел бы от app.py напрямую (циклический импорт).
+
+    Добавлены `tests/test_devices.py` и `tests/test_notebook.py` — раньше
+    ни одна из двух страниц не была покрыта отдельно.
 
 36. home.py (31), diy.py (26), music.py (27), debts.py (28).
     Отдельный коммит на КАЖДЫЙ — это уже заметные файлы.

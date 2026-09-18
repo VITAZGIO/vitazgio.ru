@@ -1,27 +1,117 @@
+"""blueprints/notebook.py — «Блокнот» /notebook (задача 35, docs/structure-plan.md).
+
+Хозяйская записная книжка: страницы-вкладки, записи трёх видов (ссылка,
+текст, PDF). Данные — модульного уровня, здесь же, а не в `app.py`: файл
+владеет своим состоянием целиком, как и задумано блоком Б плана. Данные
+всё равно лежат в `DATA_DIR`/переживают деплой — только путь к нему теперь
+берётся из `core.storage`, а не из фабричного аргумента.
+
+`notebook_data`/`notebook_lock` читает не только этот blueprint — кнопка
+«В блокнот» на `/ai` (`blueprints/ai.py`) пишет сюда напрямую, а
+`/api/metrics` в `app.py` считает число страниц для диагностики. Оба
+по-прежнему получают эти объекты через `app.py`, который сам берёт их
+отсюда (`from blueprints.notebook import notebook_data, notebook_lock`)
+— перевести и их на прямой импорт можно будет вместе с задачами 37/40.
+"""
+
+import json
 import os
+import re
+import threading
 import time
 import uuid
 
 from flask import Blueprint, g, jsonify, request, send_file
 
+from blueprints.pwa import ICON_LINKS
+from core.auth import login_required
+from core.storage import DATA_DIR, atomic_write_json, clean_url, safe_filename
+from core.templates import template
 
-def create_notebook_blueprint(
-    *,
-    template,
-    icon_links,
-    login_required,
-    notebook_data,
-    notebook_lock,
-    notebook_borders,
-    notebook_types,
-    notebook_entry_limit,
-    notebook_pdf_max,
-    notebook_pdf_path,
-    notebook_write,
-    notebook_entry_public,
-    notebook_apply,
-    diy_safe_name,
-):
+NOTEBOOK_DIR = os.path.join(DATA_DIR, "notebook")
+NOTEBOOK_PATH = os.path.join(DATA_DIR, "notebook.json")
+NOTEBOOK_TEXT_MAX = 20000
+NOTEBOOK_ENTRY_LIMIT = 1000
+NOTEBOOK_PDF_MAX = 25 * 1024 * 1024
+NOTEBOOK_TYPES = ("link", "text", "pdf")
+NOTEBOOK_BORDERS = ("solid", "dashed", "dotted", "double", "none")
+NOTEBOOK_WIDTHS = ("half", "full")
+
+notebook_data: dict = {"pages": [], "entries": {}}
+notebook_lock = threading.Lock()
+os.makedirs(NOTEBOOK_DIR, exist_ok=True)
+
+
+def notebook_pdf_path(entry_id):
+    return os.path.join(NOTEBOOK_DIR, f"{entry_id}.pdf")
+
+
+def notebook_write():
+    """Вызывать под notebook_lock."""
+    try:
+        atomic_write_json(NOTEBOOK_PATH, notebook_data)
+    except OSError:
+        pass
+
+
+def notebook_load():
+    try:
+        with open(NOTEBOOK_PATH, encoding="utf-8") as fh:
+            saved = json.load(fh) or {}
+        notebook_data["pages"] = saved.get("pages", [])
+        notebook_data["entries"] = saved.get("entries", {})
+    except (OSError, ValueError):
+        pass
+    if not notebook_data["pages"]:
+        notebook_data["pages"] = [{"id": str(uuid.uuid4()), "name": "Заметки"}]
+    for e in notebook_data["entries"].values():
+        e.setdefault("note", "")
+        e.setdefault("width", "half")
+        e.setdefault("border", "solid")
+        e.setdefault("accent", "#2de2ff")
+        e.setdefault("order", 0)
+
+
+notebook_load()
+
+
+def notebook_entry_public(eid, e):
+    row = {
+        "id": eid, "page": e.get("page"), "type": e.get("type"),
+        "title": e.get("title", ""), "width": e.get("width", "half"),
+        "border": e.get("border", "solid"), "accent": e.get("accent", "#2de2ff"),
+        "note": e.get("note", ""), "order": e.get("order", 0),
+    }
+    if e.get("type") == "link":
+        row["url"] = e.get("url", "")
+    elif e.get("type") == "text":
+        row["text"] = e.get("text", "")
+    elif e.get("type") == "pdf":
+        row["pdf"] = bool(e.get("pdf"))
+        row["filename"] = e.get("filename", "")
+    return row
+
+
+def notebook_apply(e, payload):
+    """Переносит присланные поля в запись, каждое — по своим правилам."""
+    if "title" in payload:
+        e["title"] = (payload.get("title") or "").strip()[:160]
+    if "note" in payload:
+        e["note"] = (payload.get("note") or "").strip()[:4000]
+    if "url" in payload and e["type"] == "link":
+        e["url"] = clean_url(payload.get("url"))
+    if "text" in payload and e["type"] == "text":
+        e["text"] = (payload.get("text") or "")[:NOTEBOOK_TEXT_MAX]
+    if payload.get("width") in NOTEBOOK_WIDTHS:
+        e["width"] = payload["width"]
+    if payload.get("border") in NOTEBOOK_BORDERS:
+        e["border"] = payload["border"]
+    ac = (payload.get("accent") or "").strip()
+    if re.match(r"^#[0-9a-fA-F]{6}$", ac):
+        e["accent"] = ac
+
+
+def create_notebook_blueprint():
     notebook_bp = Blueprint("notebook", __name__)
 
     @notebook_bp.get("/api/notebook")
@@ -32,7 +122,7 @@ def create_notebook_blueprint(
             entries = [notebook_entry_public(k, v)
                        for k, v in notebook_data["entries"].items()]
         entries.sort(key=lambda x: x["order"])
-        return jsonify(pages=pages, entries=entries, borders=list(notebook_borders))
+        return jsonify(pages=pages, entries=entries, borders=list(NOTEBOOK_BORDERS))
 
     @notebook_bp.post("/api/notebook/page")
     @login_required
@@ -84,10 +174,10 @@ def create_notebook_blueprint(
     def notebook_entry_add():
         payload = request.get_json(silent=True) or {}
         etype = payload.get("type")
-        if etype not in notebook_types:
+        if etype not in NOTEBOOK_TYPES:
             return jsonify(error="Неизвестный тип записи."), 400
         with notebook_lock:
-            if len(notebook_data["entries"]) >= notebook_entry_limit:
+            if len(notebook_data["entries"]) >= NOTEBOOK_ENTRY_LIMIT:
                 return jsonify(error="Слишком много записей."), 400
             pages = notebook_data["pages"]
             page = payload.get("page")
@@ -151,16 +241,16 @@ def create_notebook_blueprint(
         upload = request.files.get("file")
         if not upload:
             return jsonify(error="Файл не выбран."), 400
-        if request.content_length and request.content_length > notebook_pdf_max + 8192:
+        if request.content_length and request.content_length > NOTEBOOK_PDF_MAX + 8192:
             return jsonify(error="PDF больше 25 МБ."), 413
         if os.path.splitext(upload.filename or "")[1].lower() != ".pdf":
             return jsonify(error="Нужен файл PDF."), 415
         dest = notebook_pdf_path(eid)
         upload.save(dest)
-        if os.path.getsize(dest) > notebook_pdf_max:
+        if os.path.getsize(dest) > NOTEBOOK_PDF_MAX:
             os.remove(dest)
             return jsonify(error="PDF больше 25 МБ."), 413
-        fname = diy_safe_name(upload.filename) or "файл.pdf"
+        fname = safe_filename(upload.filename) or "файл.pdf"
         with notebook_lock:
             e = notebook_data["entries"].get(eid)
             if e:
@@ -192,6 +282,6 @@ def create_notebook_blueprint(
         """Блокнот: страницы-вкладки как в браузере, записи трёх видов. Оформлен
         в едином тёмном стиле сайта — бирюзовый акцент, шрифт Cascadia."""
         html = template("notebook.html")
-        return html.replace("__ICONLINKS__", icon_links)
+        return html.replace("__ICONLINKS__", ICON_LINKS)
 
     return notebook_bp

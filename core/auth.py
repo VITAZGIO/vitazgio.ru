@@ -1,14 +1,15 @@
 """core/auth.py — вход в кабинет: доверенные устройства, журнал входов,
-`login_required` (задача 34).
+`login_required`, суточный пароль консоли, ограничение частоты попыток
+(задачи 34-35).
 
 Перенесено из `app.py` дословно (то же поведение, те же имена данных —
 `docs/structure-plan.md` запрещает менять семантику в рамках этого
 разреза). Публичные имена здесь — без ведущего подчёркивания: раньше это
 были приватные функции `app.py`, а теперь их напрямую импортируют и
 `app.py` (под старыми именами, через `as`, чтобы не трогать полторы сотни
-мест, где они уже вызываются), и blueprints (`devices.py`, `debts.py`,
-`home.py`, `remote.py` уже получают `log_login`/`client_ip`/`device_*`
-через фабрику — после миграции этих файлов на импорты они возьмут те же
+мест, где они уже вызываются), и blueprints (`devices.py` уже берёт их
+отсюда напрямую; `debts.py`, `home.py`, `remote.py` пока получают их же
+через фабрику из `app.py` — после миграции этих файлов возьмут те же
 имена прямо отсюда).
 
 `login_required` — единственный guard, переехавший сюда целиком: он
@@ -26,6 +27,7 @@ import os
 import secrets
 import threading
 import time
+from collections import defaultdict, deque
 from datetime import datetime
 from functools import wraps
 from zoneinfo import ZoneInfo
@@ -259,3 +261,50 @@ def login_required(view):
         return view(*args, **kwargs)
 
     return wrapped
+
+
+# ---- Ограничение частоты попыток (общая утилита) -----------------------------
+# Используется и здесь (нигде выше — счётчик самого пароля кабинета
+# остался в app.py, ему core не нужен), и суточным паролем консоли ниже, и
+# blueprints (devices.py, debts.py, home.py, remote.py — рекорды аркады,
+# доверие устройству, вход в консоль).
+
+def rate_blocked(store, lock, key, window, limit):
+    """Не пора ли притормозить этот адрес. Заодно чистит остывшие записи,
+    чтобы словарь не рос по одной строке на каждый заглянувший IP."""
+    now = time.monotonic()
+    with lock:
+        for stale, hits in [(k, v) for k, v in store.items() if k != key]:
+            if not hits or now - hits[-1] > window:
+                store.pop(stale, None)
+        attempts = store[key]
+        while attempts and now - attempts[0] > window:
+            attempts.popleft()
+        return len(attempts) >= limit
+
+
+def rate_hit(store, lock, key):
+    with lock:
+        store[key].append(time.monotonic())
+
+
+def rate_clear(store, lock, key):
+    with lock:
+        store.pop(key, None)
+
+
+# ---- Суточный пароль консоли -------------------------------------------------
+# Второй, независимый от пароля кабинета секрет: открывает SSH-консоль,
+# RDP/VNC-оверлеи, файлы по SFTP и (тем же паролем) доверие устройству и
+# рекорды аркады — везде, где нужен уровень строже, чем просто «вошёл в
+# кабинет». Меняется раз в сутки сам, без .env — только префикс в нём.
+SSH_GATE_PASSWORD_PREFIX = os.environ.get("SSH_GATE_PASSWORD_PREFIX")
+CONSOLE_LOGIN_WINDOW_SECONDS = 300
+CONSOLE_LOGIN_MAX_ATTEMPTS = 5
+console_login_attempts = defaultdict(deque)
+console_login_attempts_lock = threading.Lock()
+
+
+def console_password_today():
+    now = datetime.now(ZoneInfo("Europe/Moscow"))
+    return f"{SSH_GATE_PASSWORD_PREFIX}{now:%d%m}"

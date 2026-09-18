@@ -1,50 +1,61 @@
+"""blueprints/devices.py — вкладка кабинета «Запомнить устройства» (/devices).
+
+Переведён на прямые импорты из core/ (задача 35, docs/structure-plan.md,
+по образцу задачи 34/login_log.py). Все нужные примитивы — доверенные
+устройства, суточный пароль консоли, ограничение частоты попыток, журнал
+входов — уже в `core/auth.py` (перевезены сюда тем же разрезом: раньше
+`login_required` тянул их за собой, и раз они всё равно там — блюпринт
+берёт напрямую, а не через `app.py`).
+"""
+
 import hmac
 
 from flask import Blueprint, g, jsonify, request
 
-
-def create_devices_blueprint(
-    *,
-    template,
-    icon_links,
-    login_required,
-    device_cookie,
-    devices_lock,
-    trusted_devices,
-    devices_prune_expired,
-    devices_write,
-    unique_label,
-    device_label,
-    device_issue,
-    device_forget,
-    ssh_gate_password_prefix,
-    console_password_today,
+from blueprints.pwa import ICON_LINKS
+from core.auth import (
+    CONSOLE_LOGIN_MAX_ATTEMPTS,
+    CONSOLE_LOGIN_WINDOW_SECONDS,
+    DEVICE_COOKIE,
+    SSH_GATE_PASSWORD_PREFIX,
     client_ip,
-    rate_blocked,
-    rate_hit,
-    rate_clear,
     console_login_attempts,
     console_login_attempts_lock,
-    console_login_window_seconds,
-    console_login_max_attempts,
+    console_password_today,
+    device_forget,
+    device_issue,
+    device_label,
+    devices_lock,
+    devices_prune_expired,
+    devices_write,
     log_login,
-):
+    login_required,
+    rate_blocked,
+    rate_clear,
+    rate_hit,
+    trusted_devices,
+    unique_label,
+)
+from core.templates import template
+
+
+def create_devices_blueprint():
     devices_bp = Blueprint("devices", __name__)
 
     @devices_bp.get("/devices")
     @login_required
     def devices_page():
-        return template("devices.html").replace("__ICONLINKS__", icon_links)
+        return template("devices.html").replace("__ICONLINKS__", ICON_LINKS)
 
     @devices_bp.post("/api/devices/trust")
     @login_required
     def device_trust():
-        if not ssh_gate_password_prefix:
+        if not SSH_GATE_PASSWORD_PREFIX:
             return jsonify(error="Суточный пароль не настроен на сервере."), 503
 
         client = client_ip()
         if rate_blocked(console_login_attempts, console_login_attempts_lock, client,
-                        console_login_window_seconds, console_login_max_attempts):
+                        CONSOLE_LOGIN_WINDOW_SECONDS, CONSOLE_LOGIN_MAX_ATTEMPTS):
             return jsonify(error="Слишком много попыток. Попробуйте через 5 минут."), 429
 
         password = (request.get_json(silent=True) or {}).get("password", "")
@@ -58,7 +69,7 @@ def create_devices_blueprint(
         rate_clear(console_login_attempts, console_login_attempts_lock, client)
 
         ua = request.headers.get("User-Agent", "")
-        raw = request.cookies.get(device_cookie) or ""
+        raw = request.cookies.get(DEVICE_COOKIE) or ""
         selector = raw.split(".", 1)[0] if "." in raw else None
         with devices_lock:
             devices_prune_expired()
@@ -71,7 +82,7 @@ def create_devices_blueprint(
     @devices_bp.get("/api/devices")
     @login_required
     def devices_list_api():
-        current = (request.cookies.get(device_cookie) or "").split(".", 1)[0]
+        current = (request.cookies.get(DEVICE_COOKIE) or "").split(".", 1)[0]
         with devices_lock:
             if devices_prune_expired():
                 devices_write()
@@ -100,7 +111,7 @@ def create_devices_blueprint(
     @login_required
     def device_forget_api(selector):
         removed = device_forget(selector)
-        if removed and (request.cookies.get(device_cookie) or "").split(".", 1)[0] == selector:
+        if removed and (request.cookies.get(DEVICE_COOKIE) or "").split(".", 1)[0] == selector:
             g.clear_device_cookie = True
         return jsonify(ok=True)
 
