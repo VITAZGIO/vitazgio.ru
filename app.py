@@ -1,20 +1,16 @@
-import base64
 import gzip
 import hashlib
 import hmac
-import io
 import json
 import os
 import platform
 import re
 import secrets
 import shutil
-import tempfile
 import subprocess
 import threading
 import time
 import uuid
-import zipfile
 from collections import defaultdict, deque
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -41,7 +37,6 @@ from core.auth import (
     console_login_attempts,
     console_login_attempts_lock,
     console_password_today,
-    device_check as _device_check,
     devices_lock,
     log_login as _log_login,
     login_required,
@@ -56,15 +51,16 @@ from core.templates import template as _template
 
 from blueprints.ai import create_ai_blueprint
 from blueprints.apps import create_apps_blueprint
-from blueprints.backup_sebastian import create_backup_sebastian_blueprint
+from blueprints.backup_sebastian import (
+    SEBASTIAN_HOST,
+    create_backup_sebastian_blueprint,
+)
 from blueprints.debts import create_debts_blueprint, debt_find_user_by_password as _debt_find_user_by_password
 from blueprints.devices import create_devices_blueprint
 from blueprints.desktop import create_desktop_blueprint
 from blueprints.diy import (
     create_diy_blueprint,
     diy_items,
-    diy_lock,
-    diy_load as _diy_load,
 )
 from blueprints.drop import create_drop_blueprint
 from blueprints.files import create_files_blueprint
@@ -79,7 +75,6 @@ from blueprints.music import (
     music_folder_depth as _music_folder_depth,
     music_folders,
     music_items,
-    music_load as _music_load,
     music_lock,
     music_safe_name as _music_safe_name,
     music_scan as _music_scan,
@@ -92,8 +87,6 @@ from blueprints.music import (
 from blueprints.notebook import (
     create_notebook_blueprint,
     notebook_data,
-    notebook_lock,
-    notebook_load as _notebook_load,
 )
 from blueprints.phone import create_phone_blueprint
 from blueprints.pwa import ICON_LINKS, create_pwa_blueprint
@@ -746,12 +739,13 @@ def _drop_used_safe():
 
 
 
-# _rate_blocked/_rate_hit/_rate_clear, console_password_today, _device_check
+# _rate_blocked/_rate_hit/_rate_clear, console_password_today, device_check
 # и вся остальная работа с доверенными устройствами — в core/auth.py.
-# _device_check ещё нужен для форварда в create_backup_sebastian_blueprint
-# (не переехал); остальные device_*/devices_* app.py больше не нужны — их
-# взяли blueprints/devices.py (задача 35), blueprints/diy.py и
-# blueprints/debts.py (задача 36) напрямую.
+# device_check самому app.py больше не нужен: последний форвард (в
+# create_backup_sebastian_blueprint) убран в задаче 37 — теперь тот файл
+# читает device_check/DEVICE_COOKIE из core.auth напрямую. Остальные
+# device_*/devices_* app.py тоже не нужны — их взяли blueprints/devices.py
+# (задача 35), blueprints/diy.py и blueprints/debts.py (задача 36) напрямую.
 
 
 # Долги (DEBTS_PATH/DEBT_USER_COLORS, debts_data/debts_lock и вся
@@ -2302,161 +2296,25 @@ _GAME_ICONS = {
     }),
 }
 # Страна DIY (DIY_*, diy_items/diy_lock и вся логика) — теперь целиком
-# в blueprints/diy.py (задача 36): использовались только там же, кроме
-# diy_items/diy_lock/diy_load, которые app.py читает обратно для
-# резервных копий (импортированы наверху файла).
+# в blueprints/diy.py (задача 36): использовался только там же, кроме
+# diy_items, который app.py читает обратно для /api/metrics (импортирован
+# наверху файла). diy_lock/diy_load резервным копиям тоже были нужны, но
+# это переехало в blueprints/backup_sebastian.py (задача 37) — оно теперь
+# читает их из blueprints.diy напрямую, а не через app.py.
 
 
 # Блокнот (notebook_data/notebook_lock и вся его логика) — теперь целиком
 # в blueprints/notebook.py (задача 35): фича владеет своим состоянием сама,
-# а не раздаёт его отсюда пачкой аргументов. notebook_data/notebook_lock
-# импортированы наверху файла — они ещё нужны здесь для /api/metrics и для
-# передачи в create_ai_blueprint (кнопка «В блокнот» на /ai).
+# а не раздаёт его отсюда пачкой аргументов. notebook_data импортирован
+# наверху файла — ещё нужен здесь для /api/metrics. notebook_lock резервным
+# копиям тоже был нужен, но это переехало в blueprints/backup_sebastian.py
+# (задача 37) — оно теперь читает его из blueprints.notebook напрямую.
 
-# ---- Резервные копии ------------------------------------------------------
-# Всё, что нажито сайтом, лежит в двух папках: data (записи DIY, блокнот,
-# фонотека, журнал входов) и drop_data (личный дроп). Здесь они складываются
-# в один архив и оттуда же разворачиваются обратно.
-#
-# Два размера копии:
-#   лёгкая — только записи и настройки: статьи страны DIY с фотографиями,
-#            блокнот, списки и журналы. Весит мегабайты, годится «на каждый день»;
-#   полная — вдобавок сами файлы дропа и музыка. Может весить гигабайты.
-#
-# Забирать копию может не только хозяин из кабинета, но и отдельная программа
-# — например, та, что будет крутиться на домашнем гипервизоре и складывать
-# копии на свой диск. Для неё есть ключ BACKUP_TOKEN: с ним архив отдаётся по
-# обычному GET, без входа в кабинет. Ключ не задан — эта дверь закрыта.
-BACKUP_TOKEN = os.environ.get("BACKUP_TOKEN", "").strip()
-
-
-def _backup_targets(full):
-    """Какие папки кладём в архив. Возвращает [(корень, имя в архиве)]."""
-    roots = [(DATA_DIR, "data")]
-    if full:
-        roots.append((DROP_DIR, "drop_data"))
-    return [(root, alias) for root, alias in roots if os.path.isdir(root)]
-
-
-def _backup_skip(path):
-    """Мусор и временное в копию не берём."""
-    name = os.path.basename(path)
-    return (name.endswith(".tmp") or name.endswith(".part")
-            or os.sep + "tmp" + os.sep in path)
-
-
-def _backup_measure(full):
-    """Сколько весит будущий архив — до того, как его собирать."""
-    total, count = 0, 0
-    for root, _ in _backup_targets(full):
-        for base, _dirs, files in os.walk(root):
-            for name in files:
-                path = os.path.join(base, name)
-                if _backup_skip(path):
-                    continue
-                try:
-                    total += os.path.getsize(path)
-                except OSError:
-                    continue
-                count += 1
-    return total, count
-
-
-def _backup_build(full):
-    """Собирает архив во временный файл и возвращает путь к нему.
-
-    Пишем на диск, а не в память: полная копия бывает в гигабайты, и держать
-    её в оперативке на маленьком сервере — верный способ его уронить."""
-    import zipfile
-
-    fd, tmp = tempfile.mkstemp(prefix="vg-backup-", suffix=".zip")
-    os.close(fd)
-    manifest = {
-        "site": "vitazgio.ru",
-        "made": time.time(),
-        "kind": "full" if full else "light",
-        "note": "Разворачивать через кабинет → «Загрузить копию» "
-                "или распаковать поверх папок data и drop_data.",
-    }
-    with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED, allowZip64=True) as zf:
-        zf.writestr("backup.json", json.dumps(manifest, ensure_ascii=False, indent=2))
-        for root, alias in _backup_targets(full):
-            for base, _dirs, files in os.walk(root):
-                for name in files:
-                    path = os.path.join(base, name)
-                    if _backup_skip(path):
-                        continue
-                    inside = os.path.join(alias, os.path.relpath(path, root))
-                    try:
-                        zf.write(path, inside)
-                    except OSError:
-                        continue          # файл увели прямо во время сборки
-    return tmp
-
-
-# ---- Себастьян: разговор с дворецким через сайт ---------------------------
-# Отвечает та же модель, что уже висит в памяти видеокарты дома, — новую не
-# поднимаем, иначе домашнему Себастьяну не хватит места. Поэтому здесь только
-# разговор: никаких инструментов и никакого управления домом, кто бы ни писал.
-# Свет и розетки остаются за домашним контуром, куда с улицы ходу нет.
-# Какой из шести роботов стоит на полке и в шапке чата. Меняется одной
-# строкой — или переменной SEBASTIAN_ICON, без правки кода.
-SEBASTIAN_ICON = os.environ.get("SEBASTIAN_ICON", "butler1")
-if SEBASTIAN_ICON not in _GAME_ICONS:
-    SEBASTIAN_ICON = "butler1"
-_GAME_ICONS["butler"] = _GAME_ICONS[SEBASTIAN_ICON]   # под именем __ICON_BUTLER__
-SEBASTIAN_HOST = os.environ.get("SEBASTIAN_OLLAMA", "").strip().rstrip("/")
-SEBASTIAN_MODEL = os.environ.get("SEBASTIAN_MODEL", "sebastian").strip()
-SEBASTIAN_PUBLIC = os.environ.get("SEBASTIAN_PUBLIC", "1") != "0"
-SEBASTIAN_MSG_MAX = 400            # длиннее вопросы не принимаем
-SEBASTIAN_REPLY_TOKENS = 200       # и ответы держим короткими
-SEBASTIAN_TIMEOUT = 45
-SEBASTIAN_GUEST_HOUR = 12          # сколько вопросов в час с одного адреса
-SEBASTIAN_OWNER_HOUR = 60
-
-# Одновременно пускаем только один вопрос: две модели на одной видеокарте
-# душат друг друга втрое, а домашний голосовой контур важнее сайта.
-sebastian_gate = threading.Semaphore(1)
-sebastian_calls: dict = {}
-sebastian_calls_lock = threading.Lock()
-
-SEBASTIAN_PROMPT = """Ты Себастьян — дворецкий и голос домашнего сервера vitazgio.ru.
-Отвечай по-русски, коротко и с достоинством, лёгкая ирония уместна.
-
-О чём знаешь и охотно рассказываешь:
-— Три машины: гипервизор Proxmox дома (виртуалки, видеокарта под нейросети),
-  маленькая Orange Pi (умный дом круглосуточно), арендованный сервер в
-  Амстердаме (домены, сертификаты, единственный вход снаружи).
-— Сервисы: облако, медиатека, синхронизация файлов, мониторинг, прокси.
-— Умный дом: лампы, розетки, лента, магнитола — всё на Zigbee, всё локально.
-— Хозяин: Виталий, студент, собирает устройства на ESP32 и пишет прошивки.
-
-Чего не делаешь:
-— Не управляешь домом и не трогаешь устройства из этого разговора: свет,
-  розетки и техника слушаются только домашнего контура. Если просят включить
-  или выключить — вежливо откажи и объясни, что через сайт это не делается.
-— Не называешь адреса, пароли, ключи и внутренние имена машин.
-— Не выдумываешь: чего не знаешь — так и скажи."""
-
-
-def _sebastian_allow(owner):
-    """Не даём одному гостю занимать видеокарту весь день."""
-    limit = SEBASTIAN_OWNER_HOUR if owner else SEBASTIAN_GUEST_HOUR
-    who = "owner" if owner else _client_ip()
-    now = time.time()
-    with sebastian_calls_lock:
-        hits = [t for t in sebastian_calls.get(who, []) if now - t < 3600]
-        if len(hits) >= limit:
-            sebastian_calls[who] = hits
-            return False
-        hits.append(now)
-        sebastian_calls[who] = hits
-        # заодно подчищаем чужие следы, чтобы словарь не рос вечно
-        for key in [k for k, v in sebastian_calls.items()
-                    if not v or now - v[-1] > 7200]:
-            sebastian_calls.pop(key, None)
-    return True
-
+# ---- Резервные копии и Себастьян переехали в blueprints/backup_sebastian.py
+# (задача 37): не связанные друг с другом разделы, но оба были самодостаточны
+# в app.py и не тянули за собой ничего, кроме DROP_DIR/drop_lock/drop_items/
+# drop_load_index (ещё не переехавших из app.py — задача 39, разрез drop.py)
+# и общего game_icons (см. пояснение в blueprints/home.py, задача 36).
 
 app.register_blueprint(create_home_blueprint(
     game_icons=_GAME_ICONS,
@@ -2547,39 +2405,11 @@ app.register_blueprint(create_drop_blueprint(
 ))
 
 app.register_blueprint(create_backup_sebastian_blueprint(
-    template=_template,
-    icon_links=ICON_LINKS,
-    login_required=login_required,
-    device_check=_device_check,
-    device_cookie=DEVICE_COOKIE,
-    backup_token=lambda: BACKUP_TOKEN,
-    backup_measure=lambda *args, **kwargs: _backup_measure(*args, **kwargs),
-    backup_build=lambda *args, **kwargs: _backup_build(*args, **kwargs),
-    data_dir=lambda: DATA_DIR,
-    drop_dir=lambda: DROP_DIR,
+    game_icons=_GAME_ICONS,
+    drop_dir=DROP_DIR,
     drop_lock=drop_lock,
     drop_items=drop_items,
-    drop_load_index=lambda *args, **kwargs: _drop_load_index(*args, **kwargs),
-    diy_lock=diy_lock,
-    diy_items=diy_items,
-    diy_load=lambda *args, **kwargs: _diy_load(*args, **kwargs),
-    notebook_lock=notebook_lock,
-    notebook_data=notebook_data,
-    notebook_load=lambda *args, **kwargs: _notebook_load(*args, **kwargs),
-    music_lock=music_lock,
-    music_items=music_items,
-    music_folders=music_folders,
-    music_load=lambda *args, **kwargs: _music_load(*args, **kwargs),
-    sebastian_host=lambda: SEBASTIAN_HOST,
-    sebastian_model=lambda: SEBASTIAN_MODEL,
-    sebastian_public=lambda: SEBASTIAN_PUBLIC,
-    sebastian_msg_max=SEBASTIAN_MSG_MAX,
-    sebastian_reply_tokens=SEBASTIAN_REPLY_TOKENS,
-    sebastian_timeout=SEBASTIAN_TIMEOUT,
-    sebastian_prompt=SEBASTIAN_PROMPT,
-    sebastian_gate=sebastian_gate,
-    sebastian_allow=lambda *args, **kwargs: _sebastian_allow(*args, **kwargs),
-    sebastian_icon_svg=lambda: _GAME_ICONS.get(SEBASTIAN_ICON, ""),
+    drop_load_index=_drop_load_index,
 ))
 
 app.register_blueprint(create_ai_blueprint(
