@@ -171,21 +171,30 @@ NetBird на VPS в Амстердаме, `docker compose up -d --build web`).
 
 Описание каждой фичи — в `blueprints/<name>.md` рядом с её кодом, не
 здесь. Читать только тот файл, который правишь (правила — в разделе
-«Дисциплина документации» ниже). Не знаешь, в каком файле нужная фича, —
-`AI_MAP.md` в корне, там таблица «тема → файл → карта»:
+«Дисциплина документации» ниже). Карта есть у КАЖДОГО blueprint'а, имя
+файла совпадает с именем кода (`blueprints/music.py` → `music.md`).
 
-- `blueprints/ai.md` — «Нейронки» /neuro + /ai (чаты через OpenRouter),
-  страница /claude
-- `blueprints/apps.md` — вкладка кабинета «Приложения» /apps (Android +
-  Windows-оболочки)
-- `blueprints/diy.md` — DIY /diy
-- `blueprints/drop.md` — дроп /drop (MUSIK, Download, конфликты имён)
-- `blueprints/files.md` — файлы по SFTP /files/<ip>
-- `blueprints/music.md` — фонотека /music + плеер (виджет и `/player/pop`)
-- `blueprints/phone.md` — телефонный агент-ретранслятор: android-оболочка,
-  экран/звук/управление/файлы телефона
-- `blueprints/remote.md` — кабинет, NetBird, консоль/RDP/VNC, канал
-  вкладки Claude
+Где искать, если по имени не угадывается (остальные очевидны):
+
+- `blueprints/remote.md` — кабинет, NetBird, консоль/RDP/VNC, уведомления,
+  канал вкладки Claude
+- `blueprints/home.md` — главная, **темы, серверы, рекорды аркады**
+- `blueprints/ai.md` — «Нейронки» /neuro + /ai (OpenRouter), **страница
+  /claude**
+- `blueprints/pwa.md` — установка приложением, **иконки, «Поделиться»**
+- `blueprints/apps.md` — вкладка кабинета «Приложения» (витрина Android +
+  Windows-оболочек, своей логики нет)
+- `blueprints/devices.md` — доверенные устройства (сама логика доверия —
+  в `core/auth.py`)
+- `blueprints/backup_sebastian.md` — бэкап И дворецкий, два раздела в
+  одном файле
+
+Остальные по имени: `drop`, `files`, `music`, `phone`, `debts`, `diy`,
+`notebook`, `desktop`, `login_log`.
+
+**Что не открывать без причины** (артефакты сборки и живые данные):
+`static/vendor/*`, `desktop/dist/*`, `desktop/node_modules/*`,
+`android/app/build/*`, `data/*`, `drop_data/*`, `__pycache__/*`.
 
 ## Дисциплина документации (правила для ВСЕХ будущих чатов)
 
