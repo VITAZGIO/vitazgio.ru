@@ -191,7 +191,8 @@ PHONE_FILES_PASSWORD = os.environ.get("PHONE_FILES_PASSWORD")
 # Свой пароль вкладки «Долги», не связан с ежедневным паролем консоли —
 # задаётся один раз в .env и не меняется день ото дня.
 DEBTS_PASSWORD = os.environ.get("DEBTS_PASSWORD")
-SERVERS_PASSWORD = os.environ.get("SERVERS_PASSWORD", "1224")
+# SERVERS_PASSWORD — теперь читает сама blueprints/home.py (задача 36),
+# больше нигде не нужен.
 
 # Дома guacd рядом (127.0.0.1). Если сайт крутится на VPS — сюда
 # подставляется Netbird-адрес домашнего сервера.
@@ -1337,127 +1338,8 @@ def _phone_publish_status(online, last_seen):
         }
 
 
-# ---- Рекорды аркады --------------------------------------------------------
-# Лежат на сервере, а не в localStorage: браузер чистят, телефон меняют, а
-# таблица должна пережить и то, и другое, и перезагрузку сервера.
-#
-# Аркада открыта без пароля — значит, результат может прислать кто угодно.
-# Проверить «честно ли набрано» из браузера нельзя в принципе, поэтому здесь
-# только санитария: потолок значения, ограничение частоты и длины имени.
-# Удаление же закрыто суточным паролем — это единственное действие, где
-# ошибиться нельзя.
-ARCADE_SCORES_PATH = os.path.join(DATA_DIR, "arcade_scores.json")
-ARCADE_TOP = 3               # столько мест показываем
-ARCADE_KEEP = 10             # столько храним: снёс хама — поднялся следующий
-ARCADE_NAME_MAX = 12
-ARCADE_VALUE_MAX = 10_000_000
-ARCADE_SUBMIT_WINDOW = 300
-ARCADE_SUBMIT_MAX = 40       # результатов с одного адреса за пять минут
-
-# epoch поднимается, когда правила меняются так, что старые рекорды больше
-# не сравнимы с новыми, — например, в DOOM добавили уровень и время
-# прохождения выросло у всех. Записи прошлой эпохи отваливаются сами при
-# первой же загрузке файла.
-# lo/hi — границы правдоподобного результата. Считает очки браузер, подделать
-# запрос может кто угодно, но хотя бы заведомая чушь в таблицу не попадёт:
-# человек не печатает тысячу знаков в минуту и не проходит DOOM за пять секунд.
-# Рулетки тут намеренно нет: колесо — генератор случайных чисел, место в
-# такой таблице говорит про везение, а не про игрока. Свой лучший результат
-# она по-прежнему помнит, но только на устройстве.
-ARCADE_GAMES = {
-    "snake":    {"title": "Змейка",  "order": "max", "unit": "score", "epoch": 1,
-                 "lo": 10, "hi": 20_000},
-    "tetris":   {"title": "Тетрис",  "order": "max", "unit": "score", "epoch": 1,
-                 "lo": 10, "hi": 2_000_000},
-    # epoch 2: уровней стало пять вместо двух, старые времена несравнимы
-    "doom":     {"title": "DOOM",    "order": "min", "unit": "time",  "epoch": 2,
-                 "lo": 40, "hi": 7_200},
-    "tanks":    {"title": "Танчики", "order": "max", "unit": "score", "epoch": 1,
-                 "lo": 100, "hi": 500_000},
-    "arkanoid": {"title": "Арканоид", "order": "max", "unit": "score", "epoch": 1,
-                 "lo": 50, "hi": 500_000},
-    "wolf":     {"title": "Ну, погоди!", "order": "max", "unit": "score", "epoch": 1,
-                 "lo": 1, "hi": 100_000},
-    # У шахмат в рейтинге серия побед подряд, и только на сложном уровне.
-    "chess":    {"title": "Шахматы", "order": "max", "unit": "score", "epoch": 1,
-                 "lo": 1, "hi": 1_000},
-    # Печать меряется чистой скоростью: знаков в минуту за вычетом опечаток.
-    # Мировые рекорды слепой печати — около 900 зн/мин, потолок с запасом.
-    "typing":   {"title": "Печать",  "order": "max", "unit": "cpm",   "epoch": 1,
-                 "lo": 30, "hi": 1_500},
-}
-
-arcade_scores: dict = {}
-arcade_lock = threading.Lock()
-arcade_submit_attempts = defaultdict(deque)
-arcade_submit_lock = threading.Lock()
-
-# Управляющие символы, нулевой ширины и переключатели направления письма:
-# ими можно нарисовать ник, который ломает таблицу или притворяется чужим.
-ARCADE_NAME_BAD = re.compile("[\x00-\x1f\x7f\u200b-\u200f\u2028-\u202e\u2066-\u2069]")
-
-
-def _arcade_clean_name(raw):
-    """Ник в таблицу. Пустой или из одних пробелов — значит подписываться
-    не захотели: в аркадах такого зовут NoName, так и запишем."""
-    name = ARCADE_NAME_BAD.sub("", raw if isinstance(raw, str) else "")
-    name = re.sub(r"\s+", " ", name).strip()
-    return name[:ARCADE_NAME_MAX] or "NoName"
-
-
-def _arcade_sort(game, rows):
-    reverse = ARCADE_GAMES[game]["order"] == "max"
-    # При равном результате выше тот, кто добрался до него раньше.
-    return sorted(rows, key=lambda r: (-r["value"] if reverse else r["value"],
-                                       r.get("at", 0)))
-
-
-def _arcade_save():
-    """Вызывать под arcade_lock."""
-    try:
-        tmp = ARCADE_SCORES_PATH + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as fh:
-            json.dump(arcade_scores, fh, ensure_ascii=False)
-        os.replace(tmp, ARCADE_SCORES_PATH)
-    except OSError:
-        pass
-
-
-def _arcade_load():
-    try:
-        with open(ARCADE_SCORES_PATH, encoding="utf-8") as fh:
-            stored = json.load(fh)
-    except (OSError, ValueError):
-        stored = {}
-    for game, meta in ARCADE_GAMES.items():
-        rows = stored.get(game) or []
-        if not isinstance(rows, list):
-            rows = []
-        clean = []
-        for row in rows:
-            try:
-                if int(row.get("epoch", 0)) != meta["epoch"]:
-                    continue        # рекорд по старым правилам — не сравним
-                clean.append({
-                    "id": str(row["id"]),
-                    "name": _arcade_clean_name(row.get("name")),
-                    "value": int(row["value"]),
-                    "at": float(row.get("at", 0)),
-                    "epoch": meta["epoch"],
-                })
-            except (KeyError, TypeError, ValueError):
-                continue
-        arcade_scores[game] = _arcade_sort(game, clean)[:ARCADE_KEEP]
-
-
-def _arcade_public():
-    """Вызывать под arcade_lock."""
-    return {game: [{"id": r["id"], "name": r["name"], "value": r["value"], "at": r["at"]}
-                   for r in rows[:ARCADE_TOP]]
-            for game, rows in arcade_scores.items()}
-
-
-_arcade_load()
+# Рекорды аркады (ARCADE_*, arcade_scores/arcade_lock и вся логика) — теперь
+# целиком в blueprints/home.py (задача 36): использовались только там же.
 
 
 # Журнал входов (login_log/login_log_lock/трим/сохранение) и
@@ -4095,37 +3977,8 @@ def _ai_run_stream(chat_id, ctx, use_vision, imgs_b64, requested_model, model):
 
 
 app.register_blueprint(create_home_blueprint(
-    template=_template,
-    icon_links=ICON_LINKS,
     game_icons=_GAME_ICONS,
-    login_required=login_required,
     netbird_devices=NETBIRD_DEVICES,
-    arcade_games=ARCADE_GAMES,
-    arcade_top=ARCADE_TOP,
-    arcade_keep=ARCADE_KEEP,
-    arcade_value_max=ARCADE_VALUE_MAX,
-    arcade_submit_window=ARCADE_SUBMIT_WINDOW,
-    arcade_submit_max=ARCADE_SUBMIT_MAX,
-    arcade_scores=arcade_scores,
-    arcade_lock=arcade_lock,
-    arcade_submit_attempts=arcade_submit_attempts,
-    arcade_submit_lock=arcade_submit_lock,
-    arcade_clean_name=_arcade_clean_name,
-    arcade_sort=_arcade_sort,
-    arcade_save=_arcade_save,
-    arcade_public=_arcade_public,
-    client_ip=_client_ip,
-    rate_blocked=_rate_blocked,
-    rate_hit=_rate_hit,
-    rate_clear=_rate_clear,
-    console_login_attempts=console_login_attempts,
-    console_login_attempts_lock=console_login_attempts_lock,
-    console_login_window_seconds=CONSOLE_LOGIN_WINDOW_SECONDS,
-    console_login_max_attempts=CONSOLE_LOGIN_MAX_ATTEMPTS,
-    log_login=_log_login,
-    ssh_gate_password_prefix=SSH_GATE_PASSWORD_PREFIX,
-    console_password_today=console_password_today,
-    servers_password=SERVERS_PASSWORD,
 ))
 
 app.register_blueprint(create_debts_blueprint(
